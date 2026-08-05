@@ -1,0 +1,98 @@
+Month,New Service
+2026-02,AWS Amplify
+2026-02,AWS App Runner
+2026-02,AWS AppSync
+2026-02,AWS Backup
+2026-02,AWS Budgets
+2026-02,AWS CloudShell
+2026-02,AWS CloudTrail
+2026-02,AWS Config
+2026-02,AWS Cost Explorer
+2026-02,AWS Data Pipeline
+2026-02,AWS Directory Service
+2026-02,AWS Glue
+2026-02,AWS IoT
+2026-02,AWS Key Management Service
+2026-02,AWS Lambda
+2026-02,AWS Secrets Manager
+2026-02,AWS Security Hub
+2026-02,AWS Service Catalog
+2026-02,AWS Step Functions
+2026-02,AWS Support (Developer)
+2026-02,AWS Systems Manager
+2026-02,AWS WAF
+2026-02,Amazon API Gateway
+2026-02,Amazon Athena
+2026-02,Amazon Bedrock
+2026-02,Amazon Bedrock AgentCore
+2026-02,Amazon CloudFront
+2026-02,Amazon Cognito
+2026-02,Amazon DocumentDB (with MongoDB compatibility)
+2026-02,Amazon DynamoDB
+2026-02,Amazon EC2 Container Registry (ECR)
+2026-02,Amazon ElastiCache
+2026-02,Amazon Elastic Compute Cloud - Compute
+2026-02,Amazon Elastic Container Service
+2026-02,Amazon Elastic Container Service for Kubernetes
+2026-02,Amazon Elastic File System
+2026-02,Amazon Elastic Load Balancing
+2026-02,Amazon Glacier
+2026-02,Amazon GuardDuty
+2026-02,Amazon Kinesis
+2026-02,Amazon Lightsail
+2026-02,Amazon Location Service
+2026-02,Amazon Managed Blockchain
+2026-02,Amazon Managed Grafana
+2026-02,Amazon OpenSearch Service
+2026-02,Amazon Q
+2026-02,Amazon QuickSight
+2026-02,Amazon Redshift
+2026-02,Amazon Relational Database Service
+2026-02,Amazon Route 53
+2026-02,Amazon SageMaker
+2026-02,Amazon Simple Email Service
+2026-02,Amazon Simple Notification Service
+2026-02,Amazon Simple Queue Service
+2026-02,Amazon Simple Storage Service
+2026-02,Amazon Textract
+2026-02,Amazon Virtual Private Cloud
+2026-02,Amazon WorkSpaces
+2026-02,AmazonCloudWatch
+2026-02,Cisco Secure Firewall ASA Virtual - PAYG
+2026-02,Claude 3 Sonnet (Amazon Bedrock Edition)
+2026-02,Claude 3.5 Haiku (Amazon Bedrock Edition)
+2026-02,Claude 3.5 Sonnet v2 (Amazon Bedrock Edition)
+2026-02,Claude Haiku 4.5 (Amazon Bedrock Edition)
+2026-02,Claude Opus 4.1 (Amazon Bedrock Edition)
+2026-02,Claude Opus 4.5 (Amazon Bedrock Edition)
+2026-02,Claude Opus 4.6 (Amazon Bedrock Edition)
+2026-02,Claude Sonnet 4 (Amazon Bedrock Edition)
+2026-02,Claude Sonnet 4.5 (Amazon Bedrock Edition)
+2026-02,Claude Sonnet 4.6 (Amazon Bedrock Edition)
+2026-02,CloudWatch Events
+2026-02,CodeBuild
+2026-02,Debian 13 (debian 13 x86_64) | Support by SupportedImages
+2026-02,EC2 - Other
+2026-02,Tax
+2026-02,n8n on Amazon Linux 2023
+2026-03,AWS Transfer Family
+2026-03,Amazon Connect
+2026-03,Amazon Managed Streaming for Apache Kafka
+2026-03,"Contact Center Telecommunications (service sold by AMCS, LLC)"
+2026-03,Coursera Enterprise Plan
+2026-03,Secureworks Taegis XDR
+2026-04,Amazon Athena
+2026-04,Amazon Comprehend
+2026-04,Amazon Polly
+2026-04,Amazon Textract
+2026-04,Claude Haiku 4.5 (Amazon Bedrock Edition)
+2026-04,Claude Opus 4.5 (Amazon Bedrock Edition)
+2026-04,Claude Opus 4.7 (Amazon Bedrock Edition)
+2026-05,Amazon Registrar
+2026-05,Claude Opus 4.8 (Amazon Bedrock Edition)
+2026-06,Amazon Kinesis Video Streams
+2026-06,Claude Fable 5 (Amazon Bedrock Edition)
+2026-06,Claude Opus 4.5 (Amazon Bedrock Edition)
+2026-06,CloudWatch Events
+2026-07,AWS DataSync
+2026-07,Claude Sonnet 5 (Amazon Bedrock Edition)

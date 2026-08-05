@@ -1,0 +1,20 @@
+# Dependencies
+node_modules/
+
+# Secrets 
+.env
+
+# Generated reports
+AWSReports/
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+*.log
+
+da-work/
+env/
+.venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/

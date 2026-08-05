@@ -1,0 +1,26 @@
+{
+  "name": "aws-cost-pipeline",
+  "version": "1.0.0",
+  "description": "Pulls AWS Cost Explorer data, computes cost insights, and exports CSVs for Power BI.",
+  "main": "src/aws_cost_pipeline.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/aws_cost_pipeline.js",
+    "report": "node src/aws_cost_pipeline.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "aws",
+    "cost-explorer",
+    "finops",
+    "power-bi"
+  ],
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@aws-sdk/client-cost-explorer": "^3.600.0",
+    "@aws-sdk/client-organizations": "^3.600.0",
+    "dotenv": "^16.4.5"
+  }
+}

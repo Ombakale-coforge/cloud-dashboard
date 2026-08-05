@@ -1,0 +1,109 @@
+Service,Total Cost,% of Total,Cumulative %,Rank
+Secureworks Taegis XDR,199919.99,42.8,42.8,1
+Amazon Elastic Compute Cloud - Compute,38566.11,8.26,51.06,2
+Tax,35161.3,7.53,58.59,3
+EC2 - Other,32475.07,6.95,65.54,4
+Coursera Enterprise Plan,31250,6.69,72.23,5
+Amazon Simple Storage Service,23091.07,4.94,77.17,6
+Claude Sonnet 4.6 (Amazon Bedrock Edition),19900.38,4.26,81.43,7
+Amazon Relational Database Service,13151.69,2.82,84.25,8
+Amazon SageMaker,11084.76,2.37,86.62,9
+Amazon Elastic Container Service,6941.5,1.49,88.11,10
+Amazon Virtual Private Cloud,6634.27,1.42,89.53,11
+Amazon Managed Blockchain,6249.6,1.34,90.87,12
+AWS Config,4755.51,1.02,91.89,13
+Claude Sonnet 4 (Amazon Bedrock Edition),4041.81,0.87,92.76,14
+AmazonCloudWatch,3721.32,0.8,93.56,15
+Amazon QuickSight,2740,0.59,94.15,16
+AWS CloudTrail,2624.7,0.56,94.71,17
+Amazon Elastic Load Balancing,2296.57,0.49,95.2,18
+Claude Opus 4.8 (Amazon Bedrock Edition),2113.25,0.45,95.65,19
+Debian 13 (debian 13 x86_64) | Support by SupportedImages,2082.57,0.45,96.1,20
+Claude Opus 4.6 (Amazon Bedrock Edition),2078.15,0.44,96.54,21
+Amazon WorkSpaces,1812.65,0.39,96.93,22
+Amazon Elastic Container Service for Kubernetes,1742.24,0.37,97.3,23
+AWS WAF,1650.11,0.35,97.65,24
+Amazon OpenSearch Service,1617.89,0.35,98,25
+AWS Support (Developer),1573.4,0.34,98.34,26
+Cisco Secure Firewall ASA Virtual - PAYG,1519.7,0.33,98.67,27
+AWS Security Hub,1334.62,0.29,98.96,28
+AWS Key Management Service,915.32,0.2,99.16,29
+Amazon GuardDuty,720.14,0.15,99.31,30
+Amazon DocumentDB (with MongoDB compatibility),716.89,0.15,99.46,31
+AWS Directory Service,397.41,0.09,99.55,32
+Amazon CloudFront,389.26,0.08,99.63,33
+Claude Opus 4.1 (Amazon Bedrock Edition),372.71,0.08,99.71,34
+Amazon Q,190,0.04,99.75,35
+AWS Secrets Manager,150.99,0.03,99.78,36
+Amazon Kinesis,145.08,0.03,99.81,37
+Amazon Simple Notification Service,94.2,0.02,99.83,38
+Amazon Bedrock AgentCore,80.84,0.02,99.85,39
+AWS Amplify,78.13,0.02,99.87,40
+Amazon ElastiCache,76.14,0.02,99.89,41
+Claude Opus 4.7 (Amazon Bedrock Edition),74.63,0.02,99.91,42
+Claude 3.5 Sonnet v2 (Amazon Bedrock Edition),69.84,0.01,99.92,43
+Amazon EC2 Container Registry (ECR),60.55,0.01,99.93,44
+AWS App Runner,54.04,0.01,99.94,45
+Amazon Managed Grafana,54,0.01,99.95,46
+Amazon Lightsail,52.97,0.01,99.96,47
+AWS Lambda,52.24,0.01,99.97,48
+n8n on Amazon Linux 2023,49.29,0.01,99.98,49
+Claude Haiku 4.5 (Amazon Bedrock Edition),47.37,0.01,99.99,50
+AWS Service Catalog,43.07,0.01,100,51
+Amazon Route 53,29.55,0.01,100.01,52
+Claude Sonnet 5 (Amazon Bedrock Edition),25.49,0.01,100.02,53
+Claude Sonnet 4.5 (Amazon Bedrock Edition),24.29,0.01,100.03,54
+AWS Data Pipeline,19.99,0,100.03,55
+Claude 3 Sonnet (Amazon Bedrock Edition),18.76,0,100.03,56
+Amazon Simple Queue Service,18.74,0,100.03,57
+Amazon Registrar,15,0,100.03,58
+"Contact Center Telecommunications (service sold by AMCS, LLC)",12.98,0,100.03,59
+Amazon Glacier,7.85,0,100.03,60
+AWS Cost Explorer,7.15,0,100.03,61
+Amazon Connect,7.07,0,100.03,62
+Amazon Redshift,7.06,0,100.03,63
+Amazon Cognito,4.77,0,100.03,64
+AWS Glue,4.6,0,100.03,65
+Amazon Bedrock,4.11,0,100.03,66
+CodeBuild,3.13,0,100.03,67
+Amazon Managed Streaming for Apache Kafka,1.9,0,100.03,68
+Claude Opus 4.5 (Amazon Bedrock Edition),0.6,0,100.03,69
+Claude Fable 5 (Amazon Bedrock Edition),0.59,0,100.03,70
+AWS AppSync,0.44,0,100.03,71
+Amazon Textract,0.36,0,100.03,72
+AWS Backup,0.34,0,100.03,73
+Amazon DynamoDB,0.32,0,100.03,74
+Amazon API Gateway,0.24,0,100.03,75
+Amazon Elastic File System,0.21,0,100.03,76
+AWS Systems Manager,0.21,0,100.03,77
+AWS Budgets,0.11,0,100.03,78
+CloudWatch Events,0.1,0,100.03,79
+Amazon Polly,0.06,0,100.03,80
+AWS Transfer Family,0.05,0,100.03,81
+Amazon Athena,0.02,0,100.03,82
+Amazon Simple Email Service,0.01,0,100.03,83
+Amazon Comprehend,0,0,100.03,84
+AWS IoT,0,0,100.03,85
+Amazon Kinesis Video Streams,0,0,100.03,86
+AWS Step Functions,0,0,100.03,87
+AWS CloudShell,0,0,100.03,88
+Amazon Location Service,0,0,100.03,89
+Claude 3.5 Haiku (Amazon Bedrock Edition),0,0,100.03,90
+AWS DataSync,0,0,100.03,91
+AWS Audit Manager,0,0,100.03,92
+AWS CloudFormation,0,0,100.03,93
+AWS CodePipeline,0,0,100.03,94
+AWS X-Ray,0,0,100.03,95
+Amazon DataZone,0,0,100.03,96
+Amazon Lex,0,0,100.03,97
+Amazon SimpleDB,0,0,100.03,98
+CloudFront Flat-Rate Plans,0,0,100.03,99
+CodeCatalyst,0,0,100.03,100
+Ubuntu 24.04 LTS - Noble,0,0,100.03,101
+Amazon DevOps Guru,0,0,100.03,102
+AWS Certificate Manager,0,0,100.03,103
+Q in Connect,0,0,100.03,104
+Amazon Connect Customer Profiles,0,0,100.03,105
+Amazon Transcribe,0,0,100.03,106
+Amazon S3 Glacier Deep Archive,0,0,100.03,107
+AWS Data Transfer,-104.75,-0.02,100.01,108

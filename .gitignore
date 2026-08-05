@@ -1,0 +1,8 @@
+﻿da-work/
+venv/
+env/
+.venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+*_Zone.Identifier
