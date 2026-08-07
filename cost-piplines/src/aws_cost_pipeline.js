@@ -258,7 +258,7 @@ async function withRetry(fn, { retries = 5, baseDelayMs = 500 } = {}) {
 async function fetchCostByService(ceClient, monthsBack) {
   const today = new Date();
   const startStr = firstOfMonthStr(today, -monthsBack);
-  const endStr = firstOfMonthStr(today, 0);
+  const endStr = firstOfMonthStr(today, 1);
 
   log(`Fetching cost-by-service from ${startStr} to ${endStr} ...`);
 
