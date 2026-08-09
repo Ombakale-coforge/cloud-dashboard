@@ -4,8 +4,12 @@ node_modules/
 # Secrets 
 .env
 
+#report data
+data/
+
 # Generated reports
 AWSReports/
+AzureDashboardReports/
 
 # OS / editor junk
 .DS_Store
