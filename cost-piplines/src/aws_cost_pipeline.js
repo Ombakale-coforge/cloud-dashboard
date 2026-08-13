@@ -318,15 +318,17 @@ async function fetchCostByService(ceClient, monthsBack) {
 }
 
 // ==========================================================
-// Step 2: Fetch cost by linked account (previous full month)
+// Step 2: Fetch cost by linked account (last N months)
 // ==========================================================
 
-async function fetchCostByLinkedAccount(ceClient, orgClient) {
+async function fetchCostByLinkedAccount(ceClient, orgClient, monthsBack) {
   const today = new Date();
-  const startStr = firstOfMonthStr(today, -2);
-  const endStr = firstOfMonthStr(today, 0);
+  const startStr = firstOfMonthStr(today, -monthsBack);
+  const endStr = firstOfMonthStr(today, 1);
 
-  log(`Fetching 2-month cost by linked account from ${startStr} to ${endStr} ...`);
+  log(
+    `Fetching cost by linked account from ${startStr} to ${endStr} (${monthsBack + 1} months) ...`,
+  );
 
   const accountMap = {};
   try {
@@ -350,7 +352,7 @@ async function fetchCostByLinkedAccount(ceClient, orgClient) {
   });
 
   const response = await withRetry(() => ceClient.send(command));
-  
+
   const pivot = {};
   const months = [];
 
@@ -366,13 +368,14 @@ async function fetchCostByLinkedAccount(ceClient, orgClient) {
   }
 
   months.sort();
-  const prevMonth = months[0];
-  const currMonth = months[1];
+  const prevMonth = months[months.length - 2];
+  const currMonth = months[months.length - 1];
 
   const varianceRows = [];
   const singleMonthRows = [];
+  const wideRows = [];
 
-  log(`Months found for account MoM: Prev=${prevMonth}, Curr=${currMonth}`);
+  log(`Months found for linked accounts: ${months.join(", ")}`);
 
   for (const [accountId, costs] of Object.entries(pivot)) {
     const accountName = accountMap[accountId] || accountId;
@@ -393,10 +396,15 @@ async function fetchCostByLinkedAccount(ceClient, orgClient) {
       "Linked Account": accountName,
       Cost: currCost,
     });
+
+    const wideRow = { "Linked Account": accountName };
+    for (const m of months) wideRow[m] = costs[m] || 0;
+    wideRows.push(wideRow);
   }
 
   varianceRows.sort((a, b) => Math.abs(b.Difference) - Math.abs(a.Difference));
   singleMonthRows.sort((a, b) => b.Cost - a.Cost);
+  wideRows.sort((a, b) => b[currMonth] - a[currMonth]);
 
   writeCsv("account_cost_variance.csv", varianceRows, [
     "Linked Account",
@@ -404,6 +412,11 @@ async function fetchCostByLinkedAccount(ceClient, orgClient) {
     "Curr Month Cost",
     "Difference",
     "Percentage Change",
+  ]);
+
+  writeCsv("cost_by_linked_account_wide.csv", wideRows, [
+    "Linked Account",
+    ...months,
   ]);
 
   return singleMonthRows;
@@ -708,7 +721,7 @@ async function main() {
 
   const [serviceResult, accountResult] = await Promise.allSettled([
     fetchCostByService(ceClient, MONTHS_OF_HISTORY),
-    fetchCostByLinkedAccount(ceClient, orgClient),
+    fetchCostByLinkedAccount(ceClient, orgClient, MONTHS_OF_HISTORY),
   ]);
 
   if (serviceResult.status === "rejected") {
