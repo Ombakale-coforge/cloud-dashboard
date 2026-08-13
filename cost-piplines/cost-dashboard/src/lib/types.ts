@@ -12,6 +12,10 @@ export interface LinkedAccountCost {
   "Linked Account": string;
   Cost: number;
 }
+export interface LinkedAccountCostWide {
+  "Linked Account": string;
+  [month: string]: string | number;
+}
 export interface ServiceCost {
   Service: string;
   Cost: number;
