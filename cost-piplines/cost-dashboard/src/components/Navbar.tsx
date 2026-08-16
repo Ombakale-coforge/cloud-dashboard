@@ -1,5 +1,6 @@
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Cloud, CalendarDays, ChevronDown, Plus } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 
 export type Provider = "aws" | "azure";
 
@@ -9,7 +10,6 @@ export interface NavbarProps {
     onMonthChange: (month: string) => void;
     activeProvider: Provider;
     onProviderChange: (provider: Provider) => void;
-  onScrollToForm?: () => void;
 }
 
 export function Navbar({
@@ -18,8 +18,8 @@ export function Navbar({
     onMonthChange = () => { },
     activeProvider = "aws",
     onProviderChange = () => { },
-  onScrollToForm,
 }: NavbarProps) {
+    const navigate = useNavigate();
     // Format Month string (e.g. "2026-07" to "July 2026")
     const formatMonthName = (mStr: string) => {
         if (!mStr) return "Select Month";
@@ -51,10 +51,10 @@ export function Navbar({
 
       {/* Right Side */}
       <div className="flex items-center gap-3">
-        {/* Quick Add Request Button */}
-        {onScrollToForm && (
+        {/* Quick Add Request Button (AWS only) */}
+        {activeProvider === "aws" && (
           <button
-            onClick={onScrollToForm}
+            onClick={() => navigate("/newrequest")}
             className="flex items-center gap-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-1.5 text-xs font-semibold shadow-sm transition-all"
           >
             <Plus size={14} />

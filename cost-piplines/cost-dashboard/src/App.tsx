@@ -1,13 +1,11 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Navbar, type Provider } from "@/components/Navbar";
 import { KpiCards } from "@/components/KpiCards";
 import { DataTables } from "@/components/DataTables";
 import { ChartsSection } from "@/components/ChartsSection";
-import { AccountRequestForm } from "@/components/AccountRequestForm";
 import { AzureDashboard } from "@/components/azure/AzureDashboard";
 import { useCsv } from "@/lib/useCsv";
-import { useAccountRequests } from "@/lib/useAccountRequests";
 import type { MonthTotal, AzureMonthlyTotal } from "@/lib/types";
 
 export default function App() {
@@ -39,14 +37,6 @@ export default function App() {
         setSelectedMonth(""); // effect above re-selects that provider's latest month
     };
 
-  // Account Requests State
-  const { addRecord } = useAccountRequests();
-  const formRef = useRef<HTMLDivElement>(null);
-
-  const scrollToForm = () => {
-    formRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
-
     return (
         <TooltipProvider>
             <div className="min-h-screen bg-muted/30 text-foreground">
@@ -56,7 +46,6 @@ export default function App() {
                     onMonthChange={setSelectedMonth}
                     activeProvider={activeProvider}
                     onProviderChange={handleProviderChange}
-                  onScrollToForm={scrollToForm}
         />
 
                 <main className="mx-auto max-w-7xl space-y-8 p-6">
@@ -66,10 +55,6 @@ export default function App() {
           <KpiCards selectedMonth={selectedMonth} />
                             <ChartsSection selectedMonth={selectedMonth} />
                             <DataTables selectedMonth={selectedMonth} />
-                            {/* AWS Account Request Form Section */}
-                            <div ref={formRef} className="pt-4 border-t border-muted/50">
-                            <AccountRequestForm onSubmit={addRecord} />
-                            </div>
                         </>
                     ) : (
                         <AzureDashboard selectedMonth={selectedMonth} />
