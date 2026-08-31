@@ -12,6 +12,13 @@ dist
 dist-ssr
 *.local
 
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Server cache
+server-data
 
 public/data
 
