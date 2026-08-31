@@ -15,26 +15,27 @@ import { Search, ChevronLeft, ChevronRight, Building2 } from "lucide-react";
 
 interface DataTablesProps {
   selectedMonth: string;
+  basePath?: string;
 }
 
-export function DataTables({ selectedMonth }: DataTablesProps) {
+export function DataTables({ selectedMonth, basePath = "/data" }: DataTablesProps) {
   // Static latest month fallbacks
   const { data: services } = useCsv<ServiceCost>(
-    "/data/latest_month_services.csv",
+    `${basePath}/latest_month_services.csv`,
   );
   const { data: accountVariances } = useCsv<any>(
-    "/data/account_cost_variance.csv",
+    `${basePath}/account_cost_variance.csv`,
   );
   const { data: recurring } = useCsv<RecurringRow>(
-    "/data/recurring_vs_onetime.csv",
+    `${basePath}/recurring_vs_onetime.csv`,
   );
 
   // Wide service costs containing full 6 months history
-  const { data: wideServices } = useCsv<any>("/data/cost_by_service_wide.csv");
+  const { data: wideServices } = useCsv<any>(`${basePath}/cost_by_service_wide.csv`);
 
   // Wide linked-account costs containing full month history
   const { data: wideAccounts } = useCsv<LinkedAccountCostWide>(
-    "/data/cost_by_linked_account_wide.csv",
+    `${basePath}/cost_by_linked_account_wide.csv`,
   );
 
   // Determine sorted months list from wide CSV

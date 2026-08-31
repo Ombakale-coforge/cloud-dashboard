@@ -55,16 +55,17 @@ const PROFESSIONAL_COLORS = [
 
 interface ChartsSectionProps {
   selectedMonth: string;
+  basePath?: string;
 }
 
-export function ChartsSection({ selectedMonth }: ChartsSectionProps) {
+export function ChartsSection({ selectedMonth, basePath = "/data" }: ChartsSectionProps) {
   const { data: monthly } = useCsv<MonthTotal>(
-    "/data/monthly_totals_last_6_months.csv",
+    `${basePath}/monthly_totals_last_6_months.csv`,
   );
-  const { data: mom } = useCsv<MomChange>("/data/mom_change.csv");
-  const { data: topServices } = useCsv<TopService>("/data/top_10_services.csv");
+  const { data: mom } = useCsv<MomChange>(`${basePath}/mom_change.csv`);
+  const { data: topServices } = useCsv<TopService>(`${basePath}/top_10_services.csv`);
   const { data: categories } = useCsv<CategoryCost>(
-    "/data/category_monthly_costs.csv",
+    `${basePath}/category_monthly_costs.csv`,
   );
 
   const trendData = useMemo(() => {

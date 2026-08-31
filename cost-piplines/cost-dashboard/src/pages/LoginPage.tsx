@@ -20,6 +20,11 @@ export function LoginPage() {
   const { loginAdmin, loginBasic, signupBasic } = useAuth();
   const navigate = useNavigate();
 
+  // Clear any stale localStorage session left over from before the sessionStorage migration
+  React.useEffect(() => {
+    localStorage.removeItem("cloud_dashboard_session_user");
+  }, []);
+
   // Mobile view panel switcher
   const [activePanel, setActivePanel] = useState<"admin" | "basic">("admin");
 

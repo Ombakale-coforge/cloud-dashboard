@@ -9,10 +9,11 @@ const fmt = (n: number) =>
 
 interface KpiCardsProps {
   selectedMonth: string;
+  basePath?: string;
 }
 
-export function KpiCards({ selectedMonth }: KpiCardsProps) {
-  const { data: mom } = useCsv<MomChange>("/data/mom_change.csv");
+export function KpiCards({ selectedMonth, basePath = "/data" }: KpiCardsProps) {
+  const { data: mom } = useCsv<MomChange>(`${basePath}/mom_change.csv`);
 
   const activeRow = useMemo(() => {
     if (mom.length === 0) return null;

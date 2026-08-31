@@ -43,7 +43,9 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(() => {
     try {
-      const stored = localStorage.getItem(AUTH_STORAGE_KEY);
+      // sessionStorage is cleared on page refresh / tab close,
+      // so the user must always log in fresh.
+      const stored = sessionStorage.getItem(AUTH_STORAGE_KEY);
       return stored ? JSON.parse(stored) : null;
     } catch {
       return null;
@@ -52,9 +54,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (user) {
-      localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(user));
+      sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(user));
     } else {
-      localStorage.removeItem(AUTH_STORAGE_KEY);
+      sessionStorage.removeItem(AUTH_STORAGE_KEY);
     }
   }, [user]);
 

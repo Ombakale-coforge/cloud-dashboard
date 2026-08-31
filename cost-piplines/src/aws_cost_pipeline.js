@@ -1,23 +1,20 @@
 /**
  * src/aws_cost_pipeline.js
  *
- * Node.js AWS cost reporting pipeline.
+ * Node.js AWS cost reporting pipeline (Multi-Account Supported).
  * Part of the "aws-cost-pipeline" project - see README.md for setup.
  *
- * What it does, in one run:
- *   1. Loads AWS credentials and settings strictly from .env (via dotenv).
- *      No fallback to ~/.aws/credentials or IAM instance roles for now -
- *      this makes local testing predictable and avoids silently picking up
- *      the wrong credentials from some other source on your machine.
- *   2. Pulls Cost Explorer data for the last N months, broken down by service,
- *      and cost broken down by linked account - in parallel.
- *   3. Runs insight calculations (MoM % change, Pareto, anomalies,
- *      recurring vs one-time, category grouping, forecast, volatility),
- *      each isolated so one bad calculation can't take down the whole run.
- *   4. Writes everything as clean CSV files into a DATED subfolder under
- *      AWSReports/runs/, plus AWSReports/latest/ which always mirrors the
- *      newest run - point Power BI at "latest/". A run_log.txt captures
- *      what happened, for debugging unattended/scheduled runs.
+ * What it does:
+ *   1. Detects all configured AWS accounts in .env:
+ *      - Account 1: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, AWS_ACCOUNT_NAME
+ *      - Account 2: AWS_ACCOUNT_2_ACCESS_KEY_ID, AWS_ACCOUNT_2_SECRET_ACCESS_KEY, AWS_ACCOUNT_2_REGION, AWS_ACCOUNT_2_NAME
+ *      - Supports additional accounts dynamically (AWS_ACCOUNT_3_*, etc.)
+ *   2. For each account:
+ *      - Pulls Cost Explorer data for the last N months by service and linked accounts.
+ *      - Runs insight calculations (MoM % change, Pareto, anomalies, recurring vs one-time, category grouping, forecast, volatility).
+ *      - Writes clean CSV files to AWSReports/accounts/<account-id>/latest/ and timestamped run folders.
+ *      - Mirrors Account 1 into AWSReports/latest/ for backward compatibility.
+ *   3. Emits accounts.json metadata so the frontend dashboard can populate account switcher dropdowns.
  *
  * RUN:
  *   npm start
@@ -37,14 +34,6 @@ const {
   paginateListAccounts,
 } = require("@aws-sdk/client-organizations");
 
-// ==========================================================
-// Settings and credentials - read strictly from .env for now.
-// ==========================================================
-
-const AWS_ACCESS_KEY_ID = process.env.AWS_ACCESS_KEY_ID;
-const AWS_SECRET_ACCESS_KEY = process.env.AWS_SECRET_ACCESS_KEY;
-const AWS_REGION = process.env.AWS_REGION || "us-east-1";
-
 const PROJECT_ROOT = path.join(__dirname, "..");
 const BASE_OUTPUT_FOLDER =
   process.env.AWS_COST_OUTPUT_FOLDER || path.join(PROJECT_ROOT, "AWSReports");
@@ -53,32 +42,56 @@ const MONTHS_OF_HISTORY = parseInt(
   10,
 );
 
-if (!AWS_ACCESS_KEY_ID || !AWS_SECRET_ACCESS_KEY) {
-  console.error(
-    "Missing AWS_ACCESS_KEY_ID or AWS_SECRET_ACCESS_KEY.\n" +
-      "Create a .env file in the project root (copy .env.example) and fill both in.",
-  );
-  process.exit(1);
-}
+// ---------------------------------------------------------------------------
+// Discover configured AWS accounts from .env
+// ---------------------------------------------------------------------------
+function getAwsAccountConfigs() {
+  const accounts = [];
 
-// Explicit credentials object - built only from .env, not from any other
-// source (no ~/.aws/credentials, no IAM role fallback) while testing.
-const AWS_CREDENTIALS = {
-  accessKeyId: AWS_ACCESS_KEY_ID,
-  secretAccessKey: AWS_SECRET_ACCESS_KEY,
-};
+  // Account 1 (Primary / Default)
+  if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
+    accounts.push({
+      id: "account-1",
+      name: process.env.AWS_ACCOUNT_NAME || process.env.AWS_ACCOUNT_1_NAME || "AWS Account 1 (Primary)",
+      accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+      region: process.env.AWS_REGION || "us-east-1",
+      isPrimary: true,
+    });
+  }
 
-// Timestamped run folder so history is preserved for Power BI trend analysis,
-// plus a stable "latest" folder that always has the newest files.
-const RUN_STAMP = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
-const RUN_FOLDER = path.join(BASE_OUTPUT_FOLDER, "runs", RUN_STAMP);
-const LATEST_FOLDER = path.join(BASE_OUTPUT_FOLDER, "latest");
+  // Account 2
+  if (
+    process.env.AWS_ACCOUNT_2_ACCESS_KEY_ID &&
+    process.env.AWS_ACCOUNT_2_SECRET_ACCESS_KEY
+  ) {
+    accounts.push({
+      id: "account-2",
+      name: process.env.AWS_ACCOUNT_2_NAME || "AWS Account 2",
+      accessKeyId: process.env.AWS_ACCOUNT_2_ACCESS_KEY_ID,
+      secretAccessKey: process.env.AWS_ACCOUNT_2_SECRET_ACCESS_KEY,
+      region: process.env.AWS_ACCOUNT_2_REGION || process.env.AWS_REGION || "us-east-1",
+      isPrimary: false,
+    });
+  }
 
-const runLog = [];
-function log(msg) {
-  const line = `[${new Date().toISOString()}] ${msg}`;
-  console.log(line);
-  runLog.push(line);
+  // Scan for any further accounts (AWS_ACCOUNT_3, AWS_ACCOUNT_4, etc.)
+  for (let i = 3; i <= 10; i++) {
+    const key = process.env[`AWS_ACCOUNT_${i}_ACCESS_KEY_ID`];
+    const secret = process.env[`AWS_ACCOUNT_${i}_SECRET_ACCESS_KEY`];
+    if (key && secret) {
+      accounts.push({
+        id: `account-${i}`,
+        name: process.env[`AWS_ACCOUNT_${i}_NAME`] || `AWS Account ${i}`,
+        accessKeyId: key,
+        secretAccessKey: secret,
+        region: process.env[`AWS_ACCOUNT_${i}_REGION`] || process.env.AWS_REGION || "us-east-1",
+        isPrimary: false,
+      });
+    }
+  }
+
+  return accounts;
 }
 
 // ---------------------------------------------------------------------------
@@ -170,10 +183,9 @@ function categorizeService(serviceName) {
   return "Other";
 }
 
-// ==========================================================
+// ---------------------------------------------------------------------------
 // Date helpers - LOCAL calendar dates, no UTC drift.
-// ==========================================================
-
+// ---------------------------------------------------------------------------
 function toDateStr(year, monthIndexZeroBased, day) {
   const mm = String(monthIndexZeroBased + 1).padStart(2, "0");
   const dd = String(day).padStart(2, "0");
@@ -185,10 +197,9 @@ function firstOfMonthStr(date, monthOffset = 0) {
   return toDateStr(d.getFullYear(), d.getMonth(), 1);
 }
 
-// ==========================================================
-// Small CSV writer helper (no external dependency needed)
-// ==========================================================
-
+// ---------------------------------------------------------------------------
+// Small CSV writer helper
+// ---------------------------------------------------------------------------
 function toCsv(rows, columns) {
   const escape = (val) => {
     if (val === null || val === undefined) return "";
@@ -203,13 +214,6 @@ function toCsv(rows, columns) {
   return [header, ...lines].join("\n");
 }
 
-function writeCsv(filename, rows, columns) {
-  const content = toCsv(rows, columns);
-  fs.writeFileSync(path.join(RUN_FOLDER, filename), content);
-  fs.writeFileSync(path.join(LATEST_FOLDER, filename), content);
-  log(`Wrote ${filename} (${rows.length} rows)`);
-}
-
 function round(n, decimals = 2) {
   if (typeof n !== "number" || Number.isNaN(n) || !Number.isFinite(n)) return 0;
   const factor = Math.pow(10, decimals);
@@ -219,14 +223,6 @@ function round(n, decimals = 2) {
 function safeDivide(numerator, denominator) {
   if (!denominator) return 0;
   return numerator / denominator;
-}
-
-function runStep(name, fn) {
-  try {
-    fn();
-  } catch (e) {
-    log(`ERROR in ${name}: ${e.message}`);
-  }
 }
 
 async function withRetry(fn, { retries = 5, baseDelayMs = 500 } = {}) {
@@ -243,7 +239,7 @@ async function withRetry(fn, { retries = 5, baseDelayMs = 500 } = {}) {
       attempt += 1;
       if (!retriable || attempt > retries) throw e;
       const delay = baseDelayMs * 2 ** (attempt - 1);
-      log(
+      console.log(
         `Throttled (${e.name}), retrying in ${delay}ms (attempt ${attempt}/${retries})...`,
       );
       await new Promise((r) => setTimeout(r, delay));
@@ -251,11 +247,10 @@ async function withRetry(fn, { retries = 5, baseDelayMs = 500 } = {}) {
   }
 }
 
-// ==========================================================
+// ---------------------------------------------------------------------------
 // Step 1: Fetch cost by service, last N months -> pivoted structure
-// ==========================================================
-
-async function fetchCostByService(ceClient, monthsBack) {
+// ---------------------------------------------------------------------------
+async function fetchCostByService(ceClient, monthsBack, log) {
   const today = new Date();
   const startStr = firstOfMonthStr(today, -monthsBack);
   const endStr = firstOfMonthStr(today, 1);
@@ -317,11 +312,10 @@ async function fetchCostByService(ceClient, monthsBack) {
   return { monthlyData, serviceCols: services };
 }
 
-// ==========================================================
+// ---------------------------------------------------------------------------
 // Step 2: Fetch cost by linked account (last N months)
-// ==========================================================
-
-async function fetchCostByLinkedAccount(ceClient, orgClient, monthsBack) {
+// ---------------------------------------------------------------------------
+async function fetchCostByLinkedAccount(ceClient, orgClient, monthsBack, log, writeCsv) {
   const today = new Date();
   const startStr = firstOfMonthStr(today, -monthsBack);
   const endStr = firstOfMonthStr(today, 1);
@@ -402,9 +396,9 @@ async function fetchCostByLinkedAccount(ceClient, orgClient, monthsBack) {
     wideRows.push(wideRow);
   }
 
-  varianceRows.sort((a, b) => Math.abs(b.Difference) - Math.abs(a.Difference));
+  varianceRows.sort((a, b) => b["Curr Month Cost"] - a["Curr Month Cost"]);
   singleMonthRows.sort((a, b) => b.Cost - a.Cost);
-  wideRows.sort((a, b) => b[currMonth] - a[currMonth]);
+  wideRows.sort((a, b) => (b[currMonth] || 0) - (a[currMonth] || 0));
 
   writeCsv("account_cost_variance.csv", varianceRows, [
     "Linked Account",
@@ -422,269 +416,277 @@ async function fetchCostByLinkedAccount(ceClient, orgClient, monthsBack) {
   return singleMonthRows;
 }
 
-// ==========================================================
-// Step 3: Insight builders
-// ==========================================================
+// ---------------------------------------------------------------------------
+// Calculations
+// ---------------------------------------------------------------------------
+function buildCurrentAndTrend(monthlyData, writeCsv) {
+  const currentMonth = monthlyData[monthlyData.length - 1];
+  writeCsv("current_month_total.csv", [{ "Total Cost": round(currentMonth.totalCost) }], ["Total Cost"]);
 
-function buildCurrentAndTrend(monthlyData) {
-  const trend = monthlyData.map((m) => ({
+  const trendRows = monthlyData.map((m) => ({
     Month: m.month,
     "Total Cost": round(m.totalCost),
   }));
-  writeCsv("cost_trend_all_periods.csv", trend, ["Month", "Total Cost"]);
-  writeCsv("monthly_totals_last_6_months.csv", trend.slice(-6), [
-    "Month",
-    "Total Cost",
-  ]);
-  writeCsv("current_month_total.csv", trend.slice(-1), ["Month", "Total Cost"]);
+  writeCsv("monthly_totals_last_6_months.csv", trendRows, ["Month", "Total Cost"]);
 }
 
-function buildTop10AndLatest(monthlyData, serviceCols) {
-  const totals = {};
-  for (const s of serviceCols) totals[s] = 0;
-  for (const m of monthlyData) {
-    for (const s of serviceCols) totals[s] += m.services[s] || 0;
-  }
-
-  const sortedServices = serviceCols
-    .map((s) => ({ Service: s, "Total Cost": round(totals[s]) }))
-    .sort((a, b) => b["Total Cost"] - a["Total Cost"]);
-
-  writeCsv("top_10_services.csv", sortedServices.slice(0, 10), [
-    "Service",
-    "Total Cost",
-  ]);
-
+function buildTop10AndLatest(monthlyData, serviceCols, writeCsv) {
   const latestMonth = monthlyData[monthlyData.length - 1];
-  const latestRows = serviceCols
+  const allServices = serviceCols
     .map((s) => ({ Service: s, Cost: round(latestMonth.services[s] || 0) }))
-    .filter((r) => r.Cost > 0)
+    .filter((s) => s.Cost > 0)
     .sort((a, b) => b.Cost - a.Cost);
 
-  writeCsv("latest_month_services.csv", latestRows, ["Service", "Cost"]);
+  writeCsv("latest_month_services.csv", allServices, ["Service", "Cost"]);
+  const top10 = allServices.slice(0, 10);
+  writeCsv("top_10_services.csv", top10, ["Service", "Cost"]);
 }
 
-function buildMomChange(monthlyData) {
-  const rows = monthlyData.map((m, i) => {
-    const prev = i > 0 ? monthlyData[i - 1].totalCost : null;
-    const pctChange = prev
-      ? round(safeDivide(m.totalCost - prev, prev) * 100)
-      : "";
-    return {
-      Month: m.month,
-      "Total Cost": round(m.totalCost),
-      "Previous Month Cost": prev !== null ? round(prev) : "",
-      "MoM % Change": pctChange,
-    };
-  });
+function buildMomChange(monthlyData, writeCsv) {
+  const rows = [];
+  for (let i = 0; i < monthlyData.length; i++) {
+    const curr = monthlyData[i];
+    const prev = i > 0 ? monthlyData[i - 1] : null;
+    const prevCost = prev ? prev.totalCost : null;
+    const diff = prev ? curr.totalCost - prev.totalCost : null;
+    const pct = prev && prev.totalCost > 0 ? (diff / prev.totalCost) * 100 : null;
+
+    rows.push({
+      Month: curr.month,
+      "Total Cost": round(curr.totalCost),
+      "Previous Month Cost": prevCost !== null ? round(prevCost) : "",
+      "Difference": diff !== null ? round(diff) : "",
+      "MoM % Change": pct !== null ? round(pct, 1) : "",
+    });
+  }
   writeCsv("mom_change.csv", rows, [
     "Month",
     "Total Cost",
     "Previous Month Cost",
+    "Difference",
     "MoM % Change",
   ]);
 }
 
-function buildPareto(monthlyData, serviceCols) {
-  const totals = {};
-  for (const s of serviceCols) totals[s] = 0;
-  for (const m of monthlyData) {
-    for (const s of serviceCols) totals[s] += m.services[s] || 0;
-  }
+function buildPareto(monthlyData, serviceCols, writeCsv) {
+  const latestMonth = monthlyData[monthlyData.length - 1];
+  const total = latestMonth.totalCost || 1;
 
-  const sorted = serviceCols
-    .map((s) => ({ Service: s, "Total Cost": totals[s] }))
-    .sort((a, b) => b["Total Cost"] - a["Total Cost"]);
+  const items = serviceCols
+    .map((s) => ({ Service: s, Cost: round(latestMonth.services[s] || 0) }))
+    .filter((s) => s.Cost > 0)
+    .sort((a, b) => b.Cost - a.Cost);
 
-  const grandTotal = sorted.reduce((sum, r) => sum + r["Total Cost"], 0);
-  let cumulative = 0;
-
-  const rows = sorted.map((r, i) => {
-    const pctOfTotal =
-      grandTotal > 0 ? round(safeDivide(r["Total Cost"], grandTotal) * 100) : 0;
-    cumulative += pctOfTotal;
+  let running = 0;
+  const rows = items.map((item) => {
+    running += item.Cost;
+    const cumPct = round((running / total) * 100, 1);
     return {
-      Service: r.Service,
-      "Total Cost": round(r["Total Cost"]),
-      "% of Total": pctOfTotal,
-      "Cumulative %": round(cumulative),
-      Rank: i + 1,
+      Service: item.Service,
+      Cost: item.Cost,
+      "Cumulative Cost": round(running),
+      "Cumulative %": cumPct,
+      "Pareto Class": cumPct <= 80 ? "Top 80%" : "Remaining 20%",
     };
   });
 
-  writeCsv("cost_concentration_pareto.csv", rows, [
+  writeCsv("pareto_analysis.csv", rows, [
     "Service",
-    "Total Cost",
-    "% of Total",
+    "Cost",
+    "Cumulative Cost",
     "Cumulative %",
-    "Rank",
+    "Pareto Class",
   ]);
 }
 
-function buildAnomalyFlags(monthlyData) {
-  const rows = monthlyData.map((m, i) => {
-    const window = monthlyData.slice(Math.max(0, i - 2), i + 1);
-    const rollingAvg =
-      window.reduce((s, w) => s + w.totalCost, 0) / window.length;
-    return {
-      Month: m.month,
-      "Total Cost": round(m.totalCost),
-      "Rolling Avg (3mo)": round(rollingAvg),
-      "Is Anomaly": rollingAvg > 0 && m.totalCost > rollingAvg * 2,
-    };
-  });
+function buildAnomalyFlags(monthlyData, writeCsv) {
+  const rows = [];
+  for (let i = 0; i < monthlyData.length; i++) {
+    const curr = monthlyData[i];
+    if (i < 2) {
+      rows.push({
+        Month: curr.month,
+        "Total Cost": round(curr.totalCost),
+        "3M Rolling Avg": "",
+        "3M Rolling Std": "",
+        "Anomaly Flag": "Normal (insufficient history)",
+      });
+      continue;
+    }
+    const prior3 = monthlyData.slice(Math.max(0, i - 3), i).map((m) => m.totalCost);
+    const mean = prior3.reduce((a, b) => a + b, 0) / prior3.length;
+    const variance = prior3.reduce((a, b) => a + (b - mean) ** 2, 0) / prior3.length;
+    const std = Math.sqrt(variance);
+
+    let flag = "Normal";
+    if (std > 0 && curr.totalCost > mean + 2 * std) flag = "HIGH ANOMALY";
+    else if (std > 0 && curr.totalCost < mean - 2 * std) flag = "LOW ANOMALY";
+
+    rows.push({
+      Month: curr.month,
+      "Total Cost": round(curr.totalCost),
+      "3M Rolling Avg": round(mean),
+      "3M Rolling Std": round(std),
+      "Anomaly Flag": flag,
+    });
+  }
   writeCsv("anomaly_flags.csv", rows, [
     "Month",
     "Total Cost",
-    "Rolling Avg (3mo)",
-    "Is Anomaly",
+    "3M Rolling Avg",
+    "3M Rolling Std",
+    "Anomaly Flag",
   ]);
 }
 
-function buildRecurringVsOnetime(monthlyData, serviceCols) {
+function buildRecurringVsOnetime(monthlyData, serviceCols, writeCsv) {
   const totalMonths = monthlyData.length;
-  const rows = serviceCols
-    .map((s) => {
-      const monthsActive = monthlyData.filter(
-        (m) => (m.services[s] || 0) > 0,
-      ).length;
-      const activePct =
-        totalMonths > 0
-          ? round(safeDivide(monthsActive, totalMonths) * 100, 1)
-          : 0;
-      let classification;
-      if (activePct >= 75) classification = "Recurring";
-      else if (activePct <= 25) classification = "One-time / Sporadic";
-      else classification = "Occasional";
-      return {
-        Service: s,
-        "Months Active": monthsActive,
-        "Total Months": totalMonths,
-        "Active %": activePct,
-        Classification: classification,
-      };
-    })
-    .sort((a, b) => b["Months Active"] - a["Months Active"]);
+  const rows = serviceCols.map((s) => {
+    const activeMonths = monthlyData.filter((m) => (m.services[s] || 0) > 0).length;
+    const totalCost = monthlyData.reduce((acc, m) => acc + (m.services[s] || 0), 0);
+    const activePct = round((activeMonths / totalMonths) * 100, 1);
+    const type = activeMonths >= totalMonths * 0.8 ? "Recurring" : activeMonths <= 2 ? "One-time / Intermittent" : "Variable";
 
+    return {
+      Service: s,
+      "Active Months": activeMonths,
+      "Total Months in Run": totalMonths,
+      "Active %": activePct,
+      "Total Cost Over Period": round(totalCost),
+      Classification: type,
+    };
+  });
+
+  rows.sort((a, b) => b["Total Cost Over Period"] - a["Total Cost Over Period"]);
   writeCsv("recurring_vs_onetime.csv", rows, [
     "Service",
-    "Months Active",
-    "Total Months",
+    "Active Months",
+    "Total Months in Run",
     "Active %",
+    "Total Cost Over Period",
     "Classification",
   ]);
 }
 
-function buildNewServices(monthlyData, serviceCols) {
-  const rows = [];
-  let prevActive = new Set();
-
-  for (const m of monthlyData) {
-    const activeNow = new Set(
-      serviceCols.filter((s) => (m.services[s] || 0) > 0),
-    );
-    const newServices = [...activeNow].filter((s) => !prevActive.has(s)).sort();
-    for (const s of newServices) {
-      rows.push({ Month: m.month, "New Service": s });
-    }
-    prevActive = activeNow;
+function buildNewServices(monthlyData, serviceCols, writeCsv) {
+  if (monthlyData.length < 2) {
+    writeCsv("new_services_flag.csv", [], ["Service", "Cost in Latest Month", "First Seen Month", "Note"]);
+    return;
   }
+  const latestMonth = monthlyData[monthlyData.length - 1];
+  const priorMonths = monthlyData.slice(0, monthlyData.length - 1);
 
-  writeCsv("new_services_by_month.csv", rows, ["Month", "New Service"]);
+  const rows = [];
+  for (const s of serviceCols) {
+    const costLatest = latestMonth.services[s] || 0;
+    if (costLatest <= 0) continue;
+    const hadPriorCost = priorMonths.some((m) => (m.services[s] || 0) > 0);
+    if (!hadPriorCost) {
+      rows.push({
+        Service: s,
+        "Cost in Latest Month": round(costLatest),
+        "First Seen Month": latestMonth.month,
+        Note: "First time billed in the reporting window",
+      });
+    }
+  }
+  rows.sort((a, b) => b["Cost in Latest Month"] - a["Cost in Latest Month"]);
+  writeCsv("new_services_flag.csv", rows, ["Service", "Cost in Latest Month", "First Seen Month", "Note"]);
 }
 
-function buildCategoryCosts(monthlyData, serviceCols) {
-  const categoryMap = {};
-  for (const s of serviceCols) categoryMap[s] = categorizeService(s);
-
+function buildCategoryCosts(monthlyData, serviceCols, writeCsv) {
   const rows = [];
   for (const m of monthlyData) {
-    const monthCosts = {};
+    const catTotals = {};
     for (const s of serviceCols) {
-      const cat = categoryMap[s];
-      monthCosts[cat] = (monthCosts[cat] || 0) + (m.services[s] || 0);
+      const cat = categorizeService(s);
+      catTotals[cat] = (catTotals[cat] || 0) + (m.services[s] || 0);
     }
-    for (const [cat, cost] of Object.entries(monthCosts)) {
-      rows.push({ Month: m.month, Category: cat, Cost: round(cost) });
+    for (const [cat, cost] of Object.entries(catTotals)) {
+      if (cost > 0) {
+        rows.push({
+          Month: m.month,
+          Category: cat,
+          Cost: round(cost),
+          "Share %": round(safeDivide(cost, m.totalCost) * 100, 1),
+        });
+      }
     }
   }
-
-  writeCsv("category_monthly_costs.csv", rows, ["Month", "Category", "Cost"]);
+  rows.sort((a, b) => a.Month.localeCompare(b.Month) || b.Cost - a.Cost);
+  writeCsv("category_monthly_costs.csv", rows, ["Month", "Category", "Cost", "Share %"]);
 }
 
-function buildForecast(monthlyData) {
-  const recent = monthlyData.slice(-3).map((m) => m.totalCost);
-  const avgForecast = recent.length
-    ? recent.reduce((s, v) => s + v, 0) / recent.length
-    : 0;
-
-  let trendForecast = avgForecast;
-  if (recent.length >= 2) {
-    const n = recent.length;
-    const xVals = recent.map((_, i) => i);
-    const xMean = xVals.reduce((s, v) => s + v, 0) / n;
-    const yMean = recent.reduce((s, v) => s + v, 0) / n;
-    let num = 0;
-    let den = 0;
-    for (let i = 0; i < n; i++) {
-      num += (xVals[i] - xMean) * (recent[i] - yMean);
-      den += (xVals[i] - xMean) ** 2;
-    }
-    const slope = den !== 0 ? num / den : 0;
-    const intercept = yMean - slope * xMean;
-    trendForecast = slope * n + intercept;
+function buildForecast(monthlyData, writeCsv) {
+  const completeMonths = monthlyData.slice(0, monthlyData.length - 1);
+  if (completeMonths.length < 2) {
+    writeCsv("forecast_simple.csv", [], ["Forecast Month", "Projected Cost", "Method"]);
+    return;
   }
+  const n = completeMonths.length;
+  let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
+  for (let i = 0; i < n; i++) {
+    const x = i;
+    const y = completeMonths[i].totalCost;
+    sumX += x;
+    sumY += y;
+    sumXY += x * y;
+    sumX2 += x * x;
+  }
+  const denom = n * sumX2 - sumX * sumX;
+  const slope = denom !== 0 ? (n * sumXY - sumX * sumY) / denom : 0;
+  const intercept = (sumY - slope * sumX) / n;
+
+  const today = new Date();
+  const nextMonthStr = firstOfMonthStr(today, 1).slice(0, 7);
+  const nextPlusOneStr = firstOfMonthStr(today, 2).slice(0, 7);
+
+  const forecastNext = Math.max(0, slope * n + intercept);
+  const forecastNextPlus1 = Math.max(0, slope * (n + 1) + intercept);
 
   const rows = [
     {
-      Method: "Average of last 3 months",
-      "Forecasted Total Cost": round(avgForecast),
+      "Forecast Month": nextMonthStr,
+      "Projected Cost": round(forecastNext),
+      Method: "Linear trend on completed months",
     },
     {
-      Method: "Simple linear trend",
-      "Forecasted Total Cost": round(trendForecast),
+      "Forecast Month": nextPlusOneStr,
+      "Projected Cost": round(forecastNextPlus1),
+      Method: "Linear trend on completed months",
     },
   ];
-  writeCsv("forecast_next_month.csv", rows, [
-    "Method",
-    "Forecasted Total Cost",
-  ]);
+  writeCsv("forecast_simple.csv", rows, ["Forecast Month", "Projected Cost", "Method"]);
 }
 
-function buildVolatility(monthlyData, serviceCols) {
-  const rows = serviceCols
-    .map((s) => {
-      const values = monthlyData.map((m) => m.services[s] || 0);
-      const mean = values.length
-        ? values.reduce((a, b) => a + b, 0) / values.length
-        : 0;
-      const variance = values.length
-        ? values.reduce((a, b) => a + (b - mean) ** 2, 0) / values.length
-        : 0;
-      const std = Math.sqrt(variance);
-      const cv = mean !== 0 ? round(safeDivide(std, mean) * 100, 1) : 0;
-      return {
-        Service: s,
-        Mean: round(mean),
-        "Std Dev": round(std),
-        "Coefficient of Variation %": cv,
-      };
-    })
-    .filter((r) => r.Mean > 0)
-    .sort(
-      (a, b) =>
-        b["Coefficient of Variation %"] - a["Coefficient of Variation %"],
-    );
+function buildVolatility(monthlyData, serviceCols, writeCsv) {
+  const rows = [];
+  const n = monthlyData.length;
+  if (n < 2) {
+    writeCsv("service_volatility.csv", [], ["Service", "Mean", "Std Dev", "Coefficient of Variation %"]);
+    return;
+  }
+  for (const s of serviceCols) {
+    const values = monthlyData.map((m) => m.services[s] || 0);
+    const total = values.reduce((a, b) => a + b, 0);
+    if (total === 0) continue;
+    const mean = total / n;
+    const variance = values.reduce((a, b) => a + (b - mean) ** 2, 0) / n;
+    const std = Math.sqrt(variance);
+    const cv = mean > 0 ? (std / mean) * 100 : 0;
 
-  writeCsv("cost_volatility.csv", rows, [
-    "Service",
-    "Mean",
-    "Std Dev",
-    "Coefficient of Variation %",
-  ]);
+    rows.push({
+      Service: s,
+      Mean: round(mean),
+      "Std Dev": round(std),
+      "Coefficient of Variation %": round(cv, 1),
+    });
+  }
+  rows.sort((a, b) => b["Std Dev"] - a["Std Dev"]);
+  writeCsv("service_volatility.csv", rows, ["Service", "Mean", "Std Dev", "Coefficient of Variation %"]);
 }
 
-function buildCostByServiceWide(monthlyData, serviceCols) {
+function buildCostByServiceWide(monthlyData, serviceCols, writeCsv) {
   const rows = monthlyData.map((m) => {
     const row = { Month: m.month };
     for (const s of serviceCols) row[s] = round(m.services[s] || 0);
@@ -698,110 +700,168 @@ function buildCostByServiceWide(monthlyData, serviceCols) {
   ]);
 }
 
-// ==========================================================
-// Main
-// ==========================================================
+// ---------------------------------------------------------------------------
+// Run Pipeline for a Single AWS Account
+// ---------------------------------------------------------------------------
+async function processAccount(accountConfig) {
+  const { id, name, accessKeyId, secretAccessKey, region, isPrimary } = accountConfig;
 
-async function main() {
-  fs.mkdirSync(RUN_FOLDER, { recursive: true });
-  fs.mkdirSync(LATEST_FOLDER, { recursive: true });
+  console.log(`\n==========================================================`);
+  console.log(`🚀 Running AWS Cost Pipeline for: ${name} (${id})`);
+  console.log(`   Region: ${region}`);
+  console.log(`==========================================================`);
 
-  // Credentials passed explicitly, built only from .env values above.
+  const RUN_STAMP = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+  
+  // Specific account folders
+  const accountRunsFolder = path.join(BASE_OUTPUT_FOLDER, "accounts", id, "runs", RUN_STAMP);
+  const accountLatestFolder = path.join(BASE_OUTPUT_FOLDER, "accounts", id, "latest");
+  
+  // Legacy root folders (for primary account)
+  const rootRunsFolder = path.join(BASE_OUTPUT_FOLDER, "runs", RUN_STAMP);
+  const rootLatestFolder = path.join(BASE_OUTPUT_FOLDER, "latest");
+
+  fs.mkdirSync(accountRunsFolder, { recursive: true });
+  fs.mkdirSync(accountLatestFolder, { recursive: true });
+
+  if (isPrimary) {
+    fs.mkdirSync(rootRunsFolder, { recursive: true });
+    fs.mkdirSync(rootLatestFolder, { recursive: true });
+  }
+
+  const runLog = [];
+  function log(msg) {
+    const line = `[${new Date().toISOString()}] [${id}] ${msg}`;
+    console.log(line);
+    runLog.push(line);
+  }
+
+  function writeCsv(filename, rows, columns) {
+    const content = toCsv(rows, columns);
+    fs.writeFileSync(path.join(accountRunsFolder, filename), content);
+    fs.writeFileSync(path.join(accountLatestFolder, filename), content);
+
+    // If primary account, also mirror to root latest folder
+    if (isPrimary) {
+      fs.writeFileSync(path.join(rootRunsFolder, filename), content);
+      fs.writeFileSync(path.join(rootLatestFolder, filename), content);
+    }
+    log(`Wrote ${filename} (${rows.length} rows)`);
+  }
+
+  function runStep(stepName, fn) {
+    try {
+      fn();
+    } catch (e) {
+      log(`ERROR in ${stepName}: ${e.message}`);
+    }
+  }
+
   const ceClient = new CostExplorerClient({
-    region: AWS_REGION,
-    credentials: AWS_CREDENTIALS,
+    region,
+    credentials: { accessKeyId, secretAccessKey },
   });
   const orgClient = new OrganizationsClient({
-    region: AWS_REGION,
-    credentials: AWS_CREDENTIALS,
+    region,
+    credentials: { accessKeyId, secretAccessKey },
   });
 
-  log(`Run folder: ${RUN_FOLDER}`);
-  log(`Months of history: ${MONTHS_OF_HISTORY}`);
+  try {
+    const [serviceResult, accountResult] = await Promise.allSettled([
+      fetchCostByService(ceClient, MONTHS_OF_HISTORY, log),
+      fetchCostByLinkedAccount(ceClient, orgClient, MONTHS_OF_HISTORY, log, writeCsv),
+    ]);
 
-  const [serviceResult, accountResult] = await Promise.allSettled([
-    fetchCostByService(ceClient, MONTHS_OF_HISTORY),
-    fetchCostByLinkedAccount(ceClient, orgClient, MONTHS_OF_HISTORY),
-  ]);
+    if (serviceResult.status === "rejected") {
+      log(`FATAL: cost-by-service fetch failed: ${serviceResult.reason.message}`);
+      return false;
+    }
 
-  if (serviceResult.status === "rejected") {
-    log(`FATAL: cost-by-service fetch failed: ${serviceResult.reason.message}`);
-    finalizeRunLog(false);
-    process.exit(1);
+    const { monthlyData, serviceCols } = serviceResult.value;
+
+    if (monthlyData.length === 0) {
+      log("No cost data returned - check date range / permissions.");
+      return false;
+    }
+
+    log(`Got ${monthlyData.length} month(s) of data across ${serviceCols.length} services.`);
+
+    runStep("buildCostByServiceWide", () => buildCostByServiceWide(monthlyData, serviceCols, writeCsv));
+
+    if (accountResult.status === "fulfilled") {
+      runStep("Cost_By_Linked_Account", () =>
+        writeCsv("Cost_By_Linked_Account.csv", accountResult.value, ["Linked Account", "Cost"])
+      );
+    } else {
+      log(`Skipped linked account export (likely missing Organizations permission): ${accountResult.reason.message}`);
+    }
+
+    runStep("buildCurrentAndTrend", () => buildCurrentAndTrend(monthlyData, writeCsv));
+    runStep("buildTop10AndLatest", () => buildTop10AndLatest(monthlyData, serviceCols, writeCsv));
+    runStep("buildMomChange", () => buildMomChange(monthlyData, writeCsv));
+    runStep("buildPareto", () => buildPareto(monthlyData, serviceCols, writeCsv));
+    runStep("buildAnomalyFlags", () => buildAnomalyFlags(monthlyData, writeCsv));
+    runStep("buildRecurringVsOnetime", () => buildRecurringVsOnetime(monthlyData, serviceCols, writeCsv));
+    runStep("buildNewServices", () => buildNewServices(monthlyData, serviceCols, writeCsv));
+    runStep("buildCategoryCosts", () => buildCategoryCosts(monthlyData, serviceCols, writeCsv));
+    runStep("buildForecast", () => buildForecast(monthlyData, writeCsv));
+    runStep("buildVolatility", () => buildVolatility(monthlyData, serviceCols, writeCsv));
+
+    log(`✅ Account ${name} processing completed successfully.`);
+    return true;
+  } catch (err) {
+    log(`❌ Error processing account ${name}: ${err.message}`);
+    return false;
   }
-
-  const { monthlyData, serviceCols } = serviceResult.value;
-
-  if (monthlyData.length === 0) {
-    log("No cost data returned - check date range / permissions.");
-    finalizeRunLog(false);
-    process.exit(1);
-  }
-
-  log(
-    `Got ${monthlyData.length} month(s) of data across ${serviceCols.length} services.`,
-  );
-
-  runStep("buildCostByServiceWide", () =>
-    buildCostByServiceWide(monthlyData, serviceCols),
-  );
-
-  if (accountResult.status === "fulfilled") {
-    runStep("Cost_By_Linked_Account", () =>
-      writeCsv("Cost_By_Linked_Account.csv", accountResult.value, [
-        "Linked Account",
-        "Cost",
-      ]),
-    );
-  } else {
-    log(
-      `Skipped linked account export (likely missing Organizations permission): ${accountResult.reason.message}`,
-    );
-  }
-
-  runStep("buildCurrentAndTrend", () => buildCurrentAndTrend(monthlyData));
-  runStep("buildTop10AndLatest", () =>
-    buildTop10AndLatest(monthlyData, serviceCols),
-  );
-  runStep("buildMomChange", () => buildMomChange(monthlyData));
-  runStep("buildPareto", () => buildPareto(monthlyData, serviceCols));
-  runStep("buildAnomalyFlags", () => buildAnomalyFlags(monthlyData));
-  runStep("buildRecurringVsOnetime", () =>
-    buildRecurringVsOnetime(monthlyData, serviceCols),
-  );
-  runStep("buildNewServices", () => buildNewServices(monthlyData, serviceCols));
-  runStep("buildCategoryCosts", () =>
-    buildCategoryCosts(monthlyData, serviceCols),
-  );
-  runStep("buildForecast", () => buildForecast(monthlyData));
-  runStep("buildVolatility", () => buildVolatility(monthlyData, serviceCols));
-
-  log("=========================================");
-  log("AWS Cost Pipeline Completed");
-  log("=========================================");
-  log(`Run files: ${RUN_FOLDER}`);
-  log(`Latest files (for Power BI): ${LATEST_FOLDER}`);
-
-  finalizeRunLog(true);
 }
 
-function finalizeRunLog(success) {
-  runLog.push(
-    `[${new Date().toISOString()}] RUN ${success ? "SUCCEEDED" : "FAILED"}`,
-  );
-  try {
-    fs.writeFileSync(path.join(RUN_FOLDER, "run_log.txt"), runLog.join("\n"));
-    fs.writeFileSync(
-      path.join(LATEST_FOLDER, "run_log.txt"),
-      runLog.join("\n"),
+// ---------------------------------------------------------------------------
+// Main Orchestrator
+// ---------------------------------------------------------------------------
+async function main() {
+  const accounts = getAwsAccountConfigs();
+
+  if (accounts.length === 0) {
+    console.error(
+      "❌ No AWS account credentials found in .env.\n" +
+        "Please set AWS_ACCESS_KEY_ID & AWS_SECRET_ACCESS_KEY (and optionally AWS_ACCOUNT_2_*).",
     );
-  } catch (e) {
-    console.error("Could not write run log:", e.message);
+    process.exit(1);
   }
+
+  console.log(`Found ${accounts.length} configured AWS account(s):`);
+  accounts.forEach((a, idx) => console.log(`  ${idx + 1}. [${a.id}] ${a.name} (${a.region})`));
+
+  const metadata = accounts.map((a) => ({
+    id: a.id,
+    name: a.name,
+    path: a.isPrimary ? "/data" : `/data/accounts/${a.id}`,
+  }));
+
+  // Write accounts.json metadata
+  const accountsMetaFolder = path.join(BASE_OUTPUT_FOLDER, "accounts");
+  fs.mkdirSync(accountsMetaFolder, { recursive: true });
+  fs.mkdirSync(path.join(BASE_OUTPUT_FOLDER, "latest"), { recursive: true });
+
+  fs.writeFileSync(
+    path.join(accountsMetaFolder, "accounts.json"),
+    JSON.stringify(metadata, null, 2),
+  );
+  fs.writeFileSync(
+    path.join(BASE_OUTPUT_FOLDER, "latest", "accounts.json"),
+    JSON.stringify(metadata, null, 2),
+  );
+
+  for (const acc of accounts) {
+    await processAccount(acc);
+  }
+
+  console.log(`\n==========================================================`);
+  console.log(`🎉 Multi-Account AWS Cost Pipeline Finished!`);
+  console.log(`==========================================================\n`);
 }
 
 main().catch((err) => {
-  log(`Pipeline failed: ${err.message}`);
-  finalizeRunLog(false);
+  console.error("Pipeline run failed:", err);
   process.exit(1);
 });

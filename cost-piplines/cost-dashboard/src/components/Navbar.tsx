@@ -17,12 +17,21 @@ import { useAccountRequests } from "@/lib/useAccountRequests";
 
 export type Provider = "aws" | "azure";
 
+export interface AwsAccountOption {
+  id: string;
+  name: string;
+  path: string;
+}
+
 export interface NavbarProps {
   months: string[];
   selectedMonth: string;
   onMonthChange: (month: string) => void;
   activeProvider: Provider;
   onProviderChange: (provider: Provider) => void;
+  awsAccounts?: AwsAccountOption[];
+  selectedAwsAccount?: string;
+  onAwsAccountChange?: (accountId: string) => void;
 }
 
 export function Navbar({
@@ -31,6 +40,9 @@ export function Navbar({
   onMonthChange = () => {},
   activeProvider = "aws",
   onProviderChange = () => {},
+  awsAccounts = [],
+  selectedAwsAccount = "account-1",
+  onAwsAccountChange = () => {},
 }: NavbarProps) {
   const navigate = useNavigate();
   const { user, logout, isAdmin } = useAuth();
@@ -79,7 +91,7 @@ export function Navbar({
               )}
             </div>
             <p className="text-xs text-muted-foreground mt-0.5">
-              {activeProvider === "aws" ? "Live AWS Cost Sync" : "Live Azure Cost Sync"}
+              {activeProvider === "aws" ? "Live AWS Cost Analytics" : "Live Azure Cost Analytics"}
             </p>
           </div>
         </div>
@@ -90,7 +102,7 @@ export function Navbar({
           {isAdmin && (
             <button
               onClick={() => setIsAdminRequestsOpen(true)}
-              className="relative flex items-center gap-1.5 rounded-xl border border-border bg-card px-3 py-1.5 text-xs font-semibold hover:bg-muted transition-colors"
+              className="relative flex items-center gap-1.5 rounded-xl border border-border bg-card px-3 py-1.5 text-xs font-semibold hover:bg-muted transition-colors cursor-pointer"
               title="Manage Account Provisioning Requests"
             >
               <Inbox size={14} className="text-indigo-500" />
@@ -106,11 +118,37 @@ export function Navbar({
           {/* Quick Add Request Button */}
           <button
             onClick={() => navigate("/newrequest")}
-            className="flex items-center gap-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-1.5 text-xs font-semibold shadow-sm transition-all"
+            className="flex items-center gap-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-1.5 text-xs font-semibold shadow-sm transition-all cursor-pointer"
           >
             <Plus size={14} />
             <span>New Request Form</span>
           </button>
+
+          {/* AWS Account Selector Dropdown (Shown when in AWS view and accounts are available) */}
+          {activeProvider === "aws" && awsAccounts && awsAccounts.length > 1 && (
+            <div className="relative flex items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 dark:bg-amber-950/20 px-3 py-1.5 transition-colors">
+              <Layers className="h-4 w-4 text-amber-500 shrink-0" />
+
+              <select
+                value={selectedAwsAccount}
+                onChange={(e) => onAwsAccountChange(e.target.value)}
+                className="appearance-none bg-transparent pr-6 text-xs font-semibold text-foreground focus:outline-none cursor-pointer"
+                title="Select AWS Account"
+              >
+                {awsAccounts.map((acc) => (
+                  <option
+                    key={acc.id}
+                    value={acc.id}
+                    className="bg-background text-foreground font-medium"
+                  >
+                    {acc.name}
+                  </option>
+                ))}
+              </select>
+
+              <ChevronDown className="pointer-events-none absolute right-3 h-3 w-3 text-amber-500/80" />
+            </div>
+          )}
 
           {/* Month Selector */}
           {months.length > 0 && (
@@ -173,7 +211,7 @@ export function Navbar({
 
             <button
               onClick={handleLogout}
-              className="flex items-center gap-1 p-2 text-muted-foreground hover:text-rose-500 hover:bg-rose-500/10 rounded-xl transition-colors"
+              className="flex items-center gap-1 p-2 text-muted-foreground hover:text-rose-500 hover:bg-rose-500/10 rounded-xl transition-colors cursor-pointer"
               title="Sign Out"
             >
               <LogOut size={16} />
