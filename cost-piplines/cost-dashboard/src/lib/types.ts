@@ -13,8 +13,8 @@ export interface LinkedAccountCost {
     Cost: number;
 }
 export interface LinkedAccountCostWide {
-  "Linked Account": string;
-  [month: string]: string | number;
+    "Linked Account": string;
+    [month: string]: string | number;
 }
 export interface ServiceCost {
     Service: string;
@@ -98,4 +98,10 @@ export interface AzureChargeTypeCost {
     Month: string;
     ChargeType: string;
     Cost: number;
+}
+export interface AzureMomChange {
+    Month: string;
+    "Total Cost": number;
+    "Previous Month Cost": number | string;
+    "MoM % Change": number | string;
 }

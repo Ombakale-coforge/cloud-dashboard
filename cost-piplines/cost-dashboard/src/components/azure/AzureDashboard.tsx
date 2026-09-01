@@ -4,14 +4,15 @@ import { AzureDataTables } from "@/components/azure/AzureDataTables";
 
 interface AzureDashboardProps {
     selectedMonth: string;
+    basePath?: string;
 }
 
-export function AzureDashboard({ selectedMonth }: AzureDashboardProps) {
+export function AzureDashboard({ selectedMonth, basePath = "/data/azure" }: AzureDashboardProps) {
     return (
         <div className="space-y-6">
-            <AzureKpiCards selectedMonth={selectedMonth} />
-            <AzureCharts selectedMonth={selectedMonth} />
-            <AzureDataTables selectedMonth={selectedMonth} />
+            <AzureKpiCards selectedMonth={selectedMonth} basePath={basePath} />
+            <AzureCharts selectedMonth={selectedMonth} basePath={basePath} />
+            <AzureDataTables selectedMonth={selectedMonth} basePath={basePath} />
         </div>
     );
 }
