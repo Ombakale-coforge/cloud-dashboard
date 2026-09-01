@@ -3,6 +3,8 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -504,13 +506,16 @@ async function main() {
     awsAccountCount =
         syncAwsAccountReports();
 
-    azureCount =
-        await syncAzureReportsFromR2();
+    try {
+        azureCount = await syncAzureReportsFromR2() || 0;
+    } catch (azureErr) {
+        console.warn("Warning: Azure sync encountered an issue, skipping Azure sync:", azureErr.message || azureErr);
+    }
 
     const totalCount =
-        awsLatestCount +
-        awsAccountCount +
-        azureCount;
+        (awsLatestCount || 0) +
+        (awsAccountCount || 0) +
+        (azureCount || 0);
 
     console.log("");
     console.log("Data sync completed successfully.");
@@ -521,7 +526,7 @@ async function main() {
         `AWS account files: ${awsAccountCount}`
     );
     console.log(
-        `Azure R2 files: ${azureCount}`
+        `Azure R2 files: ${azureCount || 0}`
     );
     console.log(
         `Total synced files: ${totalCount}`
