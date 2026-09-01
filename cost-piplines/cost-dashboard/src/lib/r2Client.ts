@@ -46,8 +46,15 @@ export async function readJsonFromR2<T = any>(
       const response = await s3Client.send(command);
       if (response.Body) {
         const str = await response.Body.transformToString();
-        const parsed = JSON.parse(str);
-        return { data: Array.isArray(parsed) ? parsed : defaultValue, actualKey: key };
+        if (!str || !str.trim()) {
+          return { data: defaultValue, actualKey: key };
+        }
+        try {
+          const parsed = JSON.parse(str);
+          return { data: Array.isArray(parsed) ? parsed : defaultValue, actualKey: key };
+        } catch {
+          return { data: defaultValue, actualKey: key };
+        }
       }
     } catch (err: any) {
       if (
