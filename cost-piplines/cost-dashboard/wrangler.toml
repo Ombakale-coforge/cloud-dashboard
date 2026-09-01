@@ -1,0 +1,11 @@
+name = "cost-dashboard"
+pages_build_output_dir = "dist"
+compatibility_date = "2025-01-01"
+
+[vars]
+# These are read by functions/lib/r2.js for Cloudflare R2 access.
+# IMPORTANT: Prefer setting these as SECRETS in the dashboard so values aren't stored in this file.
+# R2_ACCOUNT_ID = "your_account_id"
+# R2_ACCESS_KEY_ID_FOR_FORM = "your_access_key"
+# R2_SECRET_ACCESS_KEY_FOR_FORM = "your_secret"
+# R2_BUCKET_NAME_FOR_FORM = "cost-dashboard-data"

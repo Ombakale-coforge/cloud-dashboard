@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from "react";
+import { readJsonFromR2, writeJsonToR2 } from "@/lib/r2Client";
 
 export type UserRole = "admin" | "basic";
 
@@ -43,8 +44,6 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(() => {
     try {
-      // sessionStorage is cleared on page refresh / tab close,
-      // so the user must always log in fresh.
       const stored = sessionStorage.getItem(AUTH_STORAGE_KEY);
       return stored ? JSON.parse(stored) : null;
     } catch {
@@ -95,14 +94,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         body: JSON.stringify({ email: normEmail, password }),
       });
     } catch {
-      // Admin session allowed
+      // Admin session allowed offline/static
     }
 
     setUser(adminUser);
     return { success: true, user: adminUser };
   };
 
-  // 2. Basic Login for returning users (Strictly via Cloudflare R2)
+  // 2. Basic Login for returning users (API with fallback to direct Cloudflare R2)
   const loginBasic = async (email: string, password: string): Promise<AuthResult> => {
     const normEmail = email.trim().toLowerCase();
 
@@ -118,6 +117,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
+    // Try API route first
     try {
       const res = await fetch("/api/auth/login", {
         method: "POST",
@@ -125,9 +125,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         body: JSON.stringify({ email: normEmail, password }),
       });
 
-      const data = await res.json();
+      const contentType = res.headers.get("content-type");
+      if (res.ok && contentType && contentType.includes("application/json")) {
+        const data = await res.json();
+        if (data.user) {
+          setUser(data.user);
+          return { success: true, user: data.user };
+        }
+      }
+    } catch (err) {
+      console.warn("API route unavailable, using direct Cloudflare R2 client:", err);
+    }
 
-      if (res.status === 404) {
+    // Direct Cloudflare R2 Client Fallback (Works on Cloudflare Pages static hosting without backend server)
+    try {
+      const { data: users } = await readJsonFromR2("user.json", "users.json", []);
+      const existingUser = users.find(
+        (u: any) => u.email && u.email.toLowerCase() === normEmail
+      );
+
+      if (!existingUser) {
         return {
           success: false,
           error: "Account not found in Cloudflare R2 database. Please sign up.",
@@ -135,28 +152,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         };
       }
 
-      if (!res.ok) {
+      if (existingUser.password !== password) {
         return {
           success: false,
-          error: data.message || "Invalid credentials",
+          error: "Incorrect password for this account.",
         };
       }
 
-      if (data.user) {
-        setUser(data.user);
-        return { success: true, user: data.user };
-      }
+      const basicUser: User = {
+        id: existingUser.id || `usr-${Date.now().toString(36)}`,
+        name: existingUser.name,
+        email: existingUser.email,
+        role: "basic",
+        department: existingUser.department || "Digital Engineering",
+        provider: existingUser.provider || "credentials",
+        loginTime: new Date().toISOString(),
+      };
+
+      setUser(basicUser);
+      return { success: true, user: basicUser };
     } catch (err: any) {
+      console.error("Direct Cloudflare R2 login error:", err);
       return {
         success: false,
-        error: err.message || "Failed to reach Cloudflare R2 backend server. Ensure 'npm run dev' is running.",
+        error: err.message || "Failed to authenticate with Cloudflare R2 database.",
       };
     }
-
-    return { success: false, error: "Authentication failed in R2 database." };
   };
 
-  // 3. Signup for 1st time basic users (Strictly writes to Cloudflare R2)
+  // 3. Signup for 1st time basic users (API with fallback to direct Cloudflare R2)
   const signupBasic = async (
     name: string,
     email: string,
@@ -174,6 +198,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return { success: false, error: "This email is reserved for Admin." };
     }
 
+    // Try API route first
     try {
       const res = await fetch("/api/auth/signup", {
         method: "POST",
@@ -181,27 +206,65 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         body: JSON.stringify({ name: finalName, email: normEmail, password, department }),
       });
 
-      const data = await res.json();
+      const contentType = res.headers.get("content-type");
+      if (res.ok && contentType && contentType.includes("application/json")) {
+        const data = await res.json();
+        if (data.user) {
+          setUser(data.user);
+          return { success: true, user: data.user };
+        }
+      }
+    } catch (err) {
+      console.warn("API route unavailable, using direct Cloudflare R2 client for signup:", err);
+    }
 
-      if (!res.ok) {
+    // Direct Cloudflare R2 Client Fallback (Works on Cloudflare Pages static hosting without backend server)
+    try {
+      const { data: users, actualKey } = await readJsonFromR2("user.json", "users.json", []);
+      const exists = users.find(
+        (u: any) => u.email && u.email.toLowerCase() === normEmail
+      );
+
+      if (exists) {
         return {
           success: false,
-          error: data.message || "Failed to save user to Cloudflare R2.",
+          error: "An account with this email already exists in R2 database. Please log in.",
         };
       }
 
-      if (data.user) {
-        setUser(data.user);
-        return { success: true, user: data.user };
-      }
+      const newUser = {
+        id: `usr-${Date.now().toString(36)}`,
+        name: finalName,
+        email: normEmail,
+        password: password,
+        department: department.trim() || "Digital Engineering",
+        role: "basic",
+        provider: "credentials",
+        createdAt: new Date().toISOString(),
+      };
+
+      users.push(newUser);
+      await writeJsonToR2(actualKey || "user.json", users);
+
+      const basicUser: User = {
+        id: newUser.id,
+        name: newUser.name,
+        email: newUser.email,
+        role: "basic",
+        department: newUser.department,
+        provider: "credentials",
+        loginTime: new Date().toISOString(),
+      };
+
+      setUser(basicUser);
+      return { success: true, user: basicUser };
     } catch (err: any) {
+      console.error("Direct Cloudflare R2 signup error:", err);
       return {
         success: false,
-        error: err.message || "Failed to reach Cloudflare R2 backend server. Ensure 'npm run dev' is running.",
+        error: err.message || "Failed to create user in Cloudflare R2 database.",
       };
     }
-
-    return { success: false, error: "Signup failed in Cloudflare R2." };
   };
 
   const logout = () => {

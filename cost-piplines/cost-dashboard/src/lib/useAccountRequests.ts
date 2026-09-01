@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
+import { readJsonFromR2, writeJsonToR2 } from "@/lib/r2Client";
 
 export type RequestStatus = "pending" | "approved" | "rejected" | "under_review";
 
@@ -64,24 +65,44 @@ function loadLocalRecords(): AccountRequest[] {
 export function useAccountRequests() {
   const [records, setRecords] = useState<AccountRequest[]>(loadLocalRecords);
 
-  // Fetch live from backend / Cloudflare R2 on mount
+  // Fetch live from backend API or directly from Cloudflare R2 on mount
   useEffect(() => {
     let isMounted = true;
-    async function fetchFromR2() {
+
+    async function syncFromR2() {
+      // 1. Try API Endpoint first
       try {
         const res = await fetch("/api/requests");
-        if (res.ok) {
+        const contentType = res.headers.get("content-type");
+        if (res.ok && contentType && contentType.includes("application/json")) {
           const json = await res.json();
           if (json.data && Array.isArray(json.data) && isMounted) {
             setRecords(json.data);
             localStorage.setItem(STORAGE_KEY, JSON.stringify(json.data));
+            return;
           }
+        }
+      } catch {
+        // Fall back to direct R2 client below
+      }
+
+      // 2. Direct Cloudflare R2 Client Fallback (Works on static hosting without backend)
+      try {
+        const { data: remoteData } = await readJsonFromR2(
+          "accound_request.json",
+          "account_requests.json",
+          []
+        );
+        if (Array.isArray(remoteData) && remoteData.length > 0 && isMounted) {
+          setRecords(remoteData);
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(remoteData));
         }
       } catch (err) {
         console.warn("Using local cache for account requests:", err);
       }
     }
-    fetchFromR2();
+
+    syncFromR2();
     return () => {
       isMounted = false;
     };
@@ -102,23 +123,40 @@ export function useAccountRequests() {
       return updated;
     });
 
-    // 2. Persist directly to Cloudflare R2 bucket via server API
+    // 2. Persist to API or directly to Cloudflare R2
+    let syncedViaApi = false;
     try {
       const res = await fetch("/api/requests", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(newRecord),
       });
-      if (res.ok) {
+      const contentType = res.headers.get("content-type");
+      if (res.ok && contentType && contentType.includes("application/json")) {
         const json = await res.json();
         if (json.data) {
           setRecords((prev) =>
             prev.map((r) => (r.id === newRecord.id ? json.data : r))
           );
+          syncedViaApi = true;
         }
       }
-    } catch (err) {
-      console.error("Failed to sync new request with Cloudflare R2:", err);
+    } catch {
+      // Fallback to direct R2 client
+    }
+
+    if (!syncedViaApi) {
+      try {
+        const { data: currentRequests, actualKey } = await readJsonFromR2(
+          "accound_request.json",
+          "account_requests.json",
+          []
+        );
+        const updatedRequests = [newRecord, ...currentRequests.filter((r) => r.id !== newRecord.id)];
+        await writeJsonToR2(actualKey || "accound_request.json", updatedRequests);
+      } catch (err) {
+        console.error("Failed to sync new request directly with Cloudflare R2:", err);
+      }
     }
 
     return newRecord;
@@ -143,9 +181,10 @@ export function useAccountRequests() {
         return updated;
       });
 
-      // 2. Persist status update to Cloudflare R2
+      // 2. Persist status update to API or directly to Cloudflare R2
+      let syncedViaApi = false;
       try {
-        await fetch(`/api/requests/${id}/status`, {
+        const res = await fetch(`/api/requests/${id}/status`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -154,8 +193,35 @@ export function useAccountRequests() {
             reviewedBy: adminEmail || "Admin",
           }),
         });
-      } catch (err) {
-        console.error("Failed to update request status in Cloudflare R2:", err);
+        const contentType = res.headers.get("content-type");
+        if (res.ok && contentType && contentType.includes("application/json")) {
+          syncedViaApi = true;
+        }
+      } catch {
+        // Fallback to direct R2 client
+      }
+
+      if (!syncedViaApi) {
+        try {
+          const { data: currentRequests, actualKey } = await readJsonFromR2(
+            "accound_request.json",
+            "account_requests.json",
+            []
+          );
+          const index = currentRequests.findIndex((r) => r.id === id);
+          if (index !== -1) {
+            currentRequests[index] = {
+              ...currentRequests[index],
+              status: status || currentRequests[index].status,
+              adminNotes: adminNotes ?? currentRequests[index].adminNotes,
+              reviewedBy: adminEmail || "Admin",
+              reviewedAt: new Date().toISOString(),
+            };
+            await writeJsonToR2(actualKey || "accound_request.json", currentRequests);
+          }
+        } catch (err) {
+          console.error("Failed to update status directly in Cloudflare R2:", err);
+        }
       }
     },
     []

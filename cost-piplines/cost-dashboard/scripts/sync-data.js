@@ -1,17 +1,20 @@
-import "dotenv/config";
-
+import dotenv from "dotenv";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Load dotenv from both current directory and parent directory
+dotenv.config({ path: path.resolve(__dirname, "../.env") });
+dotenv.config({ path: path.resolve(__dirname, "../../.env") });
 
 import {
     S3Client,
     ListObjectsV2Command,
     GetObjectCommand,
 } from "@aws-sdk/client-s3";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 // ---------------------------------------------------------------------
 // Local AWS report paths
@@ -50,12 +53,10 @@ const azureDestDir = path.resolve(
 // R2 configuration
 // ---------------------------------------------------------------------
 
-const {
-    R2_AZURE_DATA_ACCOUNT_ID,
-    R2_AZURE_DATA_ACCESS_KEY_ID,
-    R2_AZURE_DATA_BUCKET_NAME,
-    R2_AZURE_DATA_SECRET_ACCESS_KEY,
-} = process.env;
+const R2_AZURE_DATA_ACCOUNT_ID = process.env.R2_AZURE_DATA_ACCOUNT_ID || process.env.R2_ACCOUNT_ID;
+const R2_AZURE_DATA_ACCESS_KEY_ID = process.env.R2_AZURE_DATA_ACCESS_KEY_ID || process.env.R2_ACCESS_KEY_ID;
+const R2_AZURE_DATA_BUCKET_NAME = process.env.R2_AZURE_DATA_BUCKET_NAME || process.env.R2_BUCKET_NAME || "azure-reconciliation-data";
+const R2_AZURE_DATA_SECRET_ACCESS_KEY = process.env.R2_AZURE_DATA_SECRET_ACCESS_KEY || process.env.R2_SECRET_ACCESS_KEY;
 
 const requiredR2EnvironmentVariables = {
     R2_AZURE_DATA_ACCOUNT_ID,
@@ -71,12 +72,11 @@ const missingR2EnvironmentVariables = Object.entries(
     .map(([name]) => name);
 
 if (missingR2EnvironmentVariables.length > 0) {
-    console.error(
-        "Missing required R2 environment variables: " +
-        missingR2EnvironmentVariables.join(", ")
+    console.warn(
+        "Warning: Missing R2 environment variables for Azure sync: " +
+        missingR2EnvironmentVariables.join(", ") +
+        ". Azure sync will be skipped."
     );
-
-    process.exit(1);
 }
 
 function normalizePrefix(value, fallback) {
@@ -435,10 +435,11 @@ async function syncAzureReportsFromR2() {
         await listAzureReportObjects();
 
     if (reportObjects.length === 0) {
-        throw new Error(
-            `No Azure report files found in R2 under ` +
-            `${AZURE_REPORT_PREFIX}`
+        console.warn(
+            `Warning: No Azure report files found in R2 under ` +
+            `${AZURE_REPORT_PREFIX}. Skipping Azure R2 sync.`
         );
+        return;
     }
 
     /*
