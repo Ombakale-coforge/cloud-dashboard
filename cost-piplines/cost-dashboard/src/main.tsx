@@ -8,6 +8,17 @@ import { NewRequestPage } from './pages/NewRequestPage.tsx'
 import { AuthProvider } from './lib/auth.tsx'
 import { ProtectedRoute } from './components/ProtectedRoute.tsx'
 
+// Global Uncaught Error Loggers for Easy Copy-Pasting
+if (typeof window !== "undefined") {
+  window.addEventListener("error", (event) => {
+    console.error("🔴 [GLOBAL UNCAUGHT ERROR]:", event.message, event.error || event);
+  });
+
+  window.addEventListener("unhandledrejection", (event) => {
+    console.error("🔴 [GLOBAL UNHANDLED PROMISE REJECTION]:", event.reason || event);
+  });
+}
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <AuthProvider>

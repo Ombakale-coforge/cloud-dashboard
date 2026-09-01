@@ -70,6 +70,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   });
 
   useEffect(() => {
+    console.log("🚀 [App Version]: Loaded 100% Direct R2 Engine v2.0");
+  }, []);
+
+  useEffect(() => {
     if (user) {
       sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(user));
     } else {
@@ -80,6 +84,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // 1. Admin Login (Strict credentials)
   const loginAdmin = async (password: string, email: string = ADMIN_CREDENTIALS.email): Promise<AuthResult> => {
     const normEmail = email.trim().toLowerCase();
+    console.log("🚀 [Direct R2 Auth] Admin Login attempt:", normEmail);
 
     if (normEmail !== ADMIN_CREDENTIALS.email.toLowerCase()) {
       return {
@@ -112,6 +117,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // 2. Basic Login for returning users (Directly from Cloudflare R2 user.json)
   const loginBasic = async (email: string, password: string): Promise<AuthResult> => {
     const normEmail = email.trim().toLowerCase();
+    console.log("🚀 [Direct R2 Auth] Basic Login attempt for:", normEmail);
 
     if (!normEmail || !password) {
       return { success: false, error: "Please enter your email and password." };
@@ -133,9 +139,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (Array.isArray(remoteUsers) && remoteUsers.length > 0) {
         users = remoteUsers;
         setCachedUsers(remoteUsers);
+        console.log(`✅ [Direct R2 Auth] Fetched ${remoteUsers.length} users from R2 user.json`);
       }
     } catch (err: any) {
-      console.warn("R2 fetch warning, using cached users:", err);
+      console.warn("⚠️ [Direct R2 Auth] R2 fetch warning, using cached users:", err.message || err);
     }
 
     const existingUser = users.find(
@@ -181,6 +188,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const normEmail = email.trim().toLowerCase();
     const finalName = name.trim() || normEmail.split("@")[0].replace(/[._-]/g, " ");
 
+    console.log("🚀 [Direct R2 Auth] Signup attempt for:", normEmail);
+
     if (!normEmail || !password) {
       return { success: false, error: "Email and password are required to sign up." };
     }
@@ -200,7 +209,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         actualKey = res.actualKey;
       }
     } catch (err: any) {
-      console.warn("R2 sync warning during signup:", err);
+      console.warn("⚠️ [Direct R2 Auth] R2 sync warning during signup:", err.message || err);
     }
 
     const exists = users.find(
@@ -231,8 +240,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Save directly to Cloudflare R2 bucket
     try {
       await writeJsonToR2(actualKey || "user.json", updatedUsers);
+      console.log("✅ [Direct R2 Auth] User saved to R2 bucket user.json:", normEmail);
     } catch (err: any) {
-      console.error("Failed to write new user to R2 bucket:", err);
+      console.error("❌ [Direct R2 Auth] Failed to write new user to R2 bucket:", err.message || err);
     }
 
     const basicUser: User = {

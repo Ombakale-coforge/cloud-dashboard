@@ -18,6 +18,10 @@ const R2_SECRET_ACCESS_KEY =
 const R2_BUCKET_NAME =
   import.meta.env.VITE_R2_BUCKET_NAME || "cost-dashboard-data";
 
+console.log(
+  `📦 [R2 Client Init] Target Bucket: "${R2_BUCKET_NAME}", Endpoint: https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`
+);
+
 const s3Client = new S3Client({
   region: "auto",
   endpoint: `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
@@ -39,6 +43,7 @@ export async function readJsonFromR2<T = any>(
 
   for (const key of keysToTry) {
     try {
+      console.log(`📥 [R2 Read Attempt] Bucket: "${R2_BUCKET_NAME}", Key: "${key}"`);
       const command = new GetObjectCommand({
         Bucket: R2_BUCKET_NAME,
         Key: key,
@@ -47,12 +52,15 @@ export async function readJsonFromR2<T = any>(
       if (response.Body) {
         const str = await response.Body.transformToString();
         if (!str || !str.trim()) {
+          console.warn(`⚠️ [R2 Read Empty File] Key "${key}" is 0 bytes.`);
           return { data: defaultValue, actualKey: key };
         }
         try {
           const parsed = JSON.parse(str);
+          console.log(`✅ [R2 Read Success] Key "${key}", Items: ${Array.isArray(parsed) ? parsed.length : 1}`);
           return { data: Array.isArray(parsed) ? parsed : defaultValue, actualKey: key };
-        } catch {
+        } catch (jsonErr: any) {
+          console.error(`❌ [R2 JSON Parse Error] Key "${key}" content is invalid JSON:`, jsonErr.message, str);
           return { data: defaultValue, actualKey: key };
         }
       }
@@ -61,9 +69,10 @@ export async function readJsonFromR2<T = any>(
         err.name === "NoSuchKey" ||
         err.$metadata?.httpStatusCode === 404
       ) {
+        console.log(`ℹ️ [R2 Key Not Found] "${key}" does not exist in bucket "${R2_BUCKET_NAME}"`);
         continue;
       }
-      console.warn(`[R2 Client Read Warning] Key "${key}":`, err.message || err);
+      console.error(`❌ [R2_CLIENT_ERROR] Read failed for Key "${key}":`, err.name, err.message, err);
     }
   }
 
@@ -74,13 +83,20 @@ export async function readJsonFromR2<T = any>(
  * Writes JSON array to Cloudflare R2 bucket directly from browser.
  */
 export async function writeJsonToR2(key: string, data: any): Promise<void> {
-  const jsonStr = JSON.stringify(data, null, 2);
-  const command = new PutObjectCommand({
-    Bucket: R2_BUCKET_NAME,
-    Key: key,
-    Body: jsonStr,
-    ContentType: "application/json",
-  });
+  try {
+    const jsonStr = JSON.stringify(data, null, 2);
+    console.log(`📤 [R2 Write Attempt] Bucket: "${R2_BUCKET_NAME}", Key: "${key}", Length: ${jsonStr.length} bytes`);
+    const command = new PutObjectCommand({
+      Bucket: R2_BUCKET_NAME,
+      Key: key,
+      Body: jsonStr,
+      ContentType: "application/json",
+    });
 
-  await s3Client.send(command);
+    await s3Client.send(command);
+    console.log(`✅ [R2 Write Success] Key "${key}" successfully saved to bucket "${R2_BUCKET_NAME}"`);
+  } catch (err: any) {
+    console.error(`❌ [R2_CLIENT_ERROR] Write failed for Key "${key}":`, err.name, err.message, err);
+    throw new Error(`[R2 WRITE ERROR] ${err.name || "Error"}: ${err.message || "Failed to write to Cloudflare R2"}`);
+  }
 }
