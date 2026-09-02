@@ -437,11 +437,10 @@ async function syncAzureReportsFromR2() {
         await listAzureReportObjects();
 
     if (reportObjects.length === 0) {
-        console.warn(
-            `Warning: No Azure report files found in R2 under ` +
-            `${AZURE_REPORT_PREFIX}. Skipping Azure R2 sync.`
+        throw new Error(
+            `No Azure report files found in R2 under ` +
+            `${AZURE_REPORT_PREFIX}.`
         );
-        return;
     }
 
     /*
@@ -479,32 +478,6 @@ async function syncAzureReportsFromR2() {
     return count;
 }
 
-function syncLocalAzureReports() {
-    const baseAzureReports = path.resolve(__dirname, "../../AzureDashboardReports");
-    const localAzureLatestDir = path.resolve(baseAzureReports, "latest");
-
-    if (!fs.existsSync(localAzureLatestDir)) {
-        console.warn("Local Azure reports directory does not exist:", localAzureLatestDir);
-        return 0;
-    }
-
-    ensureDirectory(azureDestDir);
-
-    let count = 0;
-    const files = fs.readdirSync(localAzureLatestDir);
-    for (const file of files) {
-        if (file.toLowerCase().endsWith(".csv") || file.toLowerCase().endsWith(".json")) {
-            fs.copyFileSync(
-                path.join(localAzureLatestDir, file),
-                path.join(azureDestDir, file)
-            );
-            count += 1;
-            console.log(`Copied local Azure report: ${file}`);
-        }
-    }
-    return count;
-}
-
 // ---------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------
@@ -532,16 +505,7 @@ async function main() {
     awsAccountCount =
         syncAwsAccountReports();
 
-    try {
-        azureCount = await syncAzureReportsFromR2() || 0;
-    } catch (azureErr) {
-        console.warn("Warning: Azure sync encountered an issue, skipping Azure R2 sync:", azureErr.message || azureErr);
-    }
-
-    if (azureCount === 0) {
-        console.log("Syncing local Azure reports from AzureDashboardReports/latest...");
-        azureCount = syncLocalAzureReports();
-    }
+    azureCount = await syncAzureReportsFromR2();
 
     const totalCount =
         (awsLatestCount || 0) +
@@ -572,3 +536,4 @@ main().catch((error) => {
 
     process.exit(1);
 });
+
