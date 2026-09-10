@@ -232,9 +232,9 @@ export function ChartsSection({ selectedMonth }: ChartsSectionProps) {
                   fontSize: "12px",
                   fontFamily: "inherit",
                 }}
-                formatter={(value) => [formatFullCurrency(value), "Total Cost"]}
+                formatter={(value) => [formatFullCurrency(value), "Cost"]}
               />
-              <Bar dataKey="Total Cost" fill="url(#barGradient)" radius={[0, 6, 6, 0]} barSize={16} />
+              <Bar dataKey="Cost" fill="url(#barGradient)" radius={[0, 6, 6, 0]} barSize={16} />
             </BarChart>
           </ResponsiveContainer>
         </CardContent>

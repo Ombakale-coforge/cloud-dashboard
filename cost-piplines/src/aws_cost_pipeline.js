@@ -257,10 +257,10 @@ async function withRetry(fn, { retries = 5, baseDelayMs = 500 } = {}) {
 
 async function fetchCostByService(ceClient, monthsBack) {
   const today = new Date();
-  const startStr = firstOfMonthStr(today, -monthsBack);
+  const startStr = firstOfMonthStr(today, -(monthsBack - 1));
   const endStr = firstOfMonthStr(today, 1);
 
-  log(`Fetching cost-by-service from ${startStr} to ${endStr} ...`);
+  log(`Fetching cost-by-service from ${startStr} to ${endStr} (${monthsBack} months) ...`);
 
   const records = [];
   let nextToken;
@@ -323,11 +323,11 @@ async function fetchCostByService(ceClient, monthsBack) {
 
 async function fetchCostByLinkedAccount(ceClient, orgClient, monthsBack) {
   const today = new Date();
-  const startStr = firstOfMonthStr(today, -monthsBack);
+  const startStr = firstOfMonthStr(today, -(monthsBack - 1));
   const endStr = firstOfMonthStr(today, 1);
 
   log(
-    `Fetching cost by linked account from ${startStr} to ${endStr} (${monthsBack + 1} months) ...`,
+    `Fetching cost by linked account from ${startStr} to ${endStr} (${monthsBack} months) ...`,
   );
 
   const accountMap = {};

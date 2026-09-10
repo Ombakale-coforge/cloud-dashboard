@@ -73,12 +73,15 @@ export function DataTables({ selectedMonth }: DataTablesProps) {
     if (!selectedMonth || wideServices.length === 0) {
       return (services || []).map((s) => ({
         Service: s ? s.Service : "",
-        CurrentCost: s ? s.Cost : 0,
+        CurrentCost: Number(s?.Cost) || 0,
         PreviousCost: 0,
       }));
     }
-    const currentMonthRow = wideServices.find((r) => r && r.Month === selectedMonth);
-    const previousMonthRow = prevMonth ? wideServices.find((r) => r && r.Month === prevMonth) : null;
+    const targetMonth = String(selectedMonth).trim();
+    const targetPrevMonth = prevMonth ? String(prevMonth).trim() : null;
+
+    const currentMonthRow = wideServices.find((r) => r && String(r.Month).trim() === targetMonth);
+    const previousMonthRow = targetPrevMonth ? wideServices.find((r) => r && String(r.Month).trim() === targetPrevMonth) : null;
 
     const rowKeys = currentMonthRow ? Object.keys(currentMonthRow) : [];
     const serviceKeys = rowKeys.filter((k) => k !== "Month" && k !== "Total Cost");
@@ -107,14 +110,15 @@ export function DataTables({ selectedMonth }: DataTablesProps) {
   // 2-month variance snapshot only when the wide CSV has not been generated yet.
   const accountComparisons = useMemo(() => {
     const hasWide = wideAccounts && wideAccounts.length > 0;
+    const targetMonth = String(selectedMonth).trim();
 
     if (hasWide && selectedMonth && accountMonths.includes(selectedMonth)) {
       return wideAccounts
         .map((a) => {
-          const currentCost = Number(a[selectedMonth] || 0);
+          const currentCost = Number(a[targetMonth] || 0);
           const previousCost = accountPrevMonth ? Number(a[accountPrevMonth] || 0) : 0;
           return {
-            Account: a["Linked Account"],
+            Account: String(a["Linked Account"] || ""),
             CurrentCost: isNaN(currentCost) ? 0 : currentCost,
             PreviousCost: isNaN(previousCost) ? 0 : previousCost,
           };
@@ -136,7 +140,7 @@ export function DataTables({ selectedMonth }: DataTablesProps) {
       return accountVariances
         .filter((a) => a && a["Linked Account"])
         .map((a) => ({
-          Account: a["Linked Account"],
+          Account: String(a["Linked Account"] || ""),
           CurrentCost: Number(a["Curr Month Cost"] || 0),
           PreviousCost: Number(a["Prev Month Cost"] || 0),
         }))
@@ -265,10 +269,10 @@ export function DataTables({ selectedMonth }: DataTablesProps) {
                         {s.Service}
                       </TableCell>
                       <TableCell className="text-right whitespace-nowrap w-[100px] py-2.5 text-muted-foreground text-xs font-medium">
-                        ${s.PreviousCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        ${(s.PreviousCost ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </TableCell>
                       <TableCell className="text-right font-semibold whitespace-nowrap w-[100px] py-2.5 text-xs">
-                        ${s.CurrentCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        ${(s.CurrentCost ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </TableCell>
                     </TableRow>
                   ))
@@ -367,10 +371,10 @@ export function DataTables({ selectedMonth }: DataTablesProps) {
                             {a.Account}
                           </TableCell>
                           <TableCell className="text-right whitespace-nowrap w-[100px] py-2.5 text-muted-foreground text-xs font-medium">
-                            ${a.PreviousCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            ${(a.PreviousCost ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </TableCell>
                           <TableCell className="text-right font-semibold whitespace-nowrap w-[100px] py-2.5 text-xs">
-                            ${a.CurrentCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            ${(a.CurrentCost ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </TableCell>
                         </TableRow>
                       ))
@@ -455,7 +459,7 @@ export function DataTables({ selectedMonth }: DataTablesProps) {
                         {r.Service}
                       </TableCell>
                       <TableCell className="whitespace-nowrap w-[60px] py-2.5 text-muted-foreground font-medium">
-                        {r["Months Active"]}/{r["Total Months"]}
+                        {r["Active Months"] ?? r["Months Active"] ?? 0}/{r["Total Months in Run"] ?? r["Total Months"] ?? 0}
                       </TableCell>
                       <TableCell className="w-[120px] py-2.5">
                         <Badge
@@ -463,7 +467,7 @@ export function DataTables({ selectedMonth }: DataTablesProps) {
                           className={`font-semibold text-xs px-2 py-0.5 border ${
                             r.Classification === "Recurring"
                               ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                              : r.Classification === "Occasional"
+                              : r.Classification === "Variable" || r.Classification === "Occasional"
                                 ? "bg-amber-50 text-amber-700 border-amber-200"
                                 : "bg-slate-50 text-slate-600 border-slate-200"
                           }`}

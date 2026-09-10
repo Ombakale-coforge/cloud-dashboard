@@ -21,6 +21,7 @@ export interface ServiceCost {
   Cost: number;
 }
 export interface TopService {
+<<<<<<< Updated upstream
   Service: string;
   "Total Cost": number;
 }
@@ -30,6 +31,19 @@ export interface RecurringRow {
   "Total Months": number;
   "Active %": number;
   Classification: string;
+=======
+    Service: string;
+    Cost: number;
+}
+export interface RecurringRow {
+    Service: string;
+    "Active Months"?: number;
+    "Total Months in Run"?: number;
+    "Months Active"?: number;
+    "Total Months"?: number;
+    "Active %": number;
+    Classification: string;
+>>>>>>> Stashed changes
 }
 export interface CategoryCost {
   Month: string;
