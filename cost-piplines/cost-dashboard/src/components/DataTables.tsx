@@ -115,7 +115,7 @@ export function DataTables({ selectedMonth, basePath = "/data" }: DataTablesProp
           const currentCost = Number(a[selectedMonth] || 0);
           const previousCost = accountPrevMonth ? Number(a[accountPrevMonth] || 0) : 0;
           return {
-            Account: a["Linked Account"],
+            Account: String(a["Linked Account"] ?? ""),
             CurrentCost: isNaN(currentCost) ? 0 : currentCost,
             PreviousCost: isNaN(previousCost) ? 0 : previousCost,
           };
@@ -137,7 +137,7 @@ export function DataTables({ selectedMonth, basePath = "/data" }: DataTablesProp
       return accountVariances
         .filter((a) => a && a["Linked Account"])
         .map((a) => ({
-          Account: a["Linked Account"],
+          Account: String(a["Linked Account"] ?? ""),
           CurrentCost: Number(a["Curr Month Cost"] || 0),
           PreviousCost: Number(a["Prev Month Cost"] || 0),
         }))
@@ -164,7 +164,7 @@ export function DataTables({ selectedMonth, basePath = "/data" }: DataTablesProp
 
   // Filter & Paginate 1: Services
   const filteredServices = serviceComparisons.filter((s) =>
-    s && s.Service && s.Service.toLowerCase().includes(searchServices.toLowerCase())
+    s && s.Service && String(s.Service).toLowerCase().includes(searchServices.toLowerCase())
   );
   const totalPagesServices = Math.ceil(filteredServices.length / ITEMS_PER_PAGE);
   const paginatedServices = filteredServices.slice(
@@ -174,7 +174,7 @@ export function DataTables({ selectedMonth, basePath = "/data" }: DataTablesProp
 
   // Filter & Paginate 2: Accounts
   const filteredAccounts = accountComparisons.filter((a) =>
-    a && a.Account && a.Account.toLowerCase().includes(searchAccounts.toLowerCase())
+    a && a.Account && String(a.Account).toLowerCase().includes(searchAccounts.toLowerCase())
   );
   const totalPagesAccounts = Math.ceil(filteredAccounts.length / ITEMS_PER_PAGE);
   const paginatedAccounts = filteredAccounts.slice(
@@ -184,7 +184,7 @@ export function DataTables({ selectedMonth, basePath = "/data" }: DataTablesProp
 
   // Filter & Paginate 3: Service Usage Frequency
   const filteredRecurring = (recurring || []).filter((r) =>
-    r && r.Service && r.Service.toLowerCase().includes(searchRecurring.toLowerCase())
+    r && r.Service && String(r.Service).toLowerCase().includes(searchRecurring.toLowerCase())
   );
   const totalPagesRecurring = Math.ceil(filteredRecurring.length / ITEMS_PER_PAGE);
   const paginatedRecurring = filteredRecurring.slice(
@@ -208,17 +208,23 @@ export function DataTables({ selectedMonth, basePath = "/data" }: DataTablesProp
 
   // Format month name for headers display
   const formatMonthName = (mStr: string) => {
-    if (!mStr) return "";
-    const [year, month] = mStr.split("-");
+    if (!mStr || typeof mStr !== "string") return "";
+    const parts = mStr.split("-");
+    if (parts.length < 2) return mStr;
+    const [year, month] = parts;
     const date = new Date(Number(year), Number(month) - 1, 1);
+    if (isNaN(date.getTime())) return mStr;
     return date.toLocaleString("default", { month: "long" });
   };
 
   // Format short month name for headers display
   const formatShortMonthName = (mStr: string | null) => {
-    if (!mStr) return "-";
-    const [year, month] = mStr.split("-");
+    if (!mStr || typeof mStr !== "string") return "-";
+    const parts = mStr.split("-");
+    if (parts.length < 2) return "-";
+    const [year, month] = parts;
     const date = new Date(Number(year), Number(month) - 1, 1);
+    if (isNaN(date.getTime())) return "-";
     return date.toLocaleString("default", { month: "short" });
   };
 

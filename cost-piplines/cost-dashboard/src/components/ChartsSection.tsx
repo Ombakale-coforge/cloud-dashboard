@@ -68,27 +68,56 @@ export function ChartsSection({ selectedMonth, basePath = "/data" }: ChartsSecti
     `${basePath}/category_monthly_costs.csv`,
   );
 
+  // Filter AWS monthly totals strictly to the last 6 months (April to September 2026)
+  const monthlyLast6 = useMemo(() => {
+    const sorted = [...(monthly || [])]
+      .filter((m) => m && m.Month)
+      .sort((a, b) => a.Month.localeCompare(b.Month));
+    return sorted.slice(-6);
+  }, [monthly]);
+
   const trendData = useMemo(() => {
-    return monthly.map((m) => {
-      const momRow = mom.find((x) => x.Month === m.Month);
+    return monthlyLast6.map((m) => {
+      const momRow = (mom || []).find((x) => x && x.Month === m.Month);
       return {
         Month: m.Month,
-        "Total Cost": m["Total Cost"],
+        "Total Cost": Number(m["Total Cost"]) || 0,
         "MoM % Change": momRow ? Number(momRow["MoM % Change"]) || 0 : 0,
       };
     });
-  }, [monthly, mom]);
+  }, [monthlyLast6, mom]);
+
+  const isSelectedMonthInTrend = useMemo(() => {
+    return trendData.some((d) => d.Month === selectedMonth);
+  }, [trendData, selectedMonth]);
+
+  // Normalize top 10 services data
+  const normalizedTopServices = useMemo(() => {
+    return (topServices || [])
+      .filter((s) => s && s.Service)
+      .map((s) => ({
+        Service: String(s.Service),
+        Cost: Number(s.Cost ?? (s as any)["Total Cost"] ?? 0),
+      }))
+      .sort((a, b) => b.Cost - a.Cost)
+      .slice(0, 10);
+  }, [topServices]);
 
   // Dynamically load categories matching selectedMonth, sorted by cost descending
   const latestCategoryMonth = useMemo(() => {
-    if (categories.length === 0) return [];
+    if (!categories || categories.length === 0) return [];
     
-    // Use selectedMonth if available, otherwise default to the latest month in dataset
-    const targetMonth = selectedMonth || [...new Set(categories.map((c) => c.Month))].sort().pop();
+    const availableMonths = [...new Set(categories.filter((c) => c && c.Month).map((c) => c.Month))].sort();
+    const targetMonth = (selectedMonth && availableMonths.includes(selectedMonth))
+      ? selectedMonth
+      : availableMonths[availableMonths.length - 1];
+
     if (!targetMonth) return [];
 
-    const rawData = categories.filter((c) => c.Month === targetMonth);
-    return [...rawData].sort((a, b) => b.Cost - a.Cost);
+    const rawData = categories.filter((c) => c && c.Month === targetMonth);
+    return [...rawData]
+      .map((c) => ({ Category: c.Category || "Other", Cost: Number(c.Cost) || 0 }))
+      .sort((a, b) => b.Cost - a.Cost);
   }, [categories, selectedMonth]);
 
   const totalCategoryCost = useMemo(() => {
@@ -97,16 +126,23 @@ export function ChartsSection({ selectedMonth, basePath = "/data" }: ChartsSecti
 
   // Format month name for title displaying
   const formatMonthName = (mStr: string) => {
-    if (!mStr) return "";
-    const [year, month] = mStr.split("-");
+    if (!mStr || typeof mStr !== "string") return "";
+    const parts = mStr.split("-");
+    if (parts.length < 2) return mStr;
+    const [year, month] = parts;
     const date = new Date(Number(year), Number(month) - 1, 1);
+    if (isNaN(date.getTime())) return mStr;
     return date.toLocaleString("default", { month: "long", year: "numeric" });
   };
 
   const activeCategoryMonthName = useMemo(() => {
-    if (latestCategoryMonth.length === 0) return "Latest Month";
-    return formatMonthName(latestCategoryMonth[0].Month);
-  }, [latestCategoryMonth]);
+    if (!categories || categories.length === 0) return "Latest Month";
+    const availableMonths = [...new Set(categories.filter((c) => c && c.Month).map((c) => c.Month))].sort();
+    const targetMonth = (selectedMonth && availableMonths.includes(selectedMonth))
+      ? selectedMonth
+      : availableMonths[availableMonths.length - 1];
+    return targetMonth ? formatMonthName(targetMonth) : "Latest Month";
+  }, [categories, selectedMonth]);
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -155,7 +191,7 @@ export function ChartsSection({ selectedMonth, basePath = "/data" }: ChartsSecti
                 formatter={(value) => [formatFullCurrency(value), "Total Cost"]}
               />
               {/* Vertical Reference Line to mark the selected month */}
-              {selectedMonth && (
+              {selectedMonth && isSelectedMonthInTrend && (
                 <ReferenceLine 
                   x={selectedMonth} 
                   stroke="#4f46e5" 
@@ -193,7 +229,7 @@ export function ChartsSection({ selectedMonth, basePath = "/data" }: ChartsSecti
           <ResponsiveContainer width="100%" height={320}>
             {/* Added standard margins to protect axis values */}
             <BarChart
-              data={topServices}
+              data={normalizedTopServices}
               layout="vertical"
               margin={{ top: 5, right: 20, left: 10, bottom: 10 }}
             >
@@ -221,7 +257,7 @@ export function ChartsSection({ selectedMonth, basePath = "/data" }: ChartsSecti
                 fontSize={11}
                 tickLine={false}
                 axisLine={false}
-                tickFormatter={(t) => t.length > 15 ? `${t.slice(0, 15)}...` : t}
+                tickFormatter={(t) => (t && typeof t === "string" && t.length > 15) ? `${t.slice(0, 15)}...` : String(t || "")}
                 dx={-5}
               />
               <Tooltip
@@ -235,7 +271,7 @@ export function ChartsSection({ selectedMonth, basePath = "/data" }: ChartsSecti
                 }}
                 formatter={(value) => [formatFullCurrency(value), "Total Cost"]}
               />
-              <Bar dataKey="Total Cost" fill="url(#barGradient)" radius={[0, 6, 6, 0]} barSize={16} />
+              <Bar dataKey="Cost" fill="url(#barGradient)" radius={[0, 6, 6, 0]} barSize={16} />
             </BarChart>
           </ResponsiveContainer>
         </CardContent>
