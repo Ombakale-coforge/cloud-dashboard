@@ -1,0 +1,367 @@
+// schema.prisma
+// -------------------------------------------------------
+// Prisma schema for SQL Server, replacing the Drizzle/MySQL schema.
+//
+// 1. No native `enum` type. The SQL Server connector rejects `enum`
+//    blocks outright. Every field that was mysqlEnum(...) in the old
+//    schema (ingestionRuns.status, reportRuns.status) is a plain
+//    String here, with the allowed values documented in a comment and
+//    enforced at the application layer (see the ingest/report
+//    scripts) rather than by the database. This is a real, if minor,
+//    strictness regression versus MySQL's native ENUM — worth knowing
+//    even though it doesn't block anything.
+//
+// 2. No native `Json` type. usageRecords.tags is a String holding
+//    JSON text; the app JSON.stringify()/JSON.parse()s it manually,
+//    same as it already had to for tagsRaw.
+//
+// 3. SQL Server allows a maximum of 2,100 parameters per query. This
+//    doesn't affect the schema file itself, but it's why the ingest
+//    and report-generation scripts compute batch sizes from column
+//    counts instead of using one fixed constant — a naive 500-row
+//    batch against usage_records' ~30 columns would be ~15,000
+//    parameters and fail every single time, not occasionally.
+//
+// Everything else (design decisions #1–#11 for dedup/supersede
+// handling, the report-table refresh strategy) is unchanged from the
+// Drizzle schema — only the column-type syntax and connector-specific
+// workarounds differ.
+
+datasource db {
+  provider = "sqlserver"
+}
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+// ---------------------------------------------------------------
+// ingestion_runs — append-only log of every Azure export run
+// processed. status is a plain String ("started" | "success" |
+// "failed") since SQL Server has no native enum — see file header.
+// ---------------------------------------------------------------
+model IngestionRun {
+  id                 BigInt   @id @default(autoincrement()) @map("id")
+  period             String   @map("period") @db.NVarChar(64)
+  runId              String   @map("run_id") @db.NVarChar(191)
+
+  /// Allowed values: "started" | "success" | "failed". Enforced in
+  /// application code, not by the database — see file header.
+  status             String   @default("started") @map("status") @db.NVarChar(16)
+  errorMessage       String?  @map("error_message") @db.NVarChar(1024)
+
+  ingestedAt         DateTime @default(now()) @map("ingested_at")
+  rowsParsed         Int      @default(0) @map("rows_parsed")
+  rowsWritten        Int      @default(0) @map("rows_written")
+  duplicatesFlagged  Int      @default(0) @map("duplicates_flagged")
+  supersedesFlagged  Int      @default(0) @map("supersedes_flagged")
+
+  usageRecords       UsageRecord[]
+
+  @@unique([period, runId], map: "ingestion_runs_period_run_unique")
+  @@index([period], map: "ingestion_runs_period_idx")
+  @@map("ingestion_runs")
+}
+
+// ---------------------------------------------------------------
+// usage_records — one row per FOCUS charge line. See the original
+// schema's design decisions #1–#11 (unchanged) for the reasoning
+// behind stableRowHash / chargeKeyHash / the supersede mechanism.
+// ---------------------------------------------------------------
+model UsageRecord {
+  id                     BigInt    @id @default(autoincrement()) @map("id")
+
+  stableRowHash          String    @map("stable_row_hash") @db.Char(64)
+  chargeKeyHash          String    @map("charge_key_hash") @db.Char(64)
+  isDuplicateOfEarlierRow Boolean  @default(false) @map("is_duplicate_of_earlier_row")
+  isSupersededByLaterRow Boolean   @default(false) @map("is_superseded_by_later_row")
+
+  usageDate              DateTime  @map("usage_date") @db.Date
+  usageMonth             String    @map("usage_month") @db.Char(7)
+  chargePeriodStart      DateTime? @map("charge_period_start")
+  chargePeriodEnd        DateTime? @map("charge_period_end")
+
+  // Immutable ID only — never fall back to subscriptionName here.
+  subscriptionId         String    @map("subscription_id") @db.NVarChar(191)
+  subscriptionName       String?   @map("subscription_name") @db.NVarChar(255)
+
+  // Nullable: FOCUS allows ResourceId to be null for charges not tied
+  // to a resource (Purchases, Tax, some Adjustments).
+  resourceId             String?   @map("resource_id") @db.NVarChar(300)
+  resourceIdHash         String?   @map("resource_id_hash") @db.Char(64)
+  resourceName           String?   @map("resource_name") @db.NVarChar(255)
+  resourceGroup          String?   @map("resource_group") @db.NVarChar(255)
+
+  service                String    @map("service") @db.NVarChar(255)
+
+  meterId                String?   @map("meter_id") @db.NVarChar(191)
+  meterName              String?   @map("meter_name") @db.NVarChar(255)
+  meterCategory          String?   @map("meter_category") @db.NVarChar(255)
+  meterSubCategory       String?   @map("meter_sub_category") @db.NVarChar(255)
+
+  consumedQuantity       Decimal?  @map("consumed_quantity") @db.Decimal(24, 6)
+  consumedUnit           String?   @map("consumed_unit") @db.NVarChar(64)
+  pricingQuantity        Decimal?  @map("pricing_quantity") @db.Decimal(24, 6)
+  pricingUnit            String?   @map("pricing_unit") @db.NVarChar(64)
+
+  billedCost             Decimal   @map("billed_cost") @db.Decimal(18, 6)
+  effectiveCost          Decimal   @map("effective_cost") @db.Decimal(18, 6)
+  billingCurrency        String    @default("INR") @map("billing_currency") @db.NVarChar(8)
+
+  chargeType             String?   @map("charge_type") @db.NVarChar(64)
+  chargeClass            String?   @map("charge_class") @db.NVarChar(32)
+  region                 String?   @map("region") @db.NVarChar(128)
+  pricingModel           String?   @map("pricing_model") @db.NVarChar(64)
+  isCreditEligible       Boolean?  @map("is_credit_eligible")
+
+  // JSON text, not a native Json column — see file header point 2.
+  tags                   String?   @map("tags") @db.NVarChar(Max)
+  tagsRaw                String?   @map("tags_raw") @db.NVarChar(2048)
+
+  isExcludedFromAlerts   Boolean   @default(false) @map("is_excluded_from_alerts")
+
+  ingestionRunId         BigInt?   @map("ingestion_run_id")
+  ingestionRun           IngestionRun? @relation(fields: [ingestionRunId], references: [id])
+
+  createdAt              DateTime  @default(now()) @map("created_at")
+
+  @@index([stableRowHash], map: "usage_records_stable_hash_idx")
+  @@index([chargeKeyHash], map: "usage_records_charge_key_hash_idx")
+  @@index([usageDate, subscriptionId], map: "usage_records_date_sub_idx")
+  @@index([usageDate, service], map: "usage_records_date_service_idx")
+  @@index([usageDate, subscriptionId, resourceIdHash], map: "usage_records_date_resource_idx")
+  @@index([usageDate, subscriptionId, resourceIdHash, meterId, consumedUnit], map: "usage_records_date_meter_idx")
+  @@index([resourceIdHash, usageDate], map: "usage_records_resource_seen_idx")
+  @@index([usageMonth], map: "usage_records_usage_month_idx")
+  @@index([ingestionRunId], map: "usage_records_ingestion_run_idx")
+  @@map("usage_records")
+}
+
+// ---------------------------------------------------------------
+// report_runs — append-only log of every reporting pipeline run.
+// Same started/success/failed tracking as IngestionRun, same reason:
+// a failed refresh must never be mistaken for a completed one.
+// ---------------------------------------------------------------
+model ReportRun {
+  id                      Int      @id @default(autoincrement()) @map("id")
+  runStamp                String   @map("run_stamp") @db.NVarChar(32)
+
+  /// Allowed values: "started" | "success" | "failed".
+  status                  String   @default("started") @map("status") @db.NVarChar(16)
+
+  startedAt               DateTime @default(now()) @map("started_at")
+  completedAt             DateTime? @map("completed_at")
+  durationMs              Int?     @map("duration_ms")
+  dedupedRowCount          BigInt?  @map("deduped_row_count")
+
+  // JSON text (array of "YYYY-MM" strings) — not a native Json column.
+  monthsCovered           String?  @map("months_covered") @db.NVarChar(Max)
+
+  anomalyThresholdPercent Decimal? @map("anomaly_threshold_percent") @db.Decimal(6, 2)
+  anomalyRollingMonths    Int?     @map("anomaly_rolling_months")
+  errorMessage            String?  @map("error_message") @db.NVarChar(1024)
+  logText                 String?  @map("log_text") @db.NVarChar(Max)
+
+  @@index([runStamp], map: "report_runs_run_stamp_idx")
+  @@map("report_runs")
+}
+
+model ReportMonthlyTotals {
+  id           Int    @id @default(autoincrement()) @map("id")
+  reportRunId  Int    @map("report_run_id")
+  month        String @map("month") @db.Char(7)
+  totalCost    Decimal @map("total_cost") @db.Decimal(18, 2)
+
+  @@index([month], map: "report_monthly_totals_month_idx")
+  @@map("report_monthly_totals")
+}
+
+model ReportKpisByMonth {
+  id                    Int      @id @default(autoincrement()) @map("id")
+  reportRunId           Int      @map("report_run_id")
+  month                 String   @map("month") @db.Char(7)
+  totalCost             Decimal  @map("total_cost") @db.Decimal(18, 2)
+  topSubscription       String?  @map("top_subscription") @db.NVarChar(255)
+  topSubscriptionCost   Decimal? @map("top_subscription_cost") @db.Decimal(18, 2)
+  topService            String?  @map("top_service") @db.NVarChar(255)
+  topServiceCost        Decimal? @map("top_service_cost") @db.Decimal(18, 2)
+  subscriptions         Int      @default(0) @map("subscriptions")
+  resourceGroups        Int      @default(0) @map("resource_groups")
+
+  @@index([month], map: "report_kpis_by_month_month_idx")
+  @@map("report_kpis_by_month")
+}
+
+model ReportBySubscription {
+  id           Int     @id @default(autoincrement()) @map("id")
+  reportRunId  Int     @map("report_run_id")
+  month        String  @map("month") @db.Char(7)
+  subscription String  @map("subscription") @db.NVarChar(255)
+  cost         Decimal @map("cost") @db.Decimal(18, 2)
+
+  @@index([month], map: "report_by_subscription_month_idx")
+  @@map("report_by_subscription")
+}
+
+model ReportByResourceGroup {
+  id            Int     @id @default(autoincrement()) @map("id")
+  reportRunId   Int     @map("report_run_id")
+  month         String  @map("month") @db.Char(7)
+  resourceGroup String  @map("resource_group") @db.NVarChar(255)
+  subscription  String  @map("subscription") @db.NVarChar(255)
+  cost          Decimal @map("cost") @db.Decimal(18, 2)
+
+  @@index([month], map: "report_by_resource_group_month_idx")
+  @@map("report_by_resource_group")
+}
+
+model ReportByService {
+  id               Int     @id @default(autoincrement()) @map("id")
+  reportRunId      Int     @map("report_run_id")
+  month            String  @map("month") @db.Char(7)
+  consumedService  String  @map("consumed_service") @db.NVarChar(255)
+  cost             Decimal @map("cost") @db.Decimal(18, 2)
+
+  @@index([month], map: "report_by_service_month_idx")
+  @@map("report_by_service")
+}
+
+model ReportByChargeType {
+  id           Int     @id @default(autoincrement()) @map("id")
+  reportRunId  Int     @map("report_run_id")
+  month        String  @map("month") @db.Char(7)
+  chargeType   String  @map("charge_type") @db.NVarChar(64)
+  cost         Decimal @map("cost") @db.Decimal(18, 2)
+
+  @@index([month], map: "report_by_charge_type_month_idx")
+  @@map("report_by_charge_type")
+}
+
+model ReportByRegion {
+  id           Int     @id @default(autoincrement()) @map("id")
+  reportRunId  Int     @map("report_run_id")
+  month        String  @map("month") @db.Char(7)
+  region       String  @map("region") @db.NVarChar(128)
+  cost         Decimal @map("cost") @db.Decimal(18, 2)
+
+  @@index([month], map: "report_by_region_month_idx")
+  @@map("report_by_region")
+}
+
+model ReportByPricingModel {
+  id            Int     @id @default(autoincrement()) @map("id")
+  reportRunId   Int     @map("report_run_id")
+  month         String  @map("month") @db.Char(7)
+  pricingModel  String  @map("pricing_model") @db.NVarChar(64)
+  cost          Decimal @map("cost") @db.Decimal(18, 2)
+
+  @@index([month], map: "report_by_pricing_model_month_idx")
+  @@map("report_by_pricing_model")
+}
+
+model ReportCreditEligibility {
+  id             Int     @id @default(autoincrement()) @map("id")
+  reportRunId    Int     @map("report_run_id")
+  month          String  @map("month") @db.Char(7)
+  creditEligible String  @map("credit_eligible") @db.NVarChar(16)
+  cost           Decimal @map("cost") @db.Decimal(18, 2)
+
+  @@index([month], map: "report_credit_eligibility_month_idx")
+  @@map("report_credit_eligibility")
+}
+
+model ReportTopMeters {
+  id             Int     @id @default(autoincrement()) @map("id")
+  reportRunId    Int     @map("report_run_id")
+  month          String  @map("month") @db.Char(7)
+  meter          String  @map("meter") @db.NVarChar(255)
+  category       String  @map("category") @db.NVarChar(255)
+  service        String  @map("service") @db.NVarChar(255)
+  resourceGroup  String  @map("resource_group") @db.NVarChar(255)
+  cost           Decimal @map("cost") @db.Decimal(18, 2)
+
+  @@index([month], map: "report_top_meters_month_idx")
+  @@map("report_top_meters")
+}
+
+model ReportMomChange {
+  id                 Int      @id @default(autoincrement()) @map("id")
+  reportRunId        Int      @map("report_run_id")
+  month              String   @map("month") @db.Char(7)
+  totalCost          Decimal  @map("total_cost") @db.Decimal(18, 2)
+  previousMonthCost  Decimal? @map("previous_month_cost") @db.Decimal(18, 2)
+  momPercentChange   Decimal? @map("mom_percent_change") @db.Decimal(10, 2)
+
+  @@index([month], map: "report_mom_change_month_idx")
+  @@map("report_mom_change")
+}
+
+model ReportCostConcentrationPareto {
+  id                  Int     @id @default(autoincrement()) @map("id")
+  reportRunId         Int     @map("report_run_id")
+  service             String  @map("service") @db.NVarChar(255)
+  totalCost           Decimal @map("total_cost") @db.Decimal(18, 2)
+  percentOfTotal      Decimal @map("percent_of_total") @db.Decimal(6, 2)
+  cumulativePercent   Decimal @map("cumulative_percent") @db.Decimal(6, 2)
+  rank                Int     @map("rank")
+
+  @@map("report_cost_concentration_pareto")
+}
+
+model ReportAnomalyFlags {
+  id                 Int      @id @default(autoincrement()) @map("id")
+  reportRunId        Int      @map("report_run_id")
+  month              String   @map("month") @db.Char(7)
+  totalCost          Decimal  @map("total_cost") @db.Decimal(18, 2)
+  rollingAvg         Decimal? @map("rolling_avg") @db.Decimal(18, 2)
+  differencePercent  Decimal? @map("difference_percent") @db.Decimal(10, 2)
+  thresholdPercent   Decimal  @map("threshold_percent") @db.Decimal(6, 2)
+  isAnomaly          Boolean  @default(false) @map("is_anomaly")
+
+  @@index([month], map: "report_anomaly_flags_month_idx")
+  @@map("report_anomaly_flags")
+}
+
+model ReportNewServicesByMonth {
+  id           Int    @id @default(autoincrement()) @map("id")
+  reportRunId  Int    @map("report_run_id")
+  month        String @map("month") @db.Char(7)
+  newService   String @map("new_service") @db.NVarChar(255)
+
+  @@index([month], map: "report_new_services_by_month_month_idx")
+  @@map("report_new_services_by_month")
+}
+
+model ReportForecastNextMonth {
+  id                    Int     @id @default(autoincrement()) @map("id")
+  reportRunId           Int     @map("report_run_id")
+  method                String  @map("method") @db.NVarChar(64)
+  forecastedTotalCost   Decimal @map("forecasted_total_cost") @db.Decimal(18, 2)
+
+  @@map("report_forecast_next_month")
+}
+
+model ReportVolatility {
+  id                              Int     @id @default(autoincrement()) @map("id")
+  reportRunId                     Int     @map("report_run_id")
+  service                         String  @map("service") @db.NVarChar(255)
+  mean                            Decimal @map("mean") @db.Decimal(18, 2)
+  stdDev                          Decimal @map("std_dev") @db.Decimal(18, 2)
+  coefficientOfVariationPercent   Decimal @map("coefficient_of_variation_percent") @db.Decimal(10, 1)
+
+  @@map("report_volatility")
+}
+
+model ReportTopResources {
+  id             Int     @id @default(autoincrement()) @map("id")
+  reportRunId    Int     @map("report_run_id")
+  month          String  @map("month") @db.Char(7)
+  resourceName   String  @map("resource_name") @db.NVarChar(255)
+  resourceGroup  String  @map("resource_group") @db.NVarChar(255)
+  service        String  @map("service") @db.NVarChar(255)
+  cost           Decimal @map("cost") @db.Decimal(18, 2)
+
+  @@index([month], map: "report_top_resources_month_idx")
+  @@map("report_top_resources")
+}

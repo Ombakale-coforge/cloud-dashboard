@@ -1,0 +1,19 @@
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: prisma-shadow-sqlserver
+    restart: unless-stopped
+
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "YourStrongPassword123!"
+
+    ports:
+      - "11433:1433"
+
+    volumes:
+      - prisma_shadow_data:/var/opt/mssql
+
+volumes:
+  prisma_shadow_data:
+
