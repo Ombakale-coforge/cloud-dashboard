@@ -4,6 +4,7 @@ import { Navbar, type Provider, type AccountOption } from "@/components/Navbar";
 import { Sidebar } from "@/components/Sidebar";
 import { KpiCards } from "@/components/KpiCards";
 import { DataTables } from "@/components/DataTables";
+import { OrganizationGovernanceSection } from "@/components/OrganizationGovernanceSection";
 import { ChartsSection } from "@/components/ChartsSection";
 import { AzureDashboard } from "@/components/azure/AzureDashboard";
 import { useCsv } from "@/lib/useCsv";
@@ -241,7 +242,9 @@ export default function App() {
                                 <KpiCards selectedMonth={selectedMonth} basePath={awsBasePath} />
                                 <ChartsSection selectedMonth={selectedMonth} basePath={awsBasePath} />
                                 <DataTables selectedMonth={selectedMonth} basePath={awsBasePath} />
+                                <OrganizationGovernanceSection selectedMonth={selectedMonth} basePath={awsBasePath} />
                             </>
+
                         ) : (
                             <AzureDashboard selectedMonth={selectedMonth} basePath={azureBasePath} />
                         )}

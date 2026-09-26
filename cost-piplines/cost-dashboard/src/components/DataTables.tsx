@@ -10,8 +10,8 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { useCsv } from "@/lib/useCsv";
-import type { ServiceCost, LinkedAccountCostWide, RecurringRow } from "@/lib/types";
-import { Search, ChevronLeft, ChevronRight, Building2 } from "lucide-react";
+import type { ServiceCost, RecurringRow } from "@/lib/types";
+import { Search, ChevronLeft, ChevronRight } from "lucide-react";
 
 interface DataTablesProps {
   selectedMonth: string;
@@ -23,20 +23,12 @@ export function DataTables({ selectedMonth, basePath = "/data" }: DataTablesProp
   const { data: services } = useCsv<ServiceCost>(
     `${basePath}/latest_month_services.csv`,
   );
-  const { data: accountVariances } = useCsv<any>(
-    `${basePath}/account_cost_variance.csv`,
-  );
   const { data: recurring } = useCsv<RecurringRow>(
     `${basePath}/recurring_vs_onetime.csv`,
   );
 
   // Wide service costs containing full 6 months history
   const { data: wideServices } = useCsv<any>(`${basePath}/cost_by_service_wide.csv`);
-
-  // Wide linked-account costs containing full month history
-  const { data: wideAccounts } = useCsv<LinkedAccountCostWide>(
-    `${basePath}/cost_by_linked_account_wide.csv`,
-  );
 
   // Determine sorted months list from wide CSV
   const sortedMonths = useMemo(() => {
@@ -50,24 +42,6 @@ export function DataTables({ selectedMonth, basePath = "/data" }: DataTablesProp
     const idx = sortedMonths.indexOf(selectedMonth);
     return idx > 0 ? sortedMonths[idx - 1] : null;
   }, [sortedMonths, selectedMonth]);
-
-  // Account months come from the wide linked-account CSV columns
-  const accountMonths = useMemo(() => {
-    if (!wideAccounts || wideAccounts.length === 0) return [];
-    const first = wideAccounts[0];
-    if (!first) return [];
-    return Object.keys(first)
-      .filter((k) => k !== "Linked Account")
-      .filter((k) => /^\d{4}-\d{2}$/.test(k))
-      .sort();
-  }, [wideAccounts]);
-
-  // Previous account month relative to the selected month
-  const accountPrevMonth = useMemo(() => {
-    if (accountMonths.length === 0 || !selectedMonth) return null;
-    const idx = accountMonths.indexOf(selectedMonth);
-    return idx > 0 ? accountMonths[idx - 1] : null;
-  }, [accountMonths, selectedMonth]);
 
   // Dynamically compute the services and costs for the selected month and previous month from the wide CSV
   const serviceComparisons = useMemo(() => {
@@ -104,60 +78,12 @@ export function DataTables({ selectedMonth, basePath = "/data" }: DataTablesProp
     return list.sort((a, b) => b.CurrentCost - a.CurrentCost || b.PreviousCost - a.PreviousCost);
   }, [services, wideServices, selectedMonth, prevMonth]);
 
-  // Active accounts for the selected month (from wide CSV), falling back to the
-  // 2-month variance snapshot only when the wide CSV has not been generated yet.
-  const accountComparisons = useMemo(() => {
-    const hasWide = wideAccounts && wideAccounts.length > 0;
-
-    if (hasWide && selectedMonth && accountMonths.includes(selectedMonth)) {
-      return wideAccounts
-        .map((a) => {
-          const currentCost = Number(a[selectedMonth] || 0);
-          const previousCost = accountPrevMonth ? Number(a[accountPrevMonth] || 0) : 0;
-          return {
-            Account: String(a["Linked Account"] ?? ""),
-            CurrentCost: isNaN(currentCost) ? 0 : currentCost,
-            PreviousCost: isNaN(previousCost) ? 0 : previousCost,
-          };
-        })
-        .filter(
-          (a) => a.Account && (a.CurrentCost > 0 || a.PreviousCost > 0),
-        )
-        .sort(
-          (a, b) =>
-            b.CurrentCost - a.CurrentCost || b.PreviousCost - a.PreviousCost,
-        );
-    }
-
-    if (
-      !hasWide &&
-      accountVariances &&
-      accountVariances.length > 0
-    ) {
-      return accountVariances
-        .filter((a) => a && a["Linked Account"])
-        .map((a) => ({
-          Account: String(a["Linked Account"] ?? ""),
-          CurrentCost: Number(a["Curr Month Cost"] || 0),
-          PreviousCost: Number(a["Prev Month Cost"] || 0),
-        }))
-        .filter(
-          (a) => a.CurrentCost > 0 || a.PreviousCost > 0,
-        )
-        .sort((a, b) => b.CurrentCost - a.CurrentCost);
-    }
-
-    return [];
-  }, [wideAccounts, accountMonths, selectedMonth, accountPrevMonth, accountVariances]);
-
   // Search states
   const [searchServices, setSearchServices] = useState("");
-  const [searchAccounts, setSearchAccounts] = useState("");
   const [searchRecurring, setSearchRecurring] = useState("");
 
   // Pagination states
   const [pageServices, setPageServices] = useState(1);
-  const [pageAccounts, setPageAccounts] = useState(1);
   const [pageRecurring, setPageRecurring] = useState(1);
 
   const ITEMS_PER_PAGE = 8;
@@ -172,17 +98,7 @@ export function DataTables({ selectedMonth, basePath = "/data" }: DataTablesProp
     pageServices * ITEMS_PER_PAGE
   );
 
-  // Filter & Paginate 2: Accounts
-  const filteredAccounts = accountComparisons.filter((a) =>
-    a && a.Account && String(a.Account).toLowerCase().includes(searchAccounts.toLowerCase())
-  );
-  const totalPagesAccounts = Math.ceil(filteredAccounts.length / ITEMS_PER_PAGE);
-  const paginatedAccounts = filteredAccounts.slice(
-    (pageAccounts - 1) * ITEMS_PER_PAGE,
-    pageAccounts * ITEMS_PER_PAGE
-  );
-
-  // Filter & Paginate 3: Service Usage Frequency
+  // Filter & Paginate 2: Service Usage Frequency
   const filteredRecurring = (recurring || []).filter((r) =>
     r && r.Service && String(r.Service).toLowerCase().includes(searchRecurring.toLowerCase())
   );
@@ -196,10 +112,6 @@ export function DataTables({ selectedMonth, basePath = "/data" }: DataTablesProp
   const handleSearchServices = (val: string) => {
     setSearchServices(val);
     setPageServices(1);
-  };
-  const handleSearchAccounts = (val: string) => {
-    setSearchAccounts(val);
-    setPageAccounts(1);
   };
   const handleSearchRecurring = (val: string) => {
     setSearchRecurring(val);
@@ -229,7 +141,7 @@ export function DataTables({ selectedMonth, basePath = "/data" }: DataTablesProp
   };
 
   return (
-    <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+    <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
       {/* Cost by Service */}
       <Card className="flex flex-col h-full border border-muted/40 shadow-sm bg-card/60 backdrop-blur-md">
         <CardHeader className="pb-3">
@@ -303,7 +215,7 @@ export function DataTables({ selectedMonth, basePath = "/data" }: DataTablesProp
               <button
                 onClick={() => setPageServices((p) => Math.max(1, p - 1))}
                 disabled={pageServices === 1}
-                className="p-1 rounded border border-muted/30 hover:bg-muted/50 disabled:opacity-40 transition-colors"
+                className="p-1 rounded border border-muted/30 hover:bg-muted/50 disabled:opacity-40 transition-colors cursor-pointer"
               >
                 <ChevronLeft size={16} />
               </button>
@@ -313,116 +225,12 @@ export function DataTables({ selectedMonth, basePath = "/data" }: DataTablesProp
               <button
                 onClick={() => setPageServices((p) => Math.min(totalPagesServices, p + 1))}
                 disabled={pageServices === totalPagesServices || totalPagesServices === 0}
-                className="p-1 rounded border border-muted/30 hover:bg-muted/50 disabled:opacity-40 transition-colors"
+                className="p-1 rounded border border-muted/30 hover:bg-muted/50 disabled:opacity-40 transition-colors cursor-pointer"
               >
                 <ChevronRight size={16} />
               </button>
             </div>
           </div>
-        </CardContent>
-      </Card>
-
-      {/* Cost by Linked Account */}
-      <Card className="flex flex-col h-full border border-muted/40 shadow-sm bg-card/60 backdrop-blur-md">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-lg font-semibold tracking-tight">
-            Cost by Linked Account ({selectedMonth ? formatMonthName(selectedMonth) : "Latest Month"})
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col flex-1 pb-4">
-          {accountComparisons.length === 0 ? (
-            <div className="flex flex-col items-center justify-center min-h-[410px] text-center p-6 text-muted-foreground">
-              <Building2 className="h-10 w-10 text-muted-foreground/30 mb-2" />
-              <p className="text-sm font-semibold text-foreground">No account data for this month</p>
-              <p className="text-xs max-w-[200px] mt-1.5 leading-relaxed">
-                No linked account breakdowns are available for the selected period.
-              </p>
-            </div>
-          ) : (
-            <>
-              {/* Search Input */}
-              <div className="relative mb-3">
-                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                <input
-                  type="text"
-                  placeholder="Search accounts..."
-                  value={searchAccounts}
-                  onChange={(e) => handleSearchAccounts(e.target.value)}
-                  className="w-full bg-background pl-8 pr-3 py-1.5 text-sm rounded-md border border-input focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-indigo-500/50"
-                />
-              </div>
-
-              {/* Table Container */}
-              <div className="flex-1 min-h-[360px]">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="max-w-[200px]">Account</TableHead>
-                      <TableHead className="text-right whitespace-nowrap w-[100px]">
-                        {accountPrevMonth ? formatShortMonthName(accountPrevMonth) : "Prev"}
-                      </TableHead>
-                      <TableHead className="text-right whitespace-nowrap w-[100px]">
-                        {selectedMonth ? formatShortMonthName(selectedMonth) : "Curr"}
-                      </TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {paginatedAccounts.length > 0 ? (
-                      paginatedAccounts.map((a, i) => (
-                        <TableRow key={i} className="hover:bg-muted/30">
-                          <TableCell className="max-w-[200px] truncate font-medium py-2.5 text-xs" title={a.Account}>
-                            {a.Account}
-                          </TableCell>
-                          <TableCell className="text-right whitespace-nowrap w-[100px] py-2.5 text-muted-foreground text-xs font-medium">
-                            ${a.PreviousCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </TableCell>
-                          <TableCell className="text-right font-semibold whitespace-nowrap w-[100px] py-2.5 text-xs">
-                            ${a.CurrentCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </TableCell>
-                        </TableRow>
-                      ))
-                    ) : (
-                      <TableRow>
-                        <TableCell colSpan={3} className="text-center text-muted-foreground py-8">
-                          No accounts found
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
-
-              {/* Pagination Controls */}
-              <div className="flex items-center justify-between mt-4 pt-3 border-t border-muted/30">
-                <div className="text-xs text-muted-foreground">
-                  {filteredAccounts.length > 0 ? (
-                    `Showing ${(pageAccounts - 1) * ITEMS_PER_PAGE + 1}-${Math.min(pageAccounts * ITEMS_PER_PAGE, filteredAccounts.length)} of ${filteredAccounts.length}`
-                  ) : (
-                    "0-0 of 0"
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setPageAccounts((p) => Math.max(1, p - 1))}
-                    disabled={pageAccounts === 1}
-                    className="p-1 rounded border border-muted/30 hover:bg-muted/50 disabled:opacity-40 transition-colors"
-                  >
-                    <ChevronLeft size={16} />
-                  </button>
-                  <span className="text-xs font-medium min-w-[32px] text-center">
-                    {pageAccounts} / {totalPagesAccounts || 1}
-                  </span>
-                  <button
-                    onClick={() => setPageAccounts((p) => Math.min(totalPagesAccounts, p + 1))}
-                    disabled={pageAccounts === totalPagesAccounts || totalPagesAccounts === 0}
-                    className="p-1 rounded border border-muted/30 hover:bg-muted/50 disabled:opacity-40 transition-colors"
-                  >
-                    <ChevronRight size={16} />
-                  </button>
-                </div>
-              </div>
-            </>
-          )}
         </CardContent>
       </Card>
 
@@ -469,10 +277,10 @@ export function DataTables({ selectedMonth, basePath = "/data" }: DataTablesProp
                           variant="secondary"
                           className={`font-semibold text-xs px-2 py-0.5 border ${
                             r.Classification === "Recurring"
-                              ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                              ? "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300"
                               : r.Classification === "Occasional"
-                                ? "bg-amber-50 text-amber-700 border-amber-200"
-                                : "bg-slate-50 text-slate-600 border-slate-200"
+                                ? "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300"
+                                : "bg-slate-50 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-300"
                           }`}
                         >
                           {r.Classification}
@@ -504,7 +312,7 @@ export function DataTables({ selectedMonth, basePath = "/data" }: DataTablesProp
               <button
                 onClick={() => setPageRecurring((p) => Math.max(1, p - 1))}
                 disabled={pageRecurring === 1}
-                className="p-1 rounded border border-muted/30 hover:bg-muted/50 disabled:opacity-40 transition-colors"
+                className="p-1 rounded border border-muted/30 hover:bg-muted/50 disabled:opacity-40 transition-colors cursor-pointer"
               >
                 <ChevronLeft size={16} />
               </button>
@@ -514,7 +322,7 @@ export function DataTables({ selectedMonth, basePath = "/data" }: DataTablesProp
               <button
                 onClick={() => setPageRecurring((p) => Math.min(totalPagesRecurring, p + 1))}
                 disabled={pageRecurring === totalPagesRecurring || totalPagesRecurring === 0}
-                className="p-1 rounded border border-muted/30 hover:bg-muted/50 disabled:opacity-40 transition-colors"
+                className="p-1 rounded border border-muted/30 hover:bg-muted/50 disabled:opacity-40 transition-colors cursor-pointer"
               >
                 <ChevronRight size={16} />
               </button>
@@ -525,3 +333,4 @@ export function DataTables({ selectedMonth, basePath = "/data" }: DataTablesProp
     </div>
   );
 }
+

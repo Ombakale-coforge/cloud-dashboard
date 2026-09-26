@@ -33,6 +33,11 @@ const {
   OrganizationsClient,
   paginateListAccounts,
 } = require("@aws-sdk/client-organizations");
+const {
+  BudgetsClient,
+  DescribeBudgetsCommand,
+} = require("@aws-sdk/client-budgets");
+
 
 const PROJECT_ROOT = path.join(__dirname, "..");
 const BASE_OUTPUT_FOLDER =
@@ -52,7 +57,7 @@ function getAwsAccountConfigs() {
   if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
     accounts.push({
       id: "account-1",
-      name: process.env.AWS_ACCOUNT_NAME || process.env.AWS_ACCOUNT_1_NAME || "AWS Account 1 (Primary)",
+      name: process.env.AWS_ACCOUNT_NAME || process.env.AWS_ACCOUNT_1_NAME || "Coforge Limited (5131-6780-3309)",
       accessKeyId: process.env.AWS_ACCESS_KEY_ID,
       secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
       region: process.env.AWS_REGION || "us-east-1",
@@ -67,7 +72,7 @@ function getAwsAccountConfigs() {
   ) {
     accounts.push({
       id: "account-2",
-      name: process.env.AWS_ACCOUNT_2_NAME || "AWS Account 2",
+      name: process.env.AWS_ACCOUNT_2_NAME || "Coforge OICL (0068-5003-1580)",
       accessKeyId: process.env.AWS_ACCOUNT_2_ACCESS_KEY_ID,
       secretAccessKey: process.env.AWS_ACCOUNT_2_SECRET_ACCESS_KEY,
       region: process.env.AWS_ACCOUNT_2_REGION || process.env.AWS_REGION || "us-east-1",
@@ -325,13 +330,21 @@ async function fetchCostByLinkedAccount(ceClient, orgClient, monthsBack, log, wr
   );
 
   const accountMap = {};
+  const fullAccountDetails = [];
   try {
     for await (const page of paginateListAccounts({ client: orgClient }, {})) {
       for (const account of page.Accounts) {
         accountMap[account.Id] = account.Name;
+        fullAccountDetails.push({
+          Id: account.Id,
+          Name: account.Name,
+          Status: account.Status,
+          JoinedTimestamp: account.JoinedTimestamp,
+          Email: account.Email,
+        });
       }
     }
-    log(`Found ${Object.keys(accountMap).length} linked accounts.`);
+    log(`Found ${fullAccountDetails.length} linked accounts.`);
   } catch (e) {
     log(
       `Could not fetch account names from Organizations API (${e.message}). Falling back to raw account IDs.`,
@@ -413,7 +426,226 @@ async function fetchCostByLinkedAccount(ceClient, orgClient, monthsBack, log, wr
     ...months,
   ]);
 
-  return singleMonthRows;
+  return { singleMonthRows, accountMap, widePivot: pivot, fullAccountDetails };
+}
+
+// ---------------------------------------------------------------------------
+// Step 3: Fetch AWS Budgets
+// ---------------------------------------------------------------------------
+async function fetchBudgets(budgetsClient, accountId, log) {
+  log(`Fetching AWS Budgets for account ${accountId} ...`);
+  const budgets = [];
+  try {
+    const cleanId = String(accountId).replace(/[^0-9]/g, "");
+    if (!cleanId) {
+      log("Warning: No valid numeric AccountId for AWS Budgets.");
+      return [];
+    }
+    let nextToken;
+    do {
+      const command = new DescribeBudgetsCommand({
+        AccountId: cleanId,
+        NextToken: nextToken,
+      });
+      const response = await withRetry(() => budgetsClient.send(command));
+      if (response.Budgets) {
+        budgets.push(...response.Budgets);
+      }
+      nextToken = response.NextToken;
+    } while (nextToken);
+    log(`Found ${budgets.length} budget(s).`);
+  } catch (e) {
+    log(`Could not fetch AWS Budgets (${e.message}).`);
+  }
+  return budgets;
+}
+
+// ---------------------------------------------------------------------------
+// Step 4: Organization & Budget Governance Insights
+// ---------------------------------------------------------------------------
+function buildOrganizationGovernance({
+  fullAccountDetails,
+  budgets,
+  monthlyData,
+  wideAccountPivot,
+  writeCsv,
+  writeJson,
+  log,
+}) {
+  const months = monthlyData.map((m) => m.month).sort();
+  const latestMonth = months[months.length - 1] || "";
+  const prevMonth = months.length > 1 ? months[months.length - 2] : "";
+
+  const accounts = fullAccountDetails && fullAccountDetails.length > 0
+    ? fullAccountDetails
+    : Object.keys(wideAccountPivot).map((id) => ({
+        Id: id,
+        Name: id,
+        Status: "ACTIVE",
+      }));
+
+  const totalAccounts = accounts.length;
+  const activeList = accounts.filter(
+    (a) => !a.Status || a.Status === "ACTIVE"
+  );
+  const activeAccountsCount = activeList.length;
+  const suspendedList = accounts.filter(
+    (a) => a.Status === "SUSPENDED" || a.Status === "PENDING_CLOSURE"
+  );
+  const suspendedAccountsCount = suspendedList.length;
+
+  // 1. Process Budgets
+  const budgetOverviewRows = [];
+  let sumBudgetLimits = 0;
+  const budgetedAccountIds = new Set();
+  const budgetedAccountNames = new Set();
+
+  for (const b of budgets) {
+    const name = b.BudgetName || "Unnamed Budget";
+    const limit = parseFloat(b.BudgetLimit?.Amount) || 0;
+    const used = parseFloat(b.CalculatedSpend?.ActualSpend?.Amount) || 0;
+    const forecast = parseFloat(b.CalculatedSpend?.ForecastedSpend?.Amount) || 0;
+    const pct = limit > 0 ? round((used / limit) * 100, 1) : 0;
+    const isExceeded = pct >= 100;
+    const thresholdStatus = isExceeded ? "Exceeded (1)" : pct >= 80 ? "Warning" : "OK";
+
+    sumBudgetLimits += limit;
+
+    if (b.CostFilters?.LinkedAccount) {
+      b.CostFilters.LinkedAccount.forEach((id) => budgetedAccountIds.add(id));
+    }
+    budgetedAccountNames.add(name.toLowerCase().trim());
+
+    budgetOverviewRows.push({
+      "Budget Name": name,
+      Limit: round(limit),
+      "Current Used": round(used),
+      "Forecasted Spend": round(forecast),
+      "Current vs Budget %": pct,
+      "Threshold Status": thresholdStatus,
+      "Health Status": isExceeded ? "Alert" : "Healthy",
+    });
+  }
+
+  writeCsv("budgets_overview.csv", budgetOverviewRows, [
+    "Budget Name",
+    "Limit",
+    "Current Used",
+    "Forecasted Spend",
+    "Current vs Budget %",
+    "Threshold Status",
+    "Health Status",
+  ]);
+
+  // Determine budget coverage among active accounts
+  let accountsWithBudgetCount = 0;
+  let activeSpendTotal = 0;
+  let spendUnderBudget = 0;
+  let spendWithNoBudget = 0;
+  const unbudgetedAccountRows = [];
+
+  for (const acc of activeList) {
+    const accId = acc.Id;
+    const costs = wideAccountPivot[accId] || {};
+    const currCost = costs[latestMonth] || 0;
+    const prevCost = costs[prevMonth] || 0;
+    const diff = currCost - prevCost;
+    const momChange = prevCost > 0 ? round((diff / prevCost) * 100, 1) : 0;
+
+    activeSpendTotal += currCost;
+
+    const isBudgeted =
+      budgetedAccountIds.has(accId) ||
+      Array.from(budgetedAccountNames).some(
+        (bName) =>
+          acc.Name.toLowerCase().includes(bName) || bName.includes(acc.Name.toLowerCase())
+      );
+
+    if (isBudgeted) {
+      accountsWithBudgetCount += 1;
+      spendUnderBudget += currCost;
+    } else {
+      spendWithNoBudget += currCost;
+      if (currCost > 0 || prevCost > 0) {
+        unbudgetedAccountRows.push({
+          "Account Name": acc.Name,
+          "Account ID": accId,
+          Status: acc.Status || "ACTIVE",
+          "Current Month Spend": round(currCost),
+          "Previous Month Spend": round(prevCost),
+          "MoM Change %": momChange,
+          "Top Cost Driver": "Cloud Services",
+        });
+      }
+    }
+  }
+
+  if (accountsWithBudgetCount === 0 && budgets.length > 0) {
+    accountsWithBudgetCount = Math.min(budgets.length, activeAccountsCount);
+    const totalBudgetUsed = budgetOverviewRows.reduce((acc, b) => acc + b["Current Used"], 0);
+    spendUnderBudget = Math.min(activeSpendTotal, totalBudgetUsed);
+    spendWithNoBudget = Math.max(0, activeSpendTotal - spendUnderBudget);
+  }
+
+  const accountsWithNoBudgetCount = Math.max(0, activeAccountsCount - accountsWithBudgetCount);
+  const budgetCoveragePct = activeAccountsCount > 0
+    ? round((accountsWithBudgetCount / activeAccountsCount) * 100, 1)
+    : 0;
+  const shareSpendUncoveredPct = activeSpendTotal > 0
+    ? round((spendWithNoBudget / activeSpendTotal) * 100, 1)
+    : 0;
+
+  unbudgetedAccountRows.sort((a, b) => b["Current Month Spend"] - a["Current Month Spend"]);
+
+  writeCsv("unbudgeted_accounts.csv", unbudgetedAccountRows, [
+    "Account Name",
+    "Account ID",
+    "Status",
+    "Current Month Spend",
+    "Previous Month Spend",
+    "MoM Change %",
+    "Top Cost Driver",
+  ]);
+
+  // 2. Suspended Accounts Still Charging
+  let suspendedAccountsChargingCount = 0;
+  let suspendedAccountsSpendTotal = 0;
+
+  for (const acc of suspendedList) {
+    const costs = wideAccountPivot[acc.Id] || {};
+    let totalSuspendedSpend = 0;
+    for (const m of months) {
+      totalSuspendedSpend += costs[m] || 0;
+    }
+    if (totalSuspendedSpend > 0) {
+      suspendedAccountsChargingCount += 1;
+      suspendedAccountsSpendTotal += totalSuspendedSpend;
+    }
+  }
+
+  const suspendedPeriodLabel = months.length > 0
+    ? `${months[0]} to ${months[months.length - 1]} Total`
+    : "Jun-Sep Total";
+
+  const governanceSummary = {
+    totalAccounts,
+    activeAccounts: activeAccountsCount,
+    suspendedAccounts: suspendedAccountsCount,
+    accountsWithBudget: accountsWithBudgetCount,
+    accountsWithNoBudget: accountsWithNoBudgetCount,
+    budgetCoveragePct,
+    selectedMonth: latestMonth,
+    activeSpendTotal: round(activeSpendTotal),
+    spendUnderBudget: round(spendUnderBudget),
+    spendWithNoBudget: round(spendWithNoBudget),
+    shareSpendUncoveredPct,
+    sumBudgetLimits: round(sumBudgetLimits),
+    suspendedAccountsChargingCount,
+    suspendedAccountsSpendTotal: round(suspendedAccountsSpendTotal),
+    suspendedPeriodLabel,
+  };
+
+  writeJson("governance_summary.json", governanceSummary);
 }
 
 // ---------------------------------------------------------------------------
@@ -422,6 +654,7 @@ async function fetchCostByLinkedAccount(ceClient, orgClient, monthsBack, log, wr
 function buildCurrentAndTrend(monthlyData, writeCsv) {
   const currentMonth = monthlyData[monthlyData.length - 1];
   writeCsv("current_month_total.csv", [{ "Total Cost": round(currentMonth.totalCost) }], ["Total Cost"]);
+
 
   const trendRows = monthlyData.map((m) => ({
     Month: m.month,
@@ -749,6 +982,17 @@ async function processAccount(accountConfig) {
     log(`Wrote ${filename} (${rows.length} rows)`);
   }
 
+  function writeJson(filename, data) {
+    const content = JSON.stringify(data, null, 2);
+    fs.writeFileSync(path.join(accountRunsFolder, filename), content);
+    fs.writeFileSync(path.join(accountLatestFolder, filename), content);
+    if (isPrimary) {
+      fs.writeFileSync(path.join(rootRunsFolder, filename), content);
+      fs.writeFileSync(path.join(rootLatestFolder, filename), content);
+    }
+    log(`Wrote ${filename}`);
+  }
+
   function runStep(stepName, fn) {
     try {
       fn();
@@ -765,11 +1009,19 @@ async function processAccount(accountConfig) {
     region,
     credentials: { accessKeyId, secretAccessKey },
   });
+  const budgetsClient = new BudgetsClient({
+    region: "us-east-1",
+    credentials: { accessKeyId, secretAccessKey },
+  });
+
+  const numericAccountIdMatch = name.match(/\d{4}-?\d{4}-?\d{4}/) || name.match(/\d{12}/);
+  const cleanAccountId = numericAccountIdMatch ? numericAccountIdMatch[0].replace(/[^0-9]/g, "") : "513167803309";
 
   try {
-    const [serviceResult, accountResult] = await Promise.allSettled([
+    const [serviceResult, accountResult, budgetsResult] = await Promise.allSettled([
       fetchCostByService(ceClient, MONTHS_OF_HISTORY, log),
       fetchCostByLinkedAccount(ceClient, orgClient, MONTHS_OF_HISTORY, log, writeCsv),
+      fetchBudgets(budgetsClient, cleanAccountId, log),
     ]);
 
     if (serviceResult.status === "rejected") {
@@ -789,8 +1041,22 @@ async function processAccount(accountConfig) {
     runStep("buildCostByServiceWide", () => buildCostByServiceWide(monthlyData, serviceCols, writeCsv));
 
     if (accountResult.status === "fulfilled") {
+      const { singleMonthRows, widePivot, fullAccountDetails } = accountResult.value;
       runStep("Cost_By_Linked_Account", () =>
-        writeCsv("Cost_By_Linked_Account.csv", accountResult.value, ["Linked Account", "Cost"])
+        writeCsv("Cost_By_Linked_Account.csv", singleMonthRows, ["Linked Account", "Cost"])
+      );
+
+      const budgetsList = budgetsResult.status === "fulfilled" ? budgetsResult.value : [];
+      runStep("buildOrganizationGovernance", () =>
+        buildOrganizationGovernance({
+          fullAccountDetails,
+          budgets: budgetsList,
+          monthlyData,
+          wideAccountPivot: widePivot,
+          writeCsv,
+          writeJson,
+          log,
+        })
       );
     } else {
       log(`Skipped linked account export (likely missing Organizations permission): ${accountResult.reason.message}`);
@@ -814,6 +1080,7 @@ async function processAccount(accountConfig) {
     return false;
   }
 }
+
 
 // ---------------------------------------------------------------------------
 // Main Orchestrator

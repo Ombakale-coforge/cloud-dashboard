@@ -105,3 +105,45 @@ export interface AzureMomChange {
     "Previous Month Cost": number | string;
     "MoM % Change": number | string;
 }
+
+// ---------------------------------------------------------------------
+// AWS Governance & Budgets types
+// ---------------------------------------------------------------------
+export interface GovernanceSummary {
+    totalAccounts: number;
+    activeAccounts: number;
+    suspendedAccounts: number;
+    accountsWithBudget: number;
+    accountsWithNoBudget: number;
+    budgetCoveragePct: number;
+    selectedMonth: string;
+    activeSpendTotal: number;
+    spendUnderBudget: number;
+    spendWithNoBudget: number;
+    shareSpendUncoveredPct: number;
+    sumBudgetLimits: number;
+    suspendedAccountsChargingCount: number;
+    suspendedAccountsSpendTotal: number;
+    suspendedPeriodLabel: string;
+}
+
+export interface UnbudgetedAccountRow {
+    "Account Name": string;
+    "Account ID": string;
+    Status: string;
+    "Current Month Spend": number;
+    "Previous Month Spend": number;
+    "MoM Change %": number | string;
+    "Top Cost Driver": string;
+}
+
+export interface BudgetOverviewRow {
+    "Budget Name": string;
+    "Limit": number;
+    "Current Used": number;
+    "Forecasted Spend": number;
+    "Current vs Budget %": number;
+    "Threshold Status": string;
+    "Health Status": string;
+}
+
