@@ -365,3 +365,646 @@ model ReportTopResources {
   @@index([month], map: "report_top_resources_month_idx")
   @@map("report_top_resources")
 }
+
+// =====================================================================
+// =====================================================================
+// DASHBOARD APP — users, sessions, login audit, account requests
+// -------------------------------------------------------------------
+// Added 2026-09-27. Replaces the two JSON documents the React app keeps
+// in Cloudflare R2 (user.json and accound_request.json). Everything
+// above this line is the Azure FOCUS pipeline and is untouched.
+//
+// Conventions match the Azure section: snake_case @map, no native
+// enum (allowed values in /// comments, enforced in code), no native
+// Json (JSON text in NVarChar(Max)).
+//
+// SQL Server refuses a table that can be reached by more than one
+// cascading path (ON DELETE/UPDATE CASCADE or SET NULL). Every second
+// relation from a table back to `users` is therefore NoAction, and all
+// user relations use onUpdate: NoAction (Prisma's default for SQL
+// Server is ON UPDATE CASCADE, which would trip the same check).
+// =====================================================================
+
+model User {
+  id            Int       @id @default(autoincrement()) @map("id")
+
+  /// The old JSON `id` ("usr-<base36>"). Null for users created in SQL.
+  legacyId      String?   @unique(map: "users_legacy_id_unique") @map("legacy_id") @db.NVarChar(64)
+
+  name          String    @map("name") @db.NVarChar(255)
+  /// Stored trimmed + lower-cased. SQL Server's default collation is
+  /// case-insensitive so the unique index also catches mixed-case dupes.
+  email         String    @unique(map: "users_email_unique") @map("email") @db.NVarChar(320)
+
+  /// Never store the plaintext password the JSON file holds today.
+  /// The loader must hash on import; `passwordAlgo` records how.
+  passwordHash  String    @map("password_hash") @db.NVarChar(255)
+  passwordAlgo  String    @default("bcrypt") @map("password_algo") @db.NVarChar(32)
+
+  department    String?   @map("department") @db.NVarChar(255)
+  /// Allowed values: "admin" | "basic".
+  role          String    @default("basic") @map("role") @db.NVarChar(16)
+  /// Allowed values: "credentials" (only value written today).
+  provider      String    @default("credentials") @map("provider") @db.NVarChar(32)
+
+  isActive      Boolean   @default(true) @map("is_active")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at")
+  lastLoginAt   DateTime? @map("last_login_at")
+
+  sessions          UserSession[]
+  loginEvents       UserLoginEvent[]
+  submittedRequests AccountRequest[]              @relation("AccountRequestSubmitter")
+  reviewedRequests  AccountRequest[]              @relation("AccountRequestReviewer")
+  statusChanges     AccountRequestStatusHistory[]
+
+  @@index([role], map: "users_role_idx")
+  @@map("users")
+}
+
+// Server-side sessions. Store only a SHA-256 of the bearer token /
+// cookie value so a DB leak does not hand out live sessions.
+model UserSession {
+  id          Int       @id @default(autoincrement()) @map("id")
+  userId      Int       @map("user_id")
+  tokenHash   String    @unique(map: "user_sessions_token_hash_unique") @map("token_hash") @db.Char(64)
+  createdAt   DateTime  @default(now()) @map("created_at")
+  expiresAt   DateTime  @map("expires_at")
+  revokedAt   DateTime? @map("revoked_at")
+  ipAddress   String?   @map("ip_address") @db.NVarChar(64)
+  userAgent   String?   @map("user_agent") @db.NVarChar(512)
+
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([userId], map: "user_sessions_user_idx")
+  @@index([expiresAt], map: "user_sessions_expires_idx")
+  @@map("user_sessions")
+}
+
+// Append-only login audit. userId is null when the email was unknown.
+model UserLoginEvent {
+  id              Int      @id @default(autoincrement()) @map("id")
+  userId          Int?     @map("user_id")
+  emailAttempted  String   @map("email_attempted") @db.NVarChar(320)
+  /// Allowed values: "success" | "invalid_password" | "user_not_found"
+  /// | "inactive" | "invalid_admin_credentials".
+  outcome         String   @map("outcome") @db.NVarChar(32)
+  ipAddress       String?  @map("ip_address") @db.NVarChar(64)
+  userAgent       String?  @map("user_agent") @db.NVarChar(512)
+  occurredAt      DateTime @default(now()) @map("occurred_at")
+
+  user            User?    @relation(fields: [userId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([userId, occurredAt], map: "user_login_events_user_time_idx")
+  @@index([emailAttempted, occurredAt], map: "user_login_events_email_time_idx")
+  @@map("user_login_events")
+}
+
+// One row per cloud-account request submitted through /newrequest.
+// Column order follows the three wizard steps in AccountRequestForm.tsx.
+// The Yes/No strings the form sends become Boolean here.
+model AccountRequest {
+  id                      Int       @id @default(autoincrement()) @map("id")
+  /// The old JSON `id` ("req-<base36>"). Null for requests created in SQL.
+  legacyId                String?   @unique(map: "account_requests_legacy_id_unique") @map("legacy_id") @db.NVarChar(64)
+
+  // --- envelope / workflow ---
+  submittedAt             DateTime  @default(now()) @map("submitted_at")
+  submittedByUserId       Int?      @map("submitted_by_user_id")
+  submitterEmail          String    @map("submitter_email") @db.NVarChar(320)
+  submitterName           String?   @map("submitter_name") @db.NVarChar(255)
+  /// Allowed values: "pending" | "approved" | "rejected" | "under_review".
+  status                  String    @default("pending") @map("status") @db.NVarChar(16)
+  adminNotes              String?   @map("admin_notes") @db.NVarChar(Max)
+  reviewedByUserId        Int?      @map("reviewed_by_user_id")
+  /// Free-text fallback for the legacy "Admin" reviewer string.
+  reviewedByName          String?   @map("reviewed_by_name") @db.NVarChar(255)
+  reviewedAt              DateTime? @map("reviewed_at")
+
+  // --- step 1: project info ---
+  division                String    @map("division") @db.NVarChar(255)
+  projectName             String    @map("project_name") @db.NVarChar(255)
+  businessJustification   String?   @map("business_justification") @db.NVarChar(Max)
+  pointOfContact          String    @map("point_of_contact") @db.NVarChar(320)
+  accountManager          String    @map("account_manager") @db.NVarChar(320)
+
+  // --- step 2: account configuration ---
+  managedByCoforge        Boolean   @map("managed_by_coforge")
+  externalAudienceAccess  Boolean   @map("external_audience_access")
+  storesCustomerData      Boolean   @map("stores_customer_data")
+  customerDataDetails     String?   @map("customer_data_details") @db.NVarChar(Max)
+  storesConfidentialData  Boolean   @map("stores_confidential_data")
+
+  // --- step 3: financials ---
+  estimatedMonthlyCost    Decimal?  @map("estimated_monthly_cost") @db.Decimal(18, 2)
+  costChargedBack         Boolean   @map("cost_charged_back")
+  foreseenInBudget        Boolean   @map("foreseen_in_budget")
+  wbsCode                 String?   @map("wbs_code") @db.NVarChar(64)
+  costCenter              String?   @map("cost_center") @db.NVarChar(64)
+  awsPartnershipRelated   Boolean   @map("aws_partnership_related")
+  buFinanceController     String?   @map("bu_finance_controller") @db.NVarChar(320)
+
+  createdAt               DateTime  @default(now()) @map("created_at")
+  updatedAt               DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  submittedBy       User?  @relation("AccountRequestSubmitter", fields: [submittedByUserId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  reviewedBy        User?  @relation("AccountRequestReviewer", fields: [reviewedByUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  environments      AccountRequestEnvironment[]
+  adminEmails       AccountRequestAdminEmail[]
+  budgetAlertEmails AccountRequestBudgetAlertEmail[]
+  statusHistory     AccountRequestStatusHistory[]
+
+  @@index([status, submittedAt], map: "account_requests_status_submitted_idx")
+  @@index([submitterEmail], map: "account_requests_submitter_email_idx")
+  @@index([submittedByUserId], map: "account_requests_submitted_by_idx")
+  @@map("account_requests")
+}
+
+// Replaces the comma-joined `accountEnvironment` string
+// ("DEV, UAT, PROD"). Suggested values: DEV | UAT | PROD | PoC | Sandbox.
+model AccountRequestEnvironment {
+  id           Int    @id @default(autoincrement()) @map("id")
+  requestId    Int    @map("request_id")
+  environment  String @map("environment") @db.NVarChar(32)
+
+  request      AccountRequest @relation(fields: [requestId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([requestId, environment], map: "account_request_environments_unique")
+  @@map("account_request_environments")
+}
+
+// Replaces the `adminEmails` string[] (at least one required).
+model AccountRequestAdminEmail {
+  id         Int    @id @default(autoincrement()) @map("id")
+  requestId  Int    @map("request_id")
+  email      String @map("email") @db.NVarChar(320)
+
+  request    AccountRequest @relation(fields: [requestId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([requestId, email], map: "account_request_admin_emails_unique")
+  @@map("account_request_admin_emails")
+}
+
+// Replaces the `budgetAlertEmails` string[] (80% threshold list, max 4
+// enforced by the form, not the database).
+model AccountRequestBudgetAlertEmail {
+  id         Int    @id @default(autoincrement()) @map("id")
+  requestId  Int    @map("request_id")
+  email      String @map("email") @db.NVarChar(320)
+
+  request    AccountRequest @relation(fields: [requestId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([requestId, email], map: "account_request_budget_alert_emails_unique")
+  @@map("account_request_budget_alert_emails")
+}
+
+// Append-only trail of every status change. The JSON store only kept
+// the last status/notes/reviewer, so this is new information.
+model AccountRequestStatusHistory {
+  id               Int      @id @default(autoincrement()) @map("id")
+  requestId        Int      @map("request_id")
+  /// Null on the initial "pending" row.
+  fromStatus       String?  @map("from_status") @db.NVarChar(16)
+  toStatus         String   @map("to_status") @db.NVarChar(16)
+  note             String?  @map("note") @db.NVarChar(Max)
+  changedByUserId  Int?     @map("changed_by_user_id")
+  changedByName    String?  @map("changed_by_name") @db.NVarChar(255)
+  changedAt        DateTime @default(now()) @map("changed_at")
+
+  request          AccountRequest @relation(fields: [requestId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  changedBy        User?          @relation(fields: [changedByUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([requestId, changedAt], map: "account_request_status_history_request_time_idx")
+  @@map("account_request_status_history")
+}
+
+// =====================================================================
+// =====================================================================
+// AWS COST PIPELINE — report tables
+// -------------------------------------------------------------------
+// Added 2026-09-27. Mirrors every dataset src/aws_cost_pipeline.js
+// writes to AWSReports/, one table per file, keyed by aws_report_runs.
+// Same refresh strategy as the Azure report_* tables: each pipeline
+// run inserts a full new set of rows under its own run id; readers
+// pick the latest successful run per account.
+//
+// Differences from the CSV files, on purpose:
+//  - The two "wide" files (cost_by_service_wide.csv, one column per
+//    service; cost_by_linked_account_wide.csv, one column per month)
+//    are stored long: one row per (month, service) / (account, month).
+//  - Files that are pure projections of another file are not
+//    duplicated: Cost_By_Linked_Account.csv is aws_cost_by_linked_account
+//    filtered to the current month; latest_month_services.csv is
+//    aws_cost_by_service filtered to the current month with cost > 0.
+//  - Row order that carries meaning (top-10, Pareto) gets an explicit
+//    `rank` column.
+//  - CSV "" for "not applicable" (first-row MoM, first two anomaly rows)
+//    maps to NULL, never to 0.
+//  - No CSV carries the account identity (it lives in the folder path),
+//    so every run is tied to an aws_accounts row by the loader.
+// =====================================================================
+
+// The configured AWS credential slots (accounts.json): "account-1",
+// "account-2", ... Populated from env vars, not from AWS.
+model AwsAccount {
+  id             Int       @id @default(autoincrement()) @map("id")
+  /// "account-1" .. "account-10" — the folder name under AWSReports/accounts/.
+  configId       String    @unique(map: "aws_accounts_config_id_unique") @map("config_id") @db.NVarChar(32)
+  name           String    @map("name") @db.NVarChar(255)
+  /// 12-digit payer account id when known (scraped from the name today).
+  awsAccountId   String?   @map("aws_account_id") @db.Char(12)
+  region         String?   @map("region") @db.NVarChar(32)
+  isPrimary      Boolean   @default(false) @map("is_primary")
+  isActive       Boolean   @default(true) @map("is_active")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  reportRuns     AwsReportRun[]
+  linkedAccounts AwsLinkedAccount[]
+
+  @@map("aws_accounts")
+}
+
+// Directory of AWS Organizations member accounts seen under a payer.
+// Upserted each run from ListAccounts; first/last seen give history.
+model AwsLinkedAccount {
+  id               Int       @id @default(autoincrement()) @map("id")
+  accountId        Int       @map("account_id")
+  linkedAccountId  String    @map("linked_account_id") @db.Char(12)
+  name             String?   @map("name") @db.NVarChar(255)
+  /// AWS Organizations status: ACTIVE | SUSPENDED | PENDING_CLOSURE.
+  status           String?   @map("status") @db.NVarChar(32)
+  firstSeenAt      DateTime  @default(now()) @map("first_seen_at")
+  lastSeenAt       DateTime  @default(now()) @map("last_seen_at")
+
+  account          AwsAccount @relation(fields: [accountId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([accountId, linkedAccountId], map: "aws_linked_accounts_unique")
+  @@index([name], map: "aws_linked_accounts_name_idx")
+  @@map("aws_linked_accounts")
+}
+
+// One row per (pipeline run, configured account). RUN_STAMP is
+// generated per account in the pipeline, so two accounts in the same
+// process can have different stamps.
+model AwsReportRun {
+  id                    Int       @id @default(autoincrement()) @map("id")
+  accountId             Int       @map("account_id")
+  /// "YYYY-MM-DD-HH-mm-ss" (UTC), the AWSReports/runs/<stamp>/ folder.
+  runStamp              String    @map("run_stamp") @db.NVarChar(32)
+  /// Allowed values: "started" | "success" | "failed".
+  status                String    @default("started") @map("status") @db.NVarChar(16)
+
+  startedAt             DateTime  @default(now()) @map("started_at")
+  completedAt           DateTime? @map("completed_at")
+  durationMs            Int?      @map("duration_ms")
+
+  // Reporting window as passed to Cost Explorer (end is exclusive).
+  windowStart           DateTime? @map("window_start") @db.Date
+  windowEnd             DateTime? @map("window_end") @db.Date
+  monthsHistory         Int?      @map("months_history")
+  /// JSON text: array of "YYYY-MM" strings actually returned.
+  monthsCovered         String?   @map("months_covered") @db.NVarChar(Max)
+  /// The latest (partial) month bucket, "YYYY-MM".
+  currentMonth          String?   @map("current_month") @db.Char(7)
+
+  monthCount            Int?      @map("month_count")
+  serviceCount          Int?      @map("service_count")
+  linkedAccountCount    Int?      @map("linked_account_count")
+  budgetCount           Int?      @map("budget_count")
+
+  // Parameters that are hard-coded in the pipeline today.
+  anomalySigma          Decimal?  @map("anomaly_sigma") @db.Decimal(4, 2)
+  anomalyRollingMonths  Int?      @map("anomaly_rolling_months")
+  forecastMethod        String?   @map("forecast_method") @db.NVarChar(64)
+
+  errorMessage          String?   @map("error_message") @db.NVarChar(1024)
+  logText               String?   @map("log_text") @db.NVarChar(Max)
+
+  account               AwsAccount @relation(fields: [accountId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  steps                 AwsReportRunStep[]
+  monthlyTotals         AwsMonthlyTotal[]
+  costByService         AwsCostByService[]
+  topServices           AwsTopService[]
+  costByLinkedAccount   AwsCostByLinkedAccount[]
+  accountCostVariance   AwsAccountCostVariance[]
+  momChange             AwsMomChange[]
+  pareto                AwsParetoAnalysis[]
+  anomalyFlags          AwsAnomalyFlag[]
+  recurringVsOnetime    AwsRecurringVsOnetime[]
+  newServices           AwsNewServiceFlag[]
+  categoryMonthlyCosts  AwsCategoryMonthlyCost[]
+  forecasts             AwsForecast[]
+  serviceVolatility     AwsServiceVolatility[]
+  budgets               AwsBudgetOverview[]
+  unbudgetedAccounts    AwsUnbudgetedAccount[]
+  governanceSummary     AwsGovernanceSummary?
+
+  @@unique([accountId, runStamp], map: "aws_report_runs_account_stamp_unique")
+  @@index([runStamp], map: "aws_report_runs_run_stamp_idx")
+  @@index([accountId, status, completedAt], map: "aws_report_runs_latest_idx")
+  @@map("aws_report_runs")
+}
+
+// Per-step outcome. The pipeline's runStep() swallows exceptions and a
+// step can silently produce no file; this records which ones did.
+model AwsReportRunStep {
+  id            Int       @id @default(autoincrement()) @map("id")
+  reportRunId   Int       @map("report_run_id")
+  stepName      String    @map("step_name") @db.NVarChar(128)
+  /// Allowed values: "success" | "failed" | "skipped".
+  status        String    @map("status") @db.NVarChar(16)
+  startedAt     DateTime? @map("started_at")
+  completedAt   DateTime? @map("completed_at")
+  rowsWritten   Int?      @map("rows_written")
+  errorMessage  String?   @map("error_message") @db.NVarChar(1024)
+
+  reportRun     AwsReportRun @relation(fields: [reportRunId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([reportRunId], map: "aws_report_run_steps_run_idx")
+  @@map("aws_report_run_steps")
+}
+
+// monthly_totals_last_6_months.csv + current_month_total.csv
+// (the latter is the row where is_current_month = 1).
+model AwsMonthlyTotal {
+  id              Int     @id @default(autoincrement()) @map("id")
+  reportRunId     Int     @map("report_run_id")
+  month           String  @map("month") @db.Char(7)
+  totalCost       Decimal @map("total_cost") @db.Decimal(18, 2)
+  isCurrentMonth  Boolean @default(false) @map("is_current_month")
+
+  reportRun       AwsReportRun @relation(fields: [reportRunId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([reportRunId, month], map: "aws_monthly_totals_run_month_unique")
+  @@index([month], map: "aws_monthly_totals_month_idx")
+  @@map("aws_monthly_totals")
+}
+
+// cost_by_service_wide.csv unpivoted; also serves latest_month_services.csv.
+model AwsCostByService {
+  id           Int     @id @default(autoincrement()) @map("id")
+  reportRunId  Int     @map("report_run_id")
+  month        String  @map("month") @db.Char(7)
+  service      String  @map("service") @db.NVarChar(255)
+  cost         Decimal @map("cost") @db.Decimal(18, 2)
+
+  reportRun    AwsReportRun @relation(fields: [reportRunId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([reportRunId, month, service], map: "aws_cost_by_service_unique")
+  @@index([reportRunId, service], map: "aws_cost_by_service_run_service_idx")
+  @@index([month], map: "aws_cost_by_service_month_idx")
+  @@map("aws_cost_by_service")
+}
+
+// top_10_services.csv — current month, rank preserved.
+model AwsTopService {
+  id           Int     @id @default(autoincrement()) @map("id")
+  reportRunId  Int     @map("report_run_id")
+  month        String  @map("month") @db.Char(7)
+  rank         Int     @map("rank")
+  service      String  @map("service") @db.NVarChar(255)
+  cost         Decimal @map("cost") @db.Decimal(18, 2)
+
+  reportRun    AwsReportRun @relation(fields: [reportRunId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([reportRunId, rank], map: "aws_top_services_run_rank_unique")
+  @@map("aws_top_services")
+}
+
+// cost_by_linked_account_wide.csv unpivoted; Cost_By_Linked_Account.csv
+// is this table filtered to the current month.
+model AwsCostByLinkedAccount {
+  id             Int     @id @default(autoincrement()) @map("id")
+  reportRunId    Int     @map("report_run_id")
+  /// Org account name as Cost Explorer labels it (falls back to the id).
+  linkedAccount  String  @map("linked_account") @db.NVarChar(255)
+  month          String  @map("month") @db.Char(7)
+  cost           Decimal @map("cost") @db.Decimal(18, 2)
+
+  reportRun      AwsReportRun @relation(fields: [reportRunId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([reportRunId, linkedAccount, month], map: "aws_cost_by_linked_account_unique")
+  @@index([month], map: "aws_cost_by_linked_account_month_idx")
+  @@map("aws_cost_by_linked_account")
+}
+
+// account_cost_variance.csv — current vs previous month per linked account.
+model AwsAccountCostVariance {
+  id                Int     @id @default(autoincrement()) @map("id")
+  reportRunId       Int     @map("report_run_id")
+  linkedAccount     String  @map("linked_account") @db.NVarChar(255)
+  prevMonthCost     Decimal @map("prev_month_cost") @db.Decimal(18, 2)
+  currMonthCost     Decimal @map("curr_month_cost") @db.Decimal(18, 2)
+  difference        Decimal @map("difference") @db.Decimal(18, 2)
+  /// 0 (not NULL) when the previous month was 0 — matches the CSV.
+  percentageChange  Decimal @map("percentage_change") @db.Decimal(10, 2)
+
+  reportRun         AwsReportRun @relation(fields: [reportRunId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([reportRunId, linkedAccount], map: "aws_account_cost_variance_unique")
+  @@map("aws_account_cost_variance")
+}
+
+// mom_change.csv — account-total level, one row per month.
+model AwsMomChange {
+  id                 Int      @id @default(autoincrement()) @map("id")
+  reportRunId        Int      @map("report_run_id")
+  month              String   @map("month") @db.Char(7)
+  totalCost          Decimal  @map("total_cost") @db.Decimal(18, 2)
+  previousMonthCost  Decimal? @map("previous_month_cost") @db.Decimal(18, 2)
+  difference         Decimal? @map("difference") @db.Decimal(18, 2)
+  momPercentChange   Decimal? @map("mom_percent_change") @db.Decimal(10, 2)
+
+  reportRun          AwsReportRun @relation(fields: [reportRunId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([reportRunId, month], map: "aws_mom_change_run_month_unique")
+  @@index([month], map: "aws_mom_change_month_idx")
+  @@map("aws_mom_change")
+}
+
+// pareto_analysis.csv — current month, services ordered by cost.
+model AwsParetoAnalysis {
+  id                 Int     @id @default(autoincrement()) @map("id")
+  reportRunId        Int     @map("report_run_id")
+  month              String  @map("month") @db.Char(7)
+  rank               Int     @map("rank")
+  service            String  @map("service") @db.NVarChar(255)
+  cost               Decimal @map("cost") @db.Decimal(18, 2)
+  cumulativeCost     Decimal @map("cumulative_cost") @db.Decimal(18, 2)
+  cumulativePercent  Decimal @map("cumulative_percent") @db.Decimal(6, 2)
+  /// Allowed values: "Top 80%" | "Remaining 20%".
+  paretoClass        String  @map("pareto_class") @db.NVarChar(16)
+
+  reportRun          AwsReportRun @relation(fields: [reportRunId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([reportRunId, rank], map: "aws_pareto_analysis_run_rank_unique")
+  @@map("aws_pareto_analysis")
+}
+
+// anomaly_flags.csv — 3-month rolling mean/std, 2-sigma flag.
+model AwsAnomalyFlag {
+  id           Int      @id @default(autoincrement()) @map("id")
+  reportRunId  Int      @map("report_run_id")
+  month        String   @map("month") @db.Char(7)
+  totalCost    Decimal  @map("total_cost") @db.Decimal(18, 2)
+  rollingAvg   Decimal? @map("rolling_avg") @db.Decimal(18, 2)
+  rollingStd   Decimal? @map("rolling_std") @db.Decimal(18, 2)
+  /// Allowed values: "Normal (insufficient history)" | "Normal"
+  /// | "HIGH ANOMALY" | "LOW ANOMALY".
+  anomalyFlag  String   @map("anomaly_flag") @db.NVarChar(48)
+  isAnomaly    Boolean  @default(false) @map("is_anomaly")
+
+  reportRun    AwsReportRun @relation(fields: [reportRunId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([reportRunId, month], map: "aws_anomaly_flags_run_month_unique")
+  @@index([month], map: "aws_anomaly_flags_month_idx")
+  @@map("aws_anomaly_flags")
+}
+
+// recurring_vs_onetime.csv — one row per service over the window.
+model AwsRecurringVsOnetime {
+  id                   Int     @id @default(autoincrement()) @map("id")
+  reportRunId          Int     @map("report_run_id")
+  service              String  @map("service") @db.NVarChar(255)
+  activeMonths         Int     @map("active_months")
+  totalMonthsInRun     Int     @map("total_months_in_run")
+  activePercent        Decimal @map("active_percent") @db.Decimal(6, 2)
+  totalCostOverPeriod  Decimal @map("total_cost_over_period") @db.Decimal(18, 2)
+  /// Allowed values: "Recurring" | "One-time / Intermittent" | "Variable".
+  classification       String  @map("classification") @db.NVarChar(32)
+
+  reportRun            AwsReportRun @relation(fields: [reportRunId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([reportRunId, service], map: "aws_recurring_vs_onetime_unique")
+  @@map("aws_recurring_vs_onetime")
+}
+
+// new_services_flag.csv — first billed in the current month.
+model AwsNewServiceFlag {
+  id                 Int     @id @default(autoincrement()) @map("id")
+  reportRunId        Int     @map("report_run_id")
+  service            String  @map("service") @db.NVarChar(255)
+  costInLatestMonth  Decimal @map("cost_in_latest_month") @db.Decimal(18, 2)
+  firstSeenMonth     String  @map("first_seen_month") @db.Char(7)
+  note               String? @map("note") @db.NVarChar(255)
+
+  reportRun          AwsReportRun @relation(fields: [reportRunId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([reportRunId, service], map: "aws_new_services_flag_unique")
+  @@map("aws_new_services_flag")
+}
+
+// category_monthly_costs.csv — fixed 13-value category vocabulary
+// from CATEGORY_RULES in the pipeline.
+model AwsCategoryMonthlyCost {
+  id            Int     @id @default(autoincrement()) @map("id")
+  reportRunId   Int     @map("report_run_id")
+  month         String  @map("month") @db.Char(7)
+  category      String  @map("category") @db.NVarChar(64)
+  cost          Decimal @map("cost") @db.Decimal(18, 2)
+  sharePercent  Decimal @map("share_percent") @db.Decimal(6, 2)
+
+  reportRun     AwsReportRun @relation(fields: [reportRunId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([reportRunId, month, category], map: "aws_category_monthly_costs_unique")
+  @@index([month], map: "aws_category_monthly_costs_month_idx")
+  @@map("aws_category_monthly_costs")
+}
+
+// forecast_simple.csv — two rows, next month and the one after.
+model AwsForecast {
+  id             Int     @id @default(autoincrement()) @map("id")
+  reportRunId    Int     @map("report_run_id")
+  forecastMonth  String  @map("forecast_month") @db.Char(7)
+  projectedCost  Decimal @map("projected_cost") @db.Decimal(18, 2)
+  method         String  @map("method") @db.NVarChar(64)
+
+  reportRun      AwsReportRun @relation(fields: [reportRunId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([reportRunId, forecastMonth], map: "aws_forecast_run_month_unique")
+  @@map("aws_forecast")
+}
+
+// service_volatility.csv
+model AwsServiceVolatility {
+  id                             Int     @id @default(autoincrement()) @map("id")
+  reportRunId                    Int     @map("report_run_id")
+  service                        String  @map("service") @db.NVarChar(255)
+  mean                           Decimal @map("mean") @db.Decimal(18, 2)
+  stdDev                         Decimal @map("std_dev") @db.Decimal(18, 2)
+  coefficientOfVariationPercent  Decimal @map("coefficient_of_variation_percent") @db.Decimal(10, 2)
+
+  reportRun                      AwsReportRun @relation(fields: [reportRunId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([reportRunId, service], map: "aws_service_volatility_unique")
+  @@map("aws_service_volatility")
+}
+
+// budgets_overview.csv — one row per AWS Budget (DescribeBudgets).
+model AwsBudgetOverview {
+  id                      Int     @id @default(autoincrement()) @map("id")
+  reportRunId             Int     @map("report_run_id")
+  budgetName              String  @map("budget_name") @db.NVarChar(255)
+  limitAmount             Decimal @map("limit_amount") @db.Decimal(18, 2)
+  currentUsed             Decimal @map("current_used") @db.Decimal(18, 2)
+  forecastedSpend         Decimal @map("forecasted_spend") @db.Decimal(18, 2)
+  currentVsBudgetPercent  Decimal @map("current_vs_budget_percent") @db.Decimal(10, 2)
+  /// Allowed values: "Exceeded (1)" | "Warning" | "OK".
+  thresholdStatus         String  @map("threshold_status") @db.NVarChar(16)
+  /// Allowed values: "Alert" | "Healthy".
+  healthStatus            String  @map("health_status") @db.NVarChar(16)
+
+  reportRun               AwsReportRun @relation(fields: [reportRunId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([reportRunId], map: "aws_budgets_overview_run_idx")
+  @@map("aws_budgets_overview")
+}
+
+// unbudgeted_accounts.csv — active org accounts with spend but no budget.
+model AwsUnbudgetedAccount {
+  id                  Int     @id @default(autoincrement()) @map("id")
+  reportRunId         Int     @map("report_run_id")
+  accountName         String  @map("account_name") @db.NVarChar(255)
+  awsAccountId        String  @map("aws_account_id") @db.Char(12)
+  status              String  @map("status") @db.NVarChar(32)
+  currentMonthSpend   Decimal @map("current_month_spend") @db.Decimal(18, 2)
+  previousMonthSpend  Decimal @map("previous_month_spend") @db.Decimal(18, 2)
+  momChangePercent    Decimal @map("mom_change_percent") @db.Decimal(10, 2)
+  topCostDriver       String? @map("top_cost_driver") @db.NVarChar(255)
+
+  reportRun           AwsReportRun @relation(fields: [reportRunId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([reportRunId, awsAccountId], map: "aws_unbudgeted_accounts_unique")
+  @@map("aws_unbudgeted_accounts")
+}
+
+// governance_summary.json — one flat object per run, so one row per run.
+model AwsGovernanceSummary {
+  id                              Int     @id @default(autoincrement()) @map("id")
+  reportRunId                     Int     @unique(map: "aws_governance_summary_run_unique") @map("report_run_id")
+  selectedMonth                   String  @map("selected_month") @db.Char(7)
+
+  totalAccounts                   Int     @map("total_accounts")
+  activeAccounts                  Int     @map("active_accounts")
+  suspendedAccounts               Int     @map("suspended_accounts")
+  accountsWithBudget              Int     @map("accounts_with_budget")
+  accountsWithNoBudget            Int     @map("accounts_with_no_budget")
+  budgetCoveragePct               Decimal @map("budget_coverage_pct") @db.Decimal(6, 2)
+
+  activeSpendTotal                Decimal @map("active_spend_total") @db.Decimal(18, 2)
+  spendUnderBudget                Decimal @map("spend_under_budget") @db.Decimal(18, 2)
+  spendWithNoBudget               Decimal @map("spend_with_no_budget") @db.Decimal(18, 2)
+  shareSpendUncoveredPct          Decimal @map("share_spend_uncovered_pct") @db.Decimal(6, 2)
+  sumBudgetLimits                 Decimal @map("sum_budget_limits") @db.Decimal(18, 2)
+
+  suspendedAccountsChargingCount  Int     @map("suspended_accounts_charging_count")
+  suspendedAccountsSpendTotal     Decimal @map("suspended_accounts_spend_total") @db.Decimal(18, 2)
+  suspendedPeriodLabel            String? @map("suspended_period_label") @db.NVarChar(64)
+
+  reportRun                       AwsReportRun @relation(fields: [reportRunId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@map("aws_governance_summary")
+}
