@@ -33,6 +33,16 @@ const {
   OrganizationsClient,
   paginateListAccounts,
 } = require("@aws-sdk/client-organizations");
+<<<<<<< Updated upstream
+=======
+const {
+  BudgetsClient,
+  DescribeBudgetsCommand,
+} = require("@aws-sdk/client-budgets");
+const { saveAwsReportRunToDatabase } = require("./db/aws_repository");
+
+
+>>>>>>> Stashed changes
 
 const PROJECT_ROOT = path.join(__dirname, "..");
 const BASE_OUTPUT_FOLDER =
@@ -408,12 +418,281 @@ async function fetchCostByLinkedAccount(ceClient, orgClient, monthsBack, log, wr
     "Percentage Change",
   ]);
 
-  writeCsv("cost_by_linked_account_wide.csv", wideRows, [
-    "Linked Account",
-    ...months,
+  const unpivotedLinkedAccountCosts = [];
+  for (const [accountId, costs] of Object.entries(pivot)) {
+    const accountName = accountMap[accountId] || accountId;
+    for (const m of months) {
+      const cost = round(costs[m] || 0);
+      if (cost > 0) {
+        unpivotedLinkedAccountCosts.push({
+          linkedAccount: accountName,
+          month: m,
+          cost,
+        });
+      }
+    }
+  }
+
+<<<<<<< Updated upstream
+  return singleMonthRows;
+=======
+  const structuredVariance = varianceRows.map((r) => ({
+    linkedAccount: r["Linked Account"],
+    prevMonthCost: r["Prev Month Cost"],
+    currMonthCost: r["Curr Month Cost"],
+    difference: r["Difference"],
+    percentageChange: r["Percentage Change"],
+  }));
+
+  return {
+    singleMonthRows,
+    accountMap,
+    widePivot: pivot,
+    fullAccountDetails,
+    varianceRows: structuredVariance,
+    costByLinkedAccount: unpivotedLinkedAccountCosts,
+    wideRows,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Step 3: Fetch AWS Budgets
+// ---------------------------------------------------------------------------
+async function fetchBudgets(budgetsClient, accountId, log) {
+  log(`Fetching AWS Budgets for account ${accountId} ...`);
+  const budgets = [];
+  try {
+    const cleanId = String(accountId).replace(/[^0-9]/g, "");
+    if (!cleanId) {
+      log("Warning: No valid numeric AccountId for AWS Budgets.");
+      return [];
+    }
+    let nextToken;
+    do {
+      const command = new DescribeBudgetsCommand({
+        AccountId: cleanId,
+        NextToken: nextToken,
+      });
+      const response = await withRetry(() => budgetsClient.send(command));
+      if (response.Budgets) {
+        budgets.push(...response.Budgets);
+      }
+      nextToken = response.NextToken;
+    } while (nextToken);
+    log(`Found ${budgets.length} budget(s).`);
+  } catch (e) {
+    log(`Could not fetch AWS Budgets (${e.message}).`);
+  }
+  return budgets;
+}
+
+// ---------------------------------------------------------------------------
+// Step 4: Organization & Budget Governance Insights
+// ---------------------------------------------------------------------------
+function buildOrganizationGovernance({
+  fullAccountDetails,
+  budgets,
+  monthlyData,
+  wideAccountPivot,
+  writeCsv,
+  writeJson,
+  log,
+}) {
+  const months = monthlyData.map((m) => m.month).sort();
+  const latestMonth = months[months.length - 1] || "";
+  const prevMonth = months.length > 1 ? months[months.length - 2] : "";
+
+  const accounts = fullAccountDetails && fullAccountDetails.length > 0
+    ? fullAccountDetails
+    : Object.keys(wideAccountPivot).map((id) => ({
+        Id: id,
+        Name: id,
+        Status: "ACTIVE",
+      }));
+
+  const totalAccounts = accounts.length;
+  const activeList = accounts.filter(
+    (a) => !a.Status || a.Status === "ACTIVE"
+  );
+  const activeAccountsCount = activeList.length;
+  const suspendedList = accounts.filter(
+    (a) => a.Status === "SUSPENDED" || a.Status === "PENDING_CLOSURE"
+  );
+  const suspendedAccountsCount = suspendedList.length;
+
+  // 1. Process Budgets
+  const budgetOverviewRows = [];
+  let sumBudgetLimits = 0;
+  const budgetedAccountIds = new Set();
+  const budgetedAccountNames = new Set();
+
+  for (const b of budgets) {
+    const name = b.BudgetName || "Unnamed Budget";
+    const limit = parseFloat(b.BudgetLimit?.Amount) || 0;
+    const used = parseFloat(b.CalculatedSpend?.ActualSpend?.Amount) || 0;
+    const forecast = parseFloat(b.CalculatedSpend?.ForecastedSpend?.Amount) || 0;
+    const pct = limit > 0 ? round((used / limit) * 100, 1) : 0;
+    const isExceeded = pct >= 100;
+    const thresholdStatus = isExceeded ? "Exceeded (1)" : pct >= 80 ? "Warning" : "OK";
+
+    sumBudgetLimits += limit;
+
+    if (b.CostFilters?.LinkedAccount) {
+      b.CostFilters.LinkedAccount.forEach((id) => budgetedAccountIds.add(id));
+    }
+    budgetedAccountNames.add(name.toLowerCase().trim());
+
+    budgetOverviewRows.push({
+      "Budget Name": name,
+      budgetName: name,
+      Limit: round(limit),
+      limitAmount: round(limit),
+      "Current Used": round(used),
+      currentUsed: round(used),
+      "Forecasted Spend": round(forecast),
+      forecastedSpend: round(forecast),
+      "Current vs Budget %": pct,
+      currentVsBudgetPercent: pct,
+      "Threshold Status": thresholdStatus,
+      thresholdStatus: thresholdStatus,
+      "Health Status": isExceeded ? "Alert" : "Healthy",
+      healthStatus: isExceeded ? "Alert" : "Healthy",
+    });
+  }
+
+  writeCsv("budgets_overview.csv", budgetOverviewRows, [
+    "Budget Name",
+    "Limit",
+    "Current Used",
+    "Forecasted Spend",
+    "Current vs Budget %",
+    "Threshold Status",
+    "Health Status",
   ]);
 
-  return singleMonthRows;
+  // Determine budget coverage among active accounts
+  let accountsWithBudgetCount = 0;
+  let activeSpendTotal = 0;
+  let spendUnderBudget = 0;
+  let spendWithNoBudget = 0;
+  const unbudgetedAccountRows = [];
+
+  for (const acc of activeList) {
+    const accId = acc.Id;
+    const costs = wideAccountPivot[accId] || {};
+    const currCost = costs[latestMonth] || 0;
+    const prevCost = costs[prevMonth] || 0;
+    const diff = currCost - prevCost;
+    const momChange = prevCost > 0 ? round((diff / prevCost) * 100, 1) : 0;
+
+    activeSpendTotal += currCost;
+
+    const isBudgeted =
+      budgetedAccountIds.has(accId) ||
+      Array.from(budgetedAccountNames).some(
+        (bName) =>
+          acc.Name.toLowerCase().includes(bName) || bName.includes(acc.Name.toLowerCase())
+      );
+
+    if (isBudgeted) {
+      accountsWithBudgetCount += 1;
+      spendUnderBudget += currCost;
+    } else {
+      spendWithNoBudget += currCost;
+      if (currCost > 0 || prevCost > 0) {
+        unbudgetedAccountRows.push({
+          "Account Name": acc.Name,
+          accountName: acc.Name,
+          "Account ID": accId,
+          awsAccountId: accId,
+          Status: acc.Status || "ACTIVE",
+          status: acc.Status || "ACTIVE",
+          "Current Month Spend": round(currCost),
+          currentMonthSpend: round(currCost),
+          "Previous Month Spend": round(prevCost),
+          previousMonthSpend: round(prevCost),
+          "MoM Change %": momChange,
+          momChangePercent: momChange,
+          "Top Cost Driver": "Cloud Services",
+          topCostDriver: "Cloud Services",
+        });
+      }
+    }
+  }
+
+  if (accountsWithBudgetCount === 0 && budgets.length > 0) {
+    accountsWithBudgetCount = Math.min(budgets.length, activeAccountsCount);
+    const totalBudgetUsed = budgetOverviewRows.reduce((acc, b) => acc + b["Current Used"], 0);
+    spendUnderBudget = Math.min(activeSpendTotal, totalBudgetUsed);
+    spendWithNoBudget = Math.max(0, activeSpendTotal - spendUnderBudget);
+  }
+
+  const accountsWithNoBudgetCount = Math.max(0, activeAccountsCount - accountsWithBudgetCount);
+  const budgetCoveragePct = activeAccountsCount > 0
+    ? round((accountsWithBudgetCount / activeAccountsCount) * 100, 1)
+    : 0;
+  const shareSpendUncoveredPct = activeSpendTotal > 0
+    ? round((spendWithNoBudget / activeSpendTotal) * 100, 1)
+    : 0;
+
+  unbudgetedAccountRows.sort((a, b) => b["Current Month Spend"] - a["Current Month Spend"]);
+
+  writeCsv("unbudgeted_accounts.csv", unbudgetedAccountRows, [
+    "Account Name",
+    "Account ID",
+    "Status",
+    "Current Month Spend",
+    "Previous Month Spend",
+    "MoM Change %",
+    "Top Cost Driver",
+  ]);
+
+  // 2. Suspended Accounts Still Charging
+  let suspendedAccountsChargingCount = 0;
+  let suspendedAccountsSpendTotal = 0;
+
+  for (const acc of suspendedList) {
+    const costs = wideAccountPivot[acc.Id] || {};
+    let totalSuspendedSpend = 0;
+    for (const m of months) {
+      totalSuspendedSpend += costs[m] || 0;
+    }
+    if (totalSuspendedSpend > 0) {
+      suspendedAccountsChargingCount += 1;
+      suspendedAccountsSpendTotal += totalSuspendedSpend;
+    }
+  }
+
+  const suspendedPeriodLabel = months.length > 0
+    ? `${months[0]} to ${months[months.length - 1]} Total`
+    : "Jun-Sep Total";
+
+  const governanceSummary = {
+    totalAccounts,
+    activeAccounts: activeAccountsCount,
+    suspendedAccounts: suspendedAccountsCount,
+    accountsWithBudget: accountsWithBudgetCount,
+    accountsWithNoBudget: accountsWithNoBudgetCount,
+    budgetCoveragePct,
+    selectedMonth: latestMonth,
+    activeSpendTotal: round(activeSpendTotal),
+    spendUnderBudget: round(spendUnderBudget),
+    spendWithNoBudget: round(spendWithNoBudget),
+    shareSpendUncoveredPct,
+    sumBudgetLimits: round(sumBudgetLimits),
+    suspendedAccountsChargingCount,
+    suspendedAccountsSpendTotal: round(suspendedAccountsSpendTotal),
+    suspendedPeriodLabel,
+  };
+
+  writeJson("governance_summary.json", governanceSummary);
+
+  return {
+    budgets: budgetOverviewRows,
+    unbudgetedAccounts: unbudgetedAccountRows,
+    governanceSummary,
+  };
+>>>>>>> Stashed changes
 }
 
 // ---------------------------------------------------------------------------
@@ -423,23 +702,34 @@ function buildCurrentAndTrend(monthlyData, writeCsv) {
   const currentMonth = monthlyData[monthlyData.length - 1];
   writeCsv("current_month_total.csv", [{ "Total Cost": round(currentMonth.totalCost) }], ["Total Cost"]);
 
+<<<<<<< Updated upstream
   const trendRows = monthlyData.map((m) => ({
+=======
+  const trendRows = monthlyData.map((m, idx) => ({
+>>>>>>> Stashed changes
     Month: m.month,
+    month: m.month,
     "Total Cost": round(m.totalCost),
+    totalCost: round(m.totalCost),
+    isCurrentMonth: idx === monthlyData.length - 1,
   }));
   writeCsv("monthly_totals_last_6_months.csv", trendRows, ["Month", "Total Cost"]);
+
+  return trendRows;
 }
 
 function buildTop10AndLatest(monthlyData, serviceCols, writeCsv) {
   const latestMonth = monthlyData[monthlyData.length - 1];
   const allServices = serviceCols
-    .map((s) => ({ Service: s, Cost: round(latestMonth.services[s] || 0) }))
+    .map((s) => ({ Service: s, service: s, Cost: round(latestMonth.services[s] || 0), cost: round(latestMonth.services[s] || 0), month: latestMonth.month }))
     .filter((s) => s.Cost > 0)
     .sort((a, b) => b.Cost - a.Cost);
 
   writeCsv("latest_month_services.csv", allServices, ["Service", "Cost"]);
-  const top10 = allServices.slice(0, 10);
+  const top10 = allServices.slice(0, 10).map((t, idx) => ({ ...t, rank: idx + 1 }));
   writeCsv("top_10_services.csv", top10, ["Service", "Cost"]);
+
+  return { top10, allServices };
 }
 
 function buildMomChange(monthlyData, writeCsv) {
@@ -453,10 +743,15 @@ function buildMomChange(monthlyData, writeCsv) {
 
     rows.push({
       Month: curr.month,
+      month: curr.month,
       "Total Cost": round(curr.totalCost),
+      totalCost: round(curr.totalCost),
       "Previous Month Cost": prevCost !== null ? round(prevCost) : "",
+      previousMonthCost: prevCost !== null ? round(prevCost) : null,
       "Difference": diff !== null ? round(diff) : "",
+      difference: diff !== null ? round(diff) : null,
       "MoM % Change": pct !== null ? round(pct, 1) : "",
+      momPercentChange: pct !== null ? round(pct, 1) : null,
     });
   }
   writeCsv("mom_change.csv", rows, [
@@ -466,6 +761,8 @@ function buildMomChange(monthlyData, writeCsv) {
     "Difference",
     "MoM % Change",
   ]);
+
+  return rows;
 }
 
 function buildPareto(monthlyData, serviceCols, writeCsv) {
@@ -473,20 +770,27 @@ function buildPareto(monthlyData, serviceCols, writeCsv) {
   const total = latestMonth.totalCost || 1;
 
   const items = serviceCols
-    .map((s) => ({ Service: s, Cost: round(latestMonth.services[s] || 0) }))
+    .map((s) => ({ Service: s, service: s, Cost: round(latestMonth.services[s] || 0), cost: round(latestMonth.services[s] || 0) }))
     .filter((s) => s.Cost > 0)
     .sort((a, b) => b.Cost - a.Cost);
 
   let running = 0;
-  const rows = items.map((item) => {
+  const rows = items.map((item, idx) => {
     running += item.Cost;
     const cumPct = round((running / total) * 100, 1);
     return {
+      rank: idx + 1,
+      month: latestMonth.month,
       Service: item.Service,
+      service: item.Service,
       Cost: item.Cost,
+      cost: item.Cost,
       "Cumulative Cost": round(running),
+      cumulativeCost: round(running),
       "Cumulative %": cumPct,
+      cumulativePercent: cumPct,
       "Pareto Class": cumPct <= 80 ? "Top 80%" : "Remaining 20%",
+      paretoClass: cumPct <= 80 ? "Top 80%" : "Remaining 20%",
     };
   });
 
@@ -497,6 +801,8 @@ function buildPareto(monthlyData, serviceCols, writeCsv) {
     "Cumulative %",
     "Pareto Class",
   ]);
+
+  return rows;
 }
 
 function buildAnomalyFlags(monthlyData, writeCsv) {
@@ -506,10 +812,16 @@ function buildAnomalyFlags(monthlyData, writeCsv) {
     if (i < 2) {
       rows.push({
         Month: curr.month,
+        month: curr.month,
         "Total Cost": round(curr.totalCost),
+        totalCost: round(curr.totalCost),
         "3M Rolling Avg": "",
+        rollingAvg: null,
         "3M Rolling Std": "",
+        rollingStd: null,
         "Anomaly Flag": "Normal (insufficient history)",
+        anomalyFlag: "Normal (insufficient history)",
+        isAnomaly: false,
       });
       continue;
     }
@@ -524,10 +836,16 @@ function buildAnomalyFlags(monthlyData, writeCsv) {
 
     rows.push({
       Month: curr.month,
+      month: curr.month,
       "Total Cost": round(curr.totalCost),
+      totalCost: round(curr.totalCost),
       "3M Rolling Avg": round(mean),
+      rollingAvg: round(mean),
       "3M Rolling Std": round(std),
+      rollingStd: round(std),
       "Anomaly Flag": flag,
+      anomalyFlag: flag,
+      isAnomaly: flag !== "Normal",
     });
   }
   writeCsv("anomaly_flags.csv", rows, [
@@ -537,6 +855,8 @@ function buildAnomalyFlags(monthlyData, writeCsv) {
     "3M Rolling Std",
     "Anomaly Flag",
   ]);
+
+  return rows;
 }
 
 function buildRecurringVsOnetime(monthlyData, serviceCols, writeCsv) {
@@ -549,11 +869,17 @@ function buildRecurringVsOnetime(monthlyData, serviceCols, writeCsv) {
 
     return {
       Service: s,
+      service: s,
       "Active Months": activeMonths,
+      activeMonths: activeMonths,
       "Total Months in Run": totalMonths,
+      totalMonthsInRun: totalMonths,
       "Active %": activePct,
+      activePercent: activePct,
       "Total Cost Over Period": round(totalCost),
+      totalCostOverPeriod: round(totalCost),
       Classification: type,
+      classification: type,
     };
   });
 
@@ -566,12 +892,14 @@ function buildRecurringVsOnetime(monthlyData, serviceCols, writeCsv) {
     "Total Cost Over Period",
     "Classification",
   ]);
+
+  return rows;
 }
 
 function buildNewServices(monthlyData, serviceCols, writeCsv) {
   if (monthlyData.length < 2) {
     writeCsv("new_services_flag.csv", [], ["Service", "Cost in Latest Month", "First Seen Month", "Note"]);
-    return;
+    return [];
   }
   const latestMonth = monthlyData[monthlyData.length - 1];
   const priorMonths = monthlyData.slice(0, monthlyData.length - 1);
@@ -584,14 +912,20 @@ function buildNewServices(monthlyData, serviceCols, writeCsv) {
     if (!hadPriorCost) {
       rows.push({
         Service: s,
+        service: s,
         "Cost in Latest Month": round(costLatest),
+        costInLatestMonth: round(costLatest),
         "First Seen Month": latestMonth.month,
+        firstSeenMonth: latestMonth.month,
         Note: "First time billed in the reporting window",
+        note: "First time billed in the reporting window",
       });
     }
   }
   rows.sort((a, b) => b["Cost in Latest Month"] - a["Cost in Latest Month"]);
   writeCsv("new_services_flag.csv", rows, ["Service", "Cost in Latest Month", "First Seen Month", "Note"]);
+
+  return rows;
 }
 
 function buildCategoryCosts(monthlyData, serviceCols, writeCsv) {
@@ -606,22 +940,28 @@ function buildCategoryCosts(monthlyData, serviceCols, writeCsv) {
       if (cost > 0) {
         rows.push({
           Month: m.month,
+          month: m.month,
           Category: cat,
+          category: cat,
           Cost: round(cost),
+          cost: round(cost),
           "Share %": round(safeDivide(cost, m.totalCost) * 100, 1),
+          sharePercent: round(safeDivide(cost, m.totalCost) * 100, 1),
         });
       }
     }
   }
   rows.sort((a, b) => a.Month.localeCompare(b.Month) || b.Cost - a.Cost);
   writeCsv("category_monthly_costs.csv", rows, ["Month", "Category", "Cost", "Share %"]);
+
+  return rows;
 }
 
 function buildForecast(monthlyData, writeCsv) {
   const completeMonths = monthlyData.slice(0, monthlyData.length - 1);
   if (completeMonths.length < 2) {
     writeCsv("forecast_simple.csv", [], ["Forecast Month", "Projected Cost", "Method"]);
-    return;
+    return [];
   }
   const n = completeMonths.length;
   let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
@@ -647,16 +987,24 @@ function buildForecast(monthlyData, writeCsv) {
   const rows = [
     {
       "Forecast Month": nextMonthStr,
+      forecastMonth: nextMonthStr,
       "Projected Cost": round(forecastNext),
+      projectedCost: round(forecastNext),
       Method: "Linear trend on completed months",
+      method: "Linear trend on completed months",
     },
     {
       "Forecast Month": nextPlusOneStr,
+      forecastMonth: nextPlusOneStr,
       "Projected Cost": round(forecastNextPlus1),
+      projectedCost: round(forecastNextPlus1),
       Method: "Linear trend on completed months",
+      method: "Linear trend on completed months",
     },
   ];
   writeCsv("forecast_simple.csv", rows, ["Forecast Month", "Projected Cost", "Method"]);
+
+  return rows;
 }
 
 function buildVolatility(monthlyData, serviceCols, writeCsv) {
@@ -664,7 +1012,7 @@ function buildVolatility(monthlyData, serviceCols, writeCsv) {
   const n = monthlyData.length;
   if (n < 2) {
     writeCsv("service_volatility.csv", [], ["Service", "Mean", "Std Dev", "Coefficient of Variation %"]);
-    return;
+    return [];
   }
   for (const s of serviceCols) {
     const values = monthlyData.map((m) => m.services[s] || 0);
@@ -677,13 +1025,19 @@ function buildVolatility(monthlyData, serviceCols, writeCsv) {
 
     rows.push({
       Service: s,
+      service: s,
       Mean: round(mean),
+      mean: round(mean),
       "Std Dev": round(std),
+      stdDev: round(std),
       "Coefficient of Variation %": round(cv, 1),
+      coefficientOfVariationPercent: round(cv, 1),
     });
   }
   rows.sort((a, b) => b["Std Dev"] - a["Std Dev"]);
   writeCsv("service_volatility.csv", rows, ["Service", "Mean", "Std Dev", "Coefficient of Variation %"]);
+
+  return rows;
 }
 
 function buildCostByServiceWide(monthlyData, serviceCols, writeCsv) {
@@ -698,7 +1052,21 @@ function buildCostByServiceWide(monthlyData, serviceCols, writeCsv) {
     ...serviceCols,
     "Total Cost",
   ]);
+
+  // Also return unpivoted long rows for SQL Server
+  const longRows = [];
+  for (const m of monthlyData) {
+    for (const s of serviceCols) {
+      const cost = round(m.services[s] || 0);
+      if (cost > 0) {
+        longRows.push({ month: m.month, service: s, cost });
+      }
+    }
+  }
+
+  return { wideRows: rows, longRows };
 }
+
 
 // ---------------------------------------------------------------------------
 // Run Pipeline for a Single AWS Account
@@ -786,26 +1154,128 @@ async function processAccount(accountConfig) {
 
     log(`Got ${monthlyData.length} month(s) of data across ${serviceCols.length} services.`);
 
-    runStep("buildCostByServiceWide", () => buildCostByServiceWide(monthlyData, serviceCols, writeCsv));
+    let costByServiceData = { wideRows: [], longRows: [] };
+    runStep("buildCostByServiceWide", () => {
+      costByServiceData = buildCostByServiceWide(monthlyData, serviceCols, writeCsv);
+    });
 
+    let governanceResult = null;
+    let linkedAccountResultValue = null;
     if (accountResult.status === "fulfilled") {
+<<<<<<< Updated upstream
       runStep("Cost_By_Linked_Account", () =>
         writeCsv("Cost_By_Linked_Account.csv", accountResult.value, ["Linked Account", "Cost"])
       );
+=======
+      linkedAccountResultValue = accountResult.value;
+      const { singleMonthRows, widePivot, fullAccountDetails } = accountResult.value;
+      runStep("Cost_By_Linked_Account", () =>
+        writeCsv("Cost_By_Linked_Account.csv", singleMonthRows, ["Linked Account", "Cost"])
+      );
+
+      const budgetsList = budgetsResult.status === "fulfilled" ? budgetsResult.value : [];
+      runStep("buildOrganizationGovernance", () => {
+        governanceResult = buildOrganizationGovernance({
+          fullAccountDetails,
+          budgets: budgetsList,
+          monthlyData,
+          wideAccountPivot: widePivot,
+          writeCsv,
+          writeJson,
+          log,
+        });
+      });
+>>>>>>> Stashed changes
     } else {
-      log(`Skipped linked account export (likely missing Organizations permission): ${accountResult.reason.message}`);
+      log(`Skipped linked account export (likely missing Organizations permission): ${accountResult.reason?.message || "Unavailable"}`);
     }
 
-    runStep("buildCurrentAndTrend", () => buildCurrentAndTrend(monthlyData, writeCsv));
-    runStep("buildTop10AndLatest", () => buildTop10AndLatest(monthlyData, serviceCols, writeCsv));
-    runStep("buildMomChange", () => buildMomChange(monthlyData, writeCsv));
-    runStep("buildPareto", () => buildPareto(monthlyData, serviceCols, writeCsv));
-    runStep("buildAnomalyFlags", () => buildAnomalyFlags(monthlyData, writeCsv));
-    runStep("buildRecurringVsOnetime", () => buildRecurringVsOnetime(monthlyData, serviceCols, writeCsv));
-    runStep("buildNewServices", () => buildNewServices(monthlyData, serviceCols, writeCsv));
-    runStep("buildCategoryCosts", () => buildCategoryCosts(monthlyData, serviceCols, writeCsv));
-    runStep("buildForecast", () => buildForecast(monthlyData, writeCsv));
-    runStep("buildVolatility", () => buildVolatility(monthlyData, serviceCols, writeCsv));
+    let monthlyTotals = [];
+    runStep("buildCurrentAndTrend", () => {
+      monthlyTotals = buildCurrentAndTrend(monthlyData, writeCsv);
+    });
+
+    let top10AndLatest = { top10: [], allServices: [] };
+    runStep("buildTop10AndLatest", () => {
+      top10AndLatest = buildTop10AndLatest(monthlyData, serviceCols, writeCsv);
+    });
+
+    let momChange = [];
+    runStep("buildMomChange", () => {
+      momChange = buildMomChange(monthlyData, writeCsv);
+    });
+
+    let pareto = [];
+    runStep("buildPareto", () => {
+      pareto = buildPareto(monthlyData, serviceCols, writeCsv);
+    });
+
+    let anomalyFlags = [];
+    runStep("buildAnomalyFlags", () => {
+      anomalyFlags = buildAnomalyFlags(monthlyData, writeCsv);
+    });
+
+    let recurringVsOnetime = [];
+    runStep("buildRecurringVsOnetime", () => {
+      recurringVsOnetime = buildRecurringVsOnetime(monthlyData, serviceCols, writeCsv);
+    });
+
+    let newServices = [];
+    runStep("buildNewServices", () => {
+      newServices = buildNewServices(monthlyData, serviceCols, writeCsv);
+    });
+
+    let categoryMonthlyCosts = [];
+    runStep("buildCategoryCosts", () => {
+      categoryMonthlyCosts = buildCategoryCosts(monthlyData, serviceCols, writeCsv);
+    });
+
+    let forecasts = [];
+    runStep("buildForecast", () => {
+      forecasts = buildForecast(monthlyData, writeCsv);
+    });
+
+    let serviceVolatility = [];
+    runStep("buildVolatility", () => {
+      serviceVolatility = buildVolatility(monthlyData, serviceCols, writeCsv);
+    });
+
+    // Persist all data directly into SQL Server tables
+    try {
+      log("💾 Persisting AWS cost analytics directly to SQL Server...");
+      const runData = {
+        runStamp: RUN_STAMP,
+        windowStart: monthlyData[0]?.month ? `${monthlyData[0].month}-01` : null,
+        windowEnd: monthlyData[monthlyData.length - 1]?.month ? `${monthlyData[monthlyData.length - 1].month}-28` : null,
+        monthsHistory: MONTHS_OF_HISTORY,
+        monthsCovered: monthlyData.map((m) => m.month),
+        currentMonth: monthlyData[monthlyData.length - 1]?.month,
+        serviceCount: serviceCols.length,
+        linkedAccountCount: linkedAccountResultValue ? Object.keys(linkedAccountResultValue.accountMap || {}).length : 0,
+        monthlyTotals,
+        costByService: costByServiceData.longRows || [],
+        topServices: top10AndLatest.top10 || [],
+        costByLinkedAccount: linkedAccountResultValue?.costByLinkedAccount || [],
+        accountCostVariance: linkedAccountResultValue?.varianceRows || [],
+        momChange,
+        pareto,
+        anomalyFlags,
+        recurringVsOnetime,
+        newServices,
+        categoryMonthlyCosts,
+        forecasts,
+        serviceVolatility,
+        budgets: governanceResult?.budgets || [],
+        unbudgetedAccounts: governanceResult?.unbudgetedAccounts || [],
+        governanceSummary: governanceResult?.governanceSummary || null,
+        linkedAccountsList: linkedAccountResultValue?.fullAccountDetails || [],
+        logText: runLog.join("\n"),
+      };
+
+      await saveAwsReportRunToDatabase(accountConfig, runData, log);
+    } catch (dbErr) {
+      log(`⚠️ Database save failed (continuing pipeline): ${dbErr.message}`);
+    }
 
     log(`✅ Account ${name} processing completed successfully.`);
     return true;

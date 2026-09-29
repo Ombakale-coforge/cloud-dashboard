@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import {
   S3Client,
@@ -8,6 +9,17 @@ import {
   PutObjectCommand,
 } from '@aws-sdk/client-s3';
 import dotenv from 'dotenv';
+import {
+  getUserByEmail,
+  createUser,
+  recordLoginEvent,
+  verifyPassword,
+  getAccountRequests,
+  createAccountRequest,
+  updateAccountRequestStatus,
+  getAwsAccountsMetadata,
+  queryAwsTableData,
+} from './server-db.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -23,9 +35,8 @@ app.use(cors());
 app.use(express.json());
 
 // ─────────────────────────────────────────────────────────────
-// Cloudflare R2 S3 Client setup for Form & Login Page
+// Cloudflare R2 S3 Client setup (Fallback support)
 // ─────────────────────────────────────────────────────────────
-// Uses dedicated FOR_FORM variables if provided, with fallback to default R2 credentials.
 const R2_ACCOUNT_ID =
   process.env.R2_ACCOUNT_ID_FOR_FORM ||
   process.env.r2_account_id_for_form ||
@@ -51,28 +62,20 @@ const R2_BUCKET_NAME =
   process.env.r2_bucket_name_for_form ||
   'cost-dashboard-data';
 
-if (!R2_ACCOUNT_ID || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY) {
-  console.error('❌ Missing Cloudflare R2 credentials in .env!');
+let s3Client = null;
+if (R2_ACCOUNT_ID && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY) {
+  s3Client = new S3Client({
+    region: 'auto',
+    endpoint: `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+    credentials: {
+      accessKeyId: R2_ACCESS_KEY_ID,
+      secretAccessKey: R2_SECRET_ACCESS_KEY,
+    },
+  });
 }
 
-const s3Client = new S3Client({
-  region: 'auto',
-  endpoint: `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
-  credentials: {
-    accessKeyId: R2_ACCESS_KEY_ID,
-    secretAccessKey: R2_SECRET_ACCESS_KEY,
-  },
-});
-
-console.log(`\n======================================================`);
-console.log(`🚀 [Cloudflare R2] Connected Endpoint: https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`);
-console.log(`🔑 [Cloudflare R2] Using Access Key: ${R2_ACCESS_KEY_ID ? `${R2_ACCESS_KEY_ID.slice(0, 8)}...` : 'None'}`);
-console.log(`📦 [Cloudflare R2] Target Form Bucket: "${R2_BUCKET_NAME}"`);
-console.log(`======================================================\n`);
-
-// ───────────────────── Cloudflare R2 Direct Helpers ─────────────────────
-
 async function readFromR2(primaryKey, fallbackKey, defaultValue = []) {
+  if (!s3Client) return { data: defaultValue, actualKey: primaryKey };
   const keysToTry = [primaryKey, fallbackKey].filter(Boolean);
 
   for (const key of keysToTry) {
@@ -84,17 +87,12 @@ async function readFromR2(primaryKey, fallbackKey, defaultValue = []) {
       const response = await s3Client.send(command);
       const str = await response.Body.transformToString();
       const parsed = JSON.parse(str);
-      console.log(`📥 [Cloudflare R2] Fetched "${key}" (${Array.isArray(parsed) ? parsed.length : 1} items) from bucket "${R2_BUCKET_NAME}"`);
       return { data: parsed, actualKey: key };
     } catch (err) {
       if (err.name === 'NoSuchKey' || err.$metadata?.httpStatusCode === 404) {
-        continue; // Try next key if first one doesn't exist
+        continue;
       }
-      if (err.name === 'AccessDenied' || err.$metadata?.httpStatusCode === 403) {
-        console.error(`❌ [Cloudflare R2] Access Denied reading "${key}". Check API Token permissions in Cloudflare.`);
-        throw new Error(`Cloudflare R2 Access Denied. Please ensure R2_ACCESS_KEY_ID_FOR_FORM has 'Object Read & Write' permission on bucket "${R2_BUCKET_NAME}".`);
-      }
-      console.error(`[R2 Read Error] "${key}":`, err.message);
+      console.warn(`[R2 Fallback Warning] "${key}":`, err.message);
     }
   }
 
@@ -102,6 +100,7 @@ async function readFromR2(primaryKey, fallbackKey, defaultValue = []) {
 }
 
 async function writeToR2(key, data) {
+  if (!s3Client) return;
   try {
     const jsonStr = JSON.stringify(data, null, 2);
     const command = new PutObjectCommand({
@@ -111,23 +110,23 @@ async function writeToR2(key, data) {
       ContentType: 'application/json',
     });
     await s3Client.send(command);
-    console.log(`✅ [Cloudflare R2] Successfully updated "${key}" in bucket "${R2_BUCKET_NAME}"`);
   } catch (err) {
-    console.error(`❌ [Cloudflare R2 Write Error] Failed to write "${key}":`, err.message);
-    if (err.name === 'AccessDenied' || err.$metadata?.httpStatusCode === 403) {
-      throw new Error(`Cloudflare R2 Access Denied on bucket "${R2_BUCKET_NAME}". Please set R2_ACCESS_KEY_ID_FOR_FORM and R2_SECRET_ACCESS_KEY_FOR_FORM in .env with your Read & Write token.`);
-    }
-    throw err;
+    console.warn(`[R2 Fallback Write Warning] Failed to write "${key}":`, err.message);
   }
 }
 
-// ───────────────────── Authentication Endpoints ─────────────────────
+// ─────────────────────────────────────────────────────────────
+// Authentication Endpoints (Direct SQL Server with R2 Fallback)
+// ─────────────────────────────────────────────────────────────
 
 const ADMIN_EMAIL = 'dashboard-admin@coforge.com';
 const ADMIN_PASSWORD = '8iie9gb';
 
-// Login Endpoint (Reads strictly from Cloudflare R2 user.json)
+// Login Endpoint
 app.post('/api/auth/login', async (req, res) => {
+  const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+  const userAgent = req.headers['user-agent'];
+
   try {
     const { email, password } = req.body;
 
@@ -140,6 +139,14 @@ app.post('/api/auth/login', async (req, res) => {
     // 1. Admin Verification
     if (normalizedEmail === ADMIN_EMAIL.toLowerCase()) {
       if (password === ADMIN_PASSWORD) {
+        await recordLoginEvent({
+          userId: 1,
+          ipAddress: clientIp,
+          userAgent,
+          eventType: 'login',
+          success: true,
+        });
+
         return res.json({
           success: true,
           user: {
@@ -153,6 +160,15 @@ app.post('/api/auth/login', async (req, res) => {
           },
         });
       } else {
+        await recordLoginEvent({
+          userId: null,
+          ipAddress: clientIp,
+          userAgent,
+          eventType: 'login_failed',
+          success: false,
+          failureReason: 'Invalid Admin Password',
+        });
+
         return res.status(401).json({
           error: 'INVALID_ADMIN_CREDENTIALS',
           message: 'Invalid Admin password. Please check your credentials.',
@@ -160,20 +176,73 @@ app.post('/api/auth/login', async (req, res) => {
       }
     }
 
-    // 2. Fetch Users strictly from Cloudflare R2
-    const { data: users } = await readFromR2('user.json', 'users.json', []);
-    const existingUser = users.find(
+    // 2. Fetch User from SQL Server
+    try {
+      const user = await getUserByEmail(normalizedEmail);
+      if (user) {
+        if (!user.is_active) {
+          return res.status(403).json({
+            error: 'ACCOUNT_INACTIVE',
+            message: 'Your account has been deactivated. Please contact administrator.',
+          });
+        }
+
+        const isMatch = verifyPassword(password, user.password_hash);
+        if (!isMatch) {
+          await recordLoginEvent({
+            userId: user.id,
+            ipAddress: clientIp,
+            userAgent,
+            eventType: 'login_failed',
+            success: false,
+            failureReason: 'Invalid Password',
+          });
+
+          return res.status(401).json({
+            error: 'INVALID_PASSWORD',
+            message: 'Incorrect password for this account.',
+          });
+        }
+
+        await recordLoginEvent({
+          userId: user.id,
+          ipAddress: clientIp,
+          userAgent,
+          eventType: 'login',
+          success: true,
+        });
+
+        return res.json({
+          success: true,
+          user: {
+            id: `usr-${user.id}`,
+            name: user.name,
+            email: user.email,
+            role: user.role || 'basic',
+            department: user.department || 'Engineering',
+            provider: 'credentials',
+            loginTime: new Date().toISOString(),
+          },
+        });
+      }
+    } catch (dbErr) {
+      console.warn(`[Auth DB Notice]: ${dbErr.message}. Attempting R2 fallback.`);
+    }
+
+    // 3. Fallback: Check Cloudflare R2
+    const { data: r2Users } = await readFromR2('user.json', 'users.json', []);
+    const existingR2User = r2Users.find(
       (u) => u.email && u.email.toLowerCase() === normalizedEmail
     );
 
-    if (!existingUser) {
+    if (!existingR2User) {
       return res.status(404).json({
         error: 'USER_NOT_FOUND',
-        message: 'Account not found in R2 database. Please sign up to create a new requester account.',
+        message: 'Account not found. Please sign up to create a new requester account.',
       });
     }
 
-    if (existingUser.password !== password) {
+    if (existingR2User.password !== password) {
       return res.status(401).json({
         error: 'INVALID_PASSWORD',
         message: 'Incorrect password for this account.',
@@ -183,23 +252,26 @@ app.post('/api/auth/login', async (req, res) => {
     return res.json({
       success: true,
       user: {
-        id: existingUser.id,
-        name: existingUser.name,
-        email: existingUser.email,
-        role: 'basic',
-        department: existingUser.department || 'Engineering',
-        provider: existingUser.provider || 'credentials',
+        id: existingR2User.id,
+        name: existingR2User.name,
+        email: existingR2User.email,
+        role: existingR2User.role || 'basic',
+        department: existingR2User.department || 'Engineering',
+        provider: existingR2User.provider || 'credentials',
         loginTime: new Date().toISOString(),
       },
     });
   } catch (err) {
     console.error('Login error:', err.message);
-    res.status(500).json({ error: 'R2_ERROR', message: err.message });
+    res.status(500).json({ error: 'AUTH_ERROR', message: err.message });
   }
 });
 
-// Signup Endpoint (Writes strictly to Cloudflare R2 user.json)
+// Signup Endpoint
 app.post('/api/auth/signup', async (req, res) => {
+  const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+  const userAgent = req.headers['user-agent'];
+
   try {
     const { name, email, password, department } = req.body;
 
@@ -217,13 +289,56 @@ app.post('/api/auth/signup', async (req, res) => {
       });
     }
 
+    // 1. Try SQL Server
+    try {
+      const existing = await getUserByEmail(normalizedEmail);
+      if (existing) {
+        return res.status(409).json({
+          error: 'USER_ALREADY_EXISTS',
+          message: 'An account with this email already exists. Please log in.',
+        });
+      }
+
+      const created = await createUser({
+        name: finalName,
+        email: normalizedEmail,
+        password,
+        department,
+        role: 'basic',
+      });
+
+      await recordLoginEvent({
+        userId: created.id,
+        ipAddress: clientIp,
+        userAgent,
+        eventType: 'signup',
+        success: true,
+      });
+
+      return res.status(201).json({
+        success: true,
+        user: {
+          id: `usr-${created.id}`,
+          name: created.name,
+          email: created.email,
+          role: created.role,
+          department: created.department,
+          provider: 'credentials',
+          loginTime: new Date().toISOString(),
+        },
+      });
+    } catch (dbErr) {
+      console.warn(`[Signup DB Notice]: ${dbErr.message}. Attempting R2 fallback.`);
+    }
+
+    // 2. Fallback to Cloudflare R2
     const { data: users, actualKey } = await readFromR2('user.json', 'users.json', []);
     const exists = users.find((u) => u.email && u.email.toLowerCase() === normalizedEmail);
 
     if (exists) {
       return res.status(409).json({
         error: 'USER_ALREADY_EXISTS',
-        message: 'An account with this email already exists in R2 bucket. Please log in.',
+        message: 'An account with this email already exists. Please log in.',
       });
     }
 
@@ -255,23 +370,31 @@ app.post('/api/auth/signup', async (req, res) => {
     });
   } catch (err) {
     console.error('Signup error:', err.message);
-    res.status(500).json({ error: 'R2_ERROR', message: err.message });
+    res.status(500).json({ error: 'SIGNUP_ERROR', message: err.message });
   }
 });
 
-// ───────────────────── Account Requests Endpoints ─────────────────────
+// ─────────────────────────────────────────────────────────────
+// Account Requests Endpoints (SQL Server with R2 Fallback)
+// ─────────────────────────────────────────────────────────────
 
-// Fetch all requests strictly from Cloudflare R2
+// Fetch all requests
 app.get('/api/requests', async (req, res) => {
   try {
-    const { data: requests } = await readFromR2('accound_request.json', 'account_requests.json', []);
-    res.json({ success: true, data: requests });
+    try {
+      const requests = await getAccountRequests();
+      return res.json({ success: true, data: requests });
+    } catch (dbErr) {
+      console.warn(`[Requests DB Notice]: ${dbErr.message}. Falling back to R2.`);
+      const { data: requests } = await readFromR2('accound_request.json', 'account_requests.json', []);
+      return res.json({ success: true, data: requests });
+    }
   } catch (err) {
-    res.status(500).json({ error: 'R2_ERROR', message: err.message });
+    res.status(500).json({ error: 'REQUESTS_FETCH_ERROR', message: err.message });
   }
 });
 
-// Submit a new request strictly to Cloudflare R2
+// Submit a new request
 app.post('/api/requests', async (req, res) => {
   try {
     const requestData = req.body;
@@ -280,53 +403,145 @@ app.post('/api/requests', async (req, res) => {
       return res.status(400).json({ error: 'Project name and details are required' });
     }
 
-    const { data: requests, actualKey } = await readFromR2('accound_request.json', 'account_requests.json', []);
-    const newRecord = {
-      ...requestData,
-      id: requestData.id || `req-${Date.now().toString(36)}`,
-      submittedAt: requestData.submittedAt || new Date().toISOString(),
-      status: requestData.status || 'pending',
-    };
-
-    requests.unshift(newRecord);
-    await writeToR2(actualKey || 'accound_request.json', requests);
-
-    res.status(201).json({ success: true, data: newRecord });
+    try {
+      const created = await createAccountRequest(requestData);
+      return res.status(201).json({ success: true, data: created });
+    } catch (dbErr) {
+      console.warn(`[Create Request DB Notice]: ${dbErr.message}. Falling back to R2.`);
+      const { data: requests, actualKey } = await readFromR2('accound_request.json', 'account_requests.json', []);
+      const newRecord = {
+        ...requestData,
+        id: requestData.id || `req-${Date.now().toString(36)}`,
+        submittedAt: requestData.submittedAt || new Date().toISOString(),
+        status: requestData.status || 'pending',
+      };
+      requests.unshift(newRecord);
+      await writeToR2(actualKey || 'accound_request.json', requests);
+      return res.status(201).json({ success: true, data: newRecord });
+    }
   } catch (err) {
-    res.status(500).json({ error: 'R2_ERROR', message: err.message });
+    res.status(500).json({ error: 'CREATE_REQUEST_ERROR', message: err.message });
   }
 });
 
-// Admin update status (approve, reject, review) strictly in Cloudflare R2
+// Admin update status
 app.put('/api/requests/:id/status', async (req, res) => {
   try {
     const { id } = req.params;
     const { status, adminNotes, reviewedBy } = req.body;
 
-    const { data: requests, actualKey } = await readFromR2('accound_request.json', 'account_requests.json', []);
-    const index = requests.findIndex((r) => r.id === id);
+    try {
+      const updated = await updateAccountRequestStatus(id, { status, adminNotes, reviewedBy });
+      return res.json({ success: true, data: updated });
+    } catch (dbErr) {
+      console.warn(`[Update Request DB Notice]: ${dbErr.message}. Falling back to R2.`);
+      const { data: requests, actualKey } = await readFromR2('accound_request.json', 'account_requests.json', []);
+      const index = requests.findIndex((r) => r.id === id);
 
-    if (index === -1) {
-      return res.status(404).json({ error: 'Request not found in R2' });
+      if (index === -1) {
+        return res.status(404).json({ error: 'Request not found' });
+      }
+
+      requests[index] = {
+        ...requests[index],
+        status: status || requests[index].status,
+        adminNotes: adminNotes ?? requests[index].adminNotes,
+        reviewedBy: reviewedBy || 'Admin',
+        reviewedAt: new Date().toISOString(),
+      };
+
+      await writeToR2(actualKey || 'accound_request.json', requests);
+      return res.json({ success: true, data: requests[index] });
     }
-
-    requests[index] = {
-      ...requests[index],
-      status: status || requests[index].status,
-      adminNotes: adminNotes ?? requests[index].adminNotes,
-      reviewedBy: reviewedBy || 'Admin',
-      reviewedAt: new Date().toISOString(),
-    };
-
-    await writeToR2(actualKey || 'accound_request.json', requests);
-
-    res.json({ success: true, data: requests[index] });
   } catch (err) {
-    res.status(500).json({ error: 'R2_ERROR', message: err.message });
+    res.status(500).json({ error: 'UPDATE_STATUS_ERROR', message: err.message });
   }
 });
 
+// ─────────────────────────────────────────────────────────────
+// AWS Cost Analytics Data Endpoints (Direct SQL Server)
+// ─────────────────────────────────────────────────────────────
+
+// Accounts metadata
+async function handleAccountsMetadata(req, res) {
+  try {
+    const accounts = await getAwsAccountsMetadata();
+    if (accounts && accounts.length > 0) {
+      return res.json(accounts);
+    }
+  } catch (err) {
+    console.warn(`[Accounts Metadata DB Warning]: ${err.message}`);
+  }
+
+  // Fallback to static file if DB has not yet been populated
+  const localFile = path.resolve(__dirname, 'public/data/accounts.json');
+  if (fs.existsSync(localFile)) {
+    return res.sendFile(localFile);
+  }
+
+  res.json([
+    { id: 'account-1', name: 'Coforge Limited (5131-6780-3309)', path: '/data' },
+    { id: 'account-2', name: 'Coforge OICL (0068-5003-1580)', path: '/data/accounts/account-2' },
+  ]);
+}
+
+app.get('/data/accounts.json', handleAccountsMetadata);
+app.get('/api/data/accounts', handleAccountsMetadata);
+app.get('/data/accounts/accounts.json', handleAccountsMetadata);
+
+// Serve static Azure data files directly (Azure FOCUS pipeline stays 100% untouched)
+app.use('/data/azure', express.static(path.resolve(__dirname, 'public/data/azure')));
+
+// Query AWS Report data handler
+async function handleAwsDataRequest(req, res) {
+  const accountId = req.params.accountId || 'account-1';
+  const filename = req.params.filename;
+
+  if (!filename) {
+    return res.status(400).json({ error: 'Filename is required' });
+  }
+
+  try {
+    const data = await queryAwsTableData(accountId, filename);
+    if (data !== null) {
+      return res.json(data);
+    }
+  } catch (dbErr) {
+    console.warn(`[AWS DB Query Notice for ${accountId}/${filename}]: ${dbErr.message}`);
+  }
+
+  // Fallback to static public file if DB query returned null or was unavailable
+  let candidatePath = '';
+  if (accountId === 'account-1') {
+    candidatePath = path.resolve(__dirname, 'public/data', filename);
+  } else {
+    candidatePath = path.resolve(__dirname, 'public/data/accounts', accountId, filename);
+  }
+
+  if (fs.existsSync(candidatePath)) {
+    return res.sendFile(candidatePath);
+  }
+
+  res.status(404).json({ error: 'DATA_NOT_FOUND', message: `Data for ${filename} not found in database or static storage.` });
+}
+
+// Map both direct /data paths and /api/data paths
+app.get('/data/accounts/:accountId/:filename', handleAwsDataRequest);
+app.get('/api/data/accounts/:accountId/:filename', handleAwsDataRequest);
+app.get('/data/:filename', handleAwsDataRequest);
+app.get('/api/data/:filename', handleAwsDataRequest);
+
+// Serve any other static assets from public
+app.use(express.static(path.resolve(__dirname, 'public')));
+
 // Start Server
 app.listen(PORT, () => {
+  console.log(`\n======================================================`);
   console.log(`🚀 Cost Intelligence API Server running on port ${PORT}`);
+<<<<<<< Updated upstream
 });
+=======
+  console.log(`   Database-backed endpoints active for Auth, Requests & AWS`);
+  console.log(`======================================================\n`);
+});
+>>>>>>> Stashed changes
