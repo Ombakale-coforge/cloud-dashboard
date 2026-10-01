@@ -6,7 +6,16 @@
   "type": "commonjs",
   "scripts": {
     "start": "node src/aws_cost_pipeline.js",
-    "report": "node src/aws_cost_pipeline.js"
+    "report": "node src/aws_cost_pipeline.js",
+    "seed:aws": "tsx src/aws_cost_report/index.ts",
+    "report:aws": "node src/aws_cost_pipeline.js && tsx src/aws_cost_report/index.ts",
+    "server": "tsx src/server/index.ts",
+    "ingest:focus": "tsx src/fetch_data/focus-export/index.ts",
+    "test:focus": "tsx src/fetch_data/focus-export/self-check.ts",
+    "report:azure": "tsx src/azure_cost_report/index.ts",
+    "test:report": "tsx src/azure_cost_report/self-check.ts",
+    "alert:azure": "tsx src/alerts/index.ts",
+    "test:alerts": "tsx src/alerts/self-check.ts"
   },
   "engines": {
     "node": ">=18.0.0"
@@ -29,15 +38,19 @@
     "@azure/storage-blob": "^12.33.0",
     "@prisma/adapter-mssql": "^7.10.0",
     "@prisma/client": "^7.10.0",
+    "cors": "^2.8.5",
     "csv-parse": "^7.0.2",
     "dotenv": "^16.6.1",
+    "express": "^5.2.1",
     "nodemailer": "^9.0.5",
     "winston": "^3.19.0"
   },
   "devDependencies": {
     "@types/mssql": "^12.3.0",
     "@types/node": "^26.6.2",
+    "@types/nodemailer": "^8.0.2",
     "prisma": "^7.10.0",
+    "tsx": "^4.23.15",
     "typescript": "^7.0.2"
   }
 }

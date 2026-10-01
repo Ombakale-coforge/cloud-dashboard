@@ -7,11 +7,14 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "types": ["node"],
+    "allowJs": true,
+    "checkJs": false,
     "noEmit": true
   },
   "include": [
+    "src/**/*.ts",
     "src/**/*.js",
-    "prisma7.config.ts"
+    "prisma.config.js"
   ],
   "exclude": [
     "node_modules",
