@@ -1,53 +1,92 @@
 // schema.prisma
 // -------------------------------------------------------
-// Prisma schema for SQL Server, replacing the Drizzle/MySQL schema.
+// Prisma schema for SQL Server. R2/AWS is gone entirely — Azure Blob
+// (source) and SQL Server (sink) are the only two systems in this
+// pipeline now.
 //
-// 1. No native `enum` type. The SQL Server connector rejects `enum`
-//    blocks outright. Every field that was mysqlEnum(...) in the old
-//    schema (ingestionRuns.status, reportRuns.status) is a plain
-//    String here, with the allowed values documented in a comment and
-//    enforced at the application layer (see the ingest/report
-//    scripts) rather than by the database. This is a real, if minor,
-//    strictness regression versus MySQL's native ENUM — worth knowing
-//    even though it doesn't block anything.
+// Changes made in this revision:
 //
-// 2. No native `Json` type. usageRecords.tags is a String holding
-//    JSON text; the app JSON.stringify()/JSON.parse()s it manually,
-//    same as it already had to for tagsRaw.
+// 1. Prisma 7 removed the datasource `url` property from schema files
+//    entirely — connection config for Migrate/CLI now lives in
+//    prisma.config.ts (see that file), and PrismaClient itself takes a
+//    driver adapter instance at construction time rather than reading
+//    DATABASE_URL implicitly. See ingest-focus-export.js's `adapter`
+//    setup and prisma.config.ts alongside this schema.
 //
-// 3. SQL Server allows a maximum of 2,100 parameters per query. This
-//    doesn't affect the schema file itself, but it's why the ingest
-//    and report-generation scripts compute batch sizes from column
-//    counts instead of using one fixed constant — a naive 500-row
-//    batch against usage_records' ~30 columns would be ~15,000
-//    parameters and fail every single time, not occasionally.
+// 2. IngestionRun.period / .runId renamed to exportPeriod / exportRunId,
+//    and the model itself renamed IngestionRun -> AzureIngestionRun
+//    (table azure_ingestion_runs) — see point 7 below.
 //
-// Everything else (design decisions #1–#11 for dedup/supersede
-// handling, the report-table refresh strategy) is unchanged from the
-// Drizzle schema — only the column-type syntax and connector-specific
-// workarounds differ.
+// 3. azure_usage_records_date_meter_idx was recomputed against SQL Server's
+//    900-byte nonclustered index key limit. Worst case with the
+//    inherited MySQL-style NVarChar(191) widths was ~959 bytes — over
+//    the limit. NVarChar(191) came from MySQL/InnoDB's utf8mb4 index
+//    prefix cap (767 bytes / 4), which doesn't apply here at all.
+//    subscriptionId and meterId actually hold short Azure IDs, so both
+//    are right-sized to NVarChar(100), and consumedUnit was dropped
+//    from this one composite index (still a plain column, just not
+//    part of this key). New worst case: ~467 bytes.
+//
+// 4. No native `enum` type — status fields are plain String with
+//    allowed values documented in comments, enforced at the app layer.
+//
+// 5. No native `Json` type — usageRecords.tags and reportRuns.monthsCovered
+//    are String columns holding JSON text. The app must
+//    JSON.stringify() before writing and JSON.parse() after reading —
+//    Prisma will NOT do this for you the way it might for a native Json
+//    column on providers that support one.
+//
+// 6. SQL Server hard limits that the ingest script chunks around:
+//      - max ~2,100 parameters per query
+//      - max 1,000 rows per multi-row INSERT
+//    Neither limit is expressed in this schema file — see
+//    ingest-focus-export.js's computeInsertChunkSize().
+//
+// 7. Every model is prefixed Azure* (and every mapped table/index name
+//    azure_*): AzureIngestionRun / azure_ingestion_runs and
+//    AzureUsageRecord / azure_usage_records hold data sourced directly
+//    from Azure; the eighteen AzureReport* / azure_report_* tables are
+//    computed downstream of azure_usage_records rather than sourced
+//    from Azure directly, but they're written by the same pipeline and
+//    back the same Azure FinOps dashboard, so they carry the same
+//    prefix rather than a separate naming scheme.
+//
+// Everything else (dedup/supersede design, report-table shape) is
+// unchanged from the MySQL/Drizzle version.
 
 datasource db {
   provider = "sqlserver"
 }
 
 generator client {
-  provider = "prisma-client"
-  output   = "../generated/prisma"
+  provider               = "prisma-client"
+  output                 = "../generated/prisma"
+  moduleFormat           = "esm"
+  generatedFileExtension = "mts"
+  importFileExtension    = "mts"
 }
 
 // ---------------------------------------------------------------
-// ingestion_runs — append-only log of every Azure export run
-// processed. status is a plain String ("started" | "success" |
-// "failed") since SQL Server has no native enum — see file header.
+// azure_ingestion_runs — append-only log of every Azure Cost
+// Management FOCUS export run processed. Prefixed azure_ since this
+// table (unlike the report_* tables further down) holds data sourced
+// directly from Azure. status is a plain String
+// ("started" | "success" | "failed") — see file header point 4.
 // ---------------------------------------------------------------
-model IngestionRun {
+model AzureIngestionRun {
   id                 BigInt   @id @default(autoincrement()) @map("id")
-  period             String   @map("period") @db.NVarChar(64)
-  runId              String   @map("run_id") @db.NVarChar(191)
+
+  /// The Azure export's period folder, e.g. "2026-09" — one per
+  /// calendar month, per the FOCUS export layout.
+  exportPeriod       String   @map("export_period") @db.NVarChar(64)
+
+  /// The Azure export's own runId, taken from its blob path
+  /// (<prefix>/<exportPeriod>/<exportRunId>/...). For an open month
+  /// Azure assigns a new one on every MonthToDate re-export.
+  exportRunId        String   @map("export_run_id") @db.NVarChar(191)
 
   /// Allowed values: "started" | "success" | "failed". Enforced in
-  /// application code, not by the database — see file header.
+  /// application code, not by the database — see file header point 4.
   status             String   @default("started") @map("status") @db.NVarChar(16)
   errorMessage       String?  @map("error_message") @db.NVarChar(1024)
 
@@ -57,93 +96,118 @@ model IngestionRun {
   duplicatesFlagged  Int      @default(0) @map("duplicates_flagged")
   supersedesFlagged  Int      @default(0) @map("supersedes_flagged")
 
-  usageRecords       UsageRecord[]
+  usageRecords       AzureUsageRecord[]
 
-  @@unique([period, runId], map: "ingestion_runs_period_run_unique")
-  @@index([period], map: "ingestion_runs_period_idx")
-  @@map("ingestion_runs")
+  @@unique([exportPeriod, exportRunId], map: "azure_ingestion_runs_period_run_unique")
+  @@index([exportPeriod], map: "azure_ingestion_runs_period_idx")
+  @@map("azure_ingestion_runs")
 }
 
 // ---------------------------------------------------------------
-// usage_records — one row per FOCUS charge line. See the original
-// schema's design decisions #1–#11 (unchanged) for the reasoning
-// behind stableRowHash / chargeKeyHash / the supersede mechanism.
+// azure_usage_records — one row per FOCUS charge line. Prefixed
+// azure_ since this table holds data sourced directly from Azure
+// (unlike the report_* tables further down, which are computed
+// downstream from this one). Dedup/supersede design unchanged:
+// stableRowHash detects an exact re-delivery of the same row;
+// chargeKeyHash identifies "the same underlying charge" independent
+// of cost, so a revised amount for an already-ingested charge
+// supersedes the old row instead of duplicating or overwriting it.
+// See ingest-focus-export.js for the full mechanism.
 // ---------------------------------------------------------------
-model UsageRecord {
-  id                     BigInt    @id @default(autoincrement()) @map("id")
+model AzureUsageRecord {
+  id                      BigInt    @id @default(autoincrement()) @map("id")
 
-  stableRowHash          String    @map("stable_row_hash") @db.Char(64)
-  chargeKeyHash          String    @map("charge_key_hash") @db.Char(64)
-  isDuplicateOfEarlierRow Boolean  @default(false) @map("is_duplicate_of_earlier_row")
-  isSupersededByLaterRow Boolean   @default(false) @map("is_superseded_by_later_row")
+  stableRowHash           String    @map("stable_row_hash") @db.Char(64)
+  chargeKeyHash           String    @map("charge_key_hash") @db.Char(64)
+  isDuplicateOfEarlierRow Boolean   @default(false) @map("is_duplicate_of_earlier_row")
+  isSupersededByLaterRow  Boolean   @default(false) @map("is_superseded_by_later_row")
 
-  usageDate              DateTime  @map("usage_date") @db.Date
-  usageMonth             String    @map("usage_month") @db.Char(7)
-  chargePeriodStart      DateTime? @map("charge_period_start")
-  chargePeriodEnd        DateTime? @map("charge_period_end")
+  usageDate               DateTime  @map("usage_date") @db.Date
+  usageMonth              String    @map("usage_month") @db.Char(7)
+  chargePeriodStart       DateTime? @map("charge_period_start")
+  chargePeriodEnd         DateTime? @map("charge_period_end")
 
-  // Immutable ID only — never fall back to subscriptionName here.
-  subscriptionId         String    @map("subscription_id") @db.NVarChar(191)
-  subscriptionName       String?   @map("subscription_name") @db.NVarChar(255)
+  // Immutable Azure subscription ID (FOCUS SubAccountId) only — never
+  // fall back to subscriptionName here. Right-sized to NVarChar(100):
+  // an Azure subscription ID is a 36-char GUID, and this column is
+  // part of a composite index — see file header point 3.
+  subscriptionId          String    @map("subscription_id") @db.NVarChar(100)
+  subscriptionName        String?   @map("subscription_name") @db.NVarChar(255)
 
   // Nullable: FOCUS allows ResourceId to be null for charges not tied
   // to a resource (Purchases, Tax, some Adjustments).
-  resourceId             String?   @map("resource_id") @db.NVarChar(300)
-  resourceIdHash         String?   @map("resource_id_hash") @db.Char(64)
-  resourceName           String?   @map("resource_name") @db.NVarChar(255)
-  resourceGroup          String?   @map("resource_group") @db.NVarChar(255)
+  resourceId              String?   @map("resource_id") @db.NVarChar(300)
+  resourceIdHash          String?   @map("resource_id_hash") @db.Char(64)
+  resourceName            String?   @map("resource_name") @db.NVarChar(255)
+  resourceGroup           String?   @map("resource_group") @db.NVarChar(255)
 
-  service                String    @map("service") @db.NVarChar(255)
+  service                 String    @map("service") @db.NVarChar(255)
 
-  meterId                String?   @map("meter_id") @db.NVarChar(191)
-  meterName              String?   @map("meter_name") @db.NVarChar(255)
-  meterCategory          String?   @map("meter_category") @db.NVarChar(255)
-  meterSubCategory       String?   @map("meter_sub_category") @db.NVarChar(255)
+  // Right-sized to NVarChar(100) — also part of a composite index,
+  // see file header point 3. Azure meter IDs are GUIDs.
+  meterId                 String?   @map("meter_id") @db.NVarChar(100)
+  meterName               String?   @map("meter_name") @db.NVarChar(255)
+  meterCategory           String?   @map("meter_category") @db.NVarChar(255)
+  meterSubCategory        String?   @map("meter_sub_category") @db.NVarChar(255)
 
-  consumedQuantity       Decimal?  @map("consumed_quantity") @db.Decimal(24, 6)
-  consumedUnit           String?   @map("consumed_unit") @db.NVarChar(64)
-  pricingQuantity        Decimal?  @map("pricing_quantity") @db.Decimal(24, 6)
-  pricingUnit            String?   @map("pricing_unit") @db.NVarChar(64)
+  consumedQuantity        Decimal?  @map("consumed_quantity") @db.Decimal(24, 6)
+  consumedUnit            String?   @map("consumed_unit") @db.NVarChar(64)
+  pricingQuantity         Decimal?  @map("pricing_quantity") @db.Decimal(24, 6)
+  pricingUnit             String?   @map("pricing_unit") @db.NVarChar(64)
 
-  billedCost             Decimal   @map("billed_cost") @db.Decimal(18, 6)
-  effectiveCost          Decimal   @map("effective_cost") @db.Decimal(18, 6)
-  billingCurrency        String    @default("INR") @map("billing_currency") @db.NVarChar(8)
+  billedCost              Decimal   @map("billed_cost") @db.Decimal(18, 6)
+  effectiveCost           Decimal   @map("effective_cost") @db.Decimal(18, 6)
+  billingCurrency         String    @default("INR") @map("billing_currency") @db.NVarChar(8)
 
-  chargeType             String?   @map("charge_type") @db.NVarChar(64)
-  chargeClass            String?   @map("charge_class") @db.NVarChar(32)
-  region                 String?   @map("region") @db.NVarChar(128)
-  pricingModel           String?   @map("pricing_model") @db.NVarChar(64)
-  isCreditEligible       Boolean?  @map("is_credit_eligible")
+  chargeType              String?   @map("charge_type") @db.NVarChar(64)
+  chargeClass             String?   @map("charge_class") @db.NVarChar(32)
+  region                  String?   @map("region") @db.NVarChar(128)
+  pricingModel            String?   @map("pricing_model") @db.NVarChar(64)
+  isCreditEligible        Boolean?  @map("is_credit_eligible")
 
-  // JSON text, not a native Json column — see file header point 2.
-  tags                   String?   @map("tags") @db.NVarChar(Max)
-  tagsRaw                String?   @map("tags_raw") @db.NVarChar(2048)
+  // JSON TEXT, not a native Json column — see file header point 5.
+  // The app must JSON.stringify() the parsed tags object before
+  // writing this field and JSON.parse() it back out on read.
+  tags                    String?   @map("tags") @db.NVarChar(Max)
+  tagsRaw                 String?   @map("tags_raw") @db.NVarChar(2048)
 
-  isExcludedFromAlerts   Boolean   @default(false) @map("is_excluded_from_alerts")
+  isExcludedFromAlerts    Boolean   @default(false) @map("is_excluded_from_alerts")
 
-  ingestionRunId         BigInt?   @map("ingestion_run_id")
-  ingestionRun           IngestionRun? @relation(fields: [ingestionRunId], references: [id])
+  ingestionRunId          BigInt?   @map("ingestion_run_id")
+  ingestionRun            AzureIngestionRun? @relation(fields: [ingestionRunId], references: [id])
 
-  createdAt              DateTime  @default(now()) @map("created_at")
+  createdAt               DateTime  @default(now()) @map("created_at")
 
-  @@index([stableRowHash], map: "usage_records_stable_hash_idx")
-  @@index([chargeKeyHash], map: "usage_records_charge_key_hash_idx")
-  @@index([usageDate, subscriptionId], map: "usage_records_date_sub_idx")
-  @@index([usageDate, service], map: "usage_records_date_service_idx")
-  @@index([usageDate, subscriptionId, resourceIdHash], map: "usage_records_date_resource_idx")
-  @@index([usageDate, subscriptionId, resourceIdHash, meterId, consumedUnit], map: "usage_records_date_meter_idx")
-  @@index([resourceIdHash, usageDate], map: "usage_records_resource_seen_idx")
-  @@index([usageMonth], map: "usage_records_usage_month_idx")
-  @@index([ingestionRunId], map: "usage_records_ingestion_run_idx")
-  @@map("usage_records")
+  @@index([stableRowHash], map: "azure_usage_records_stable_hash_idx")
+  @@index([chargeKeyHash], map: "azure_usage_records_charge_key_hash_idx")
+  @@index([usageDate, subscriptionId], map: "azure_usage_records_date_sub_idx")
+  @@index([usageDate, service], map: "azure_usage_records_date_service_idx")
+  @@index([usageDate, subscriptionId, resourceIdHash], map: "azure_usage_records_date_resource_idx")
+  // consumedUnit dropped from this key vs. the earlier draft — see
+  // file header point 3 for the byte-length math.
+  @@index([usageDate, subscriptionId, resourceIdHash, meterId], map: "azure_usage_records_date_meter_idx")
+  @@index([resourceIdHash, usageDate], map: "azure_usage_records_resource_seen_idx")
+  @@index([usageMonth], map: "azure_usage_records_usage_month_idx")
+  @@index([ingestionRunId], map: "azure_usage_records_ingestion_run_idx")
+  @@index([isDuplicateOfEarlierRow, isSupersededByLaterRow, isExcludedFromAlerts, usageDate], map: "azure_usage_records_active_alerts_idx")
+  @@map("azure_usage_records")
 }
 
 // ---------------------------------------------------------------
-// report_runs — append-only log of every reporting pipeline run.
-// Same started/success/failed tracking as IngestionRun, same reason:
-// a failed refresh must never be mistaken for a completed one.
+// azure_report_runs — append-only log of every reporting pipeline run.
+// Also prefixed azure_: these are computed downstream of
+// azure_usage_records, but they're written by the same pipeline and
+// serve the same Azure FinOps dashboard, so they get the same prefix.
+// Same started/success/failed tracking as AzureIngestionRun, same
+// reason: a failed refresh must never be mistaken for a completed one.
+//
+// NOTE (still unaddressed — not part of this pass): none of the
+// AzureReport* tables below carry an actual @relation to this model —
+// reportRunId is a plain Int on each with no FK enforcement. Worth
+// revisiting if you want Prisma to enforce/traverse that relationship
+// when the report-generation script gets its own Prisma rewrite.
 // ---------------------------------------------------------------
-model ReportRun {
+model AzureReportRun {
   id                      Int      @id @default(autoincrement()) @map("id")
   runStamp                String   @map("run_stamp") @db.NVarChar(32)
 
@@ -153,9 +217,9 @@ model ReportRun {
   startedAt               DateTime @default(now()) @map("started_at")
   completedAt             DateTime? @map("completed_at")
   durationMs              Int?     @map("duration_ms")
-  dedupedRowCount          BigInt?  @map("deduped_row_count")
+  dedupedRowCount         BigInt?  @map("deduped_row_count")
 
-  // JSON text (array of "YYYY-MM" strings) — not a native Json column.
+  // JSON text (array of "YYYY-MM" strings) — see file header point 5.
   monthsCovered           String?  @map("months_covered") @db.NVarChar(Max)
 
   anomalyThresholdPercent Decimal? @map("anomaly_threshold_percent") @db.Decimal(6, 2)
@@ -163,21 +227,21 @@ model ReportRun {
   errorMessage            String?  @map("error_message") @db.NVarChar(1024)
   logText                 String?  @map("log_text") @db.NVarChar(Max)
 
-  @@index([runStamp], map: "report_runs_run_stamp_idx")
-  @@map("report_runs")
+  @@index([runStamp], map: "azure_report_runs_run_stamp_idx")
+  @@map("azure_report_runs")
 }
 
-model ReportMonthlyTotals {
+model AzureReportMonthlyTotals {
   id           Int    @id @default(autoincrement()) @map("id")
   reportRunId  Int    @map("report_run_id")
   month        String @map("month") @db.Char(7)
   totalCost    Decimal @map("total_cost") @db.Decimal(18, 2)
 
-  @@index([month], map: "report_monthly_totals_month_idx")
-  @@map("report_monthly_totals")
+  @@index([month], map: "azure_report_monthly_totals_month_idx")
+  @@map("azure_report_monthly_totals")
 }
 
-model ReportKpisByMonth {
+model AzureReportKpisByMonth {
   id                    Int      @id @default(autoincrement()) @map("id")
   reportRunId           Int      @map("report_run_id")
   month                 String   @map("month") @db.Char(7)
@@ -189,22 +253,22 @@ model ReportKpisByMonth {
   subscriptions         Int      @default(0) @map("subscriptions")
   resourceGroups        Int      @default(0) @map("resource_groups")
 
-  @@index([month], map: "report_kpis_by_month_month_idx")
-  @@map("report_kpis_by_month")
+  @@index([month], map: "azure_report_kpis_by_month_month_idx")
+  @@map("azure_report_kpis_by_month")
 }
 
-model ReportBySubscription {
+model AzureReportBySubscription {
   id           Int     @id @default(autoincrement()) @map("id")
   reportRunId  Int     @map("report_run_id")
   month        String  @map("month") @db.Char(7)
   subscription String  @map("subscription") @db.NVarChar(255)
   cost         Decimal @map("cost") @db.Decimal(18, 2)
 
-  @@index([month], map: "report_by_subscription_month_idx")
-  @@map("report_by_subscription")
+  @@index([month], map: "azure_report_by_subscription_month_idx")
+  @@map("azure_report_by_subscription")
 }
 
-model ReportByResourceGroup {
+model AzureReportByResourceGroup {
   id            Int     @id @default(autoincrement()) @map("id")
   reportRunId   Int     @map("report_run_id")
   month         String  @map("month") @db.Char(7)
@@ -212,66 +276,66 @@ model ReportByResourceGroup {
   subscription  String  @map("subscription") @db.NVarChar(255)
   cost          Decimal @map("cost") @db.Decimal(18, 2)
 
-  @@index([month], map: "report_by_resource_group_month_idx")
-  @@map("report_by_resource_group")
+  @@index([month], map: "azure_report_by_resource_group_month_idx")
+  @@map("azure_report_by_resource_group")
 }
 
-model ReportByService {
+model AzureReportByService {
   id               Int     @id @default(autoincrement()) @map("id")
   reportRunId      Int     @map("report_run_id")
   month            String  @map("month") @db.Char(7)
   consumedService  String  @map("consumed_service") @db.NVarChar(255)
   cost             Decimal @map("cost") @db.Decimal(18, 2)
 
-  @@index([month], map: "report_by_service_month_idx")
-  @@map("report_by_service")
+  @@index([month], map: "azure_report_by_service_month_idx")
+  @@map("azure_report_by_service")
 }
 
-model ReportByChargeType {
+model AzureReportByChargeType {
   id           Int     @id @default(autoincrement()) @map("id")
   reportRunId  Int     @map("report_run_id")
   month        String  @map("month") @db.Char(7)
   chargeType   String  @map("charge_type") @db.NVarChar(64)
   cost         Decimal @map("cost") @db.Decimal(18, 2)
 
-  @@index([month], map: "report_by_charge_type_month_idx")
-  @@map("report_by_charge_type")
+  @@index([month], map: "azure_report_by_charge_type_month_idx")
+  @@map("azure_report_by_charge_type")
 }
 
-model ReportByRegion {
+model AzureReportByRegion {
   id           Int     @id @default(autoincrement()) @map("id")
   reportRunId  Int     @map("report_run_id")
   month        String  @map("month") @db.Char(7)
   region       String  @map("region") @db.NVarChar(128)
   cost         Decimal @map("cost") @db.Decimal(18, 2)
 
-  @@index([month], map: "report_by_region_month_idx")
-  @@map("report_by_region")
+  @@index([month], map: "azure_report_by_region_month_idx")
+  @@map("azure_report_by_region")
 }
 
-model ReportByPricingModel {
+model AzureReportByPricingModel {
   id            Int     @id @default(autoincrement()) @map("id")
   reportRunId   Int     @map("report_run_id")
   month         String  @map("month") @db.Char(7)
   pricingModel  String  @map("pricing_model") @db.NVarChar(64)
   cost          Decimal @map("cost") @db.Decimal(18, 2)
 
-  @@index([month], map: "report_by_pricing_model_month_idx")
-  @@map("report_by_pricing_model")
+  @@index([month], map: "azure_report_by_pricing_model_month_idx")
+  @@map("azure_report_by_pricing_model")
 }
 
-model ReportCreditEligibility {
+model AzureReportCreditEligibility {
   id             Int     @id @default(autoincrement()) @map("id")
   reportRunId    Int     @map("report_run_id")
   month          String  @map("month") @db.Char(7)
   creditEligible String  @map("credit_eligible") @db.NVarChar(16)
   cost           Decimal @map("cost") @db.Decimal(18, 2)
 
-  @@index([month], map: "report_credit_eligibility_month_idx")
-  @@map("report_credit_eligibility")
+  @@index([month], map: "azure_report_credit_eligibility_month_idx")
+  @@map("azure_report_credit_eligibility")
 }
 
-model ReportTopMeters {
+model AzureReportTopMeters {
   id             Int     @id @default(autoincrement()) @map("id")
   reportRunId    Int     @map("report_run_id")
   month          String  @map("month") @db.Char(7)
@@ -281,11 +345,11 @@ model ReportTopMeters {
   resourceGroup  String  @map("resource_group") @db.NVarChar(255)
   cost           Decimal @map("cost") @db.Decimal(18, 2)
 
-  @@index([month], map: "report_top_meters_month_idx")
-  @@map("report_top_meters")
+  @@index([month], map: "azure_report_top_meters_month_idx")
+  @@map("azure_report_top_meters")
 }
 
-model ReportMomChange {
+model AzureReportMomChange {
   id                 Int      @id @default(autoincrement()) @map("id")
   reportRunId        Int      @map("report_run_id")
   month              String   @map("month") @db.Char(7)
@@ -293,11 +357,11 @@ model ReportMomChange {
   previousMonthCost  Decimal? @map("previous_month_cost") @db.Decimal(18, 2)
   momPercentChange   Decimal? @map("mom_percent_change") @db.Decimal(10, 2)
 
-  @@index([month], map: "report_mom_change_month_idx")
-  @@map("report_mom_change")
+  @@index([month], map: "azure_report_mom_change_month_idx")
+  @@map("azure_report_mom_change")
 }
 
-model ReportCostConcentrationPareto {
+model AzureReportCostConcentrationPareto {
   id                  Int     @id @default(autoincrement()) @map("id")
   reportRunId         Int     @map("report_run_id")
   service             String  @map("service") @db.NVarChar(255)
@@ -306,10 +370,10 @@ model ReportCostConcentrationPareto {
   cumulativePercent   Decimal @map("cumulative_percent") @db.Decimal(6, 2)
   rank                Int     @map("rank")
 
-  @@map("report_cost_concentration_pareto")
+  @@map("azure_report_cost_concentration_pareto")
 }
 
-model ReportAnomalyFlags {
+model AzureReportAnomalyFlags {
   id                 Int      @id @default(autoincrement()) @map("id")
   reportRunId        Int      @map("report_run_id")
   month              String   @map("month") @db.Char(7)
@@ -319,30 +383,30 @@ model ReportAnomalyFlags {
   thresholdPercent   Decimal  @map("threshold_percent") @db.Decimal(6, 2)
   isAnomaly          Boolean  @default(false) @map("is_anomaly")
 
-  @@index([month], map: "report_anomaly_flags_month_idx")
-  @@map("report_anomaly_flags")
+  @@index([month], map: "azure_report_anomaly_flags_month_idx")
+  @@map("azure_report_anomaly_flags")
 }
 
-model ReportNewServicesByMonth {
+model AzureReportNewServicesByMonth {
   id           Int    @id @default(autoincrement()) @map("id")
   reportRunId  Int    @map("report_run_id")
   month        String @map("month") @db.Char(7)
   newService   String @map("new_service") @db.NVarChar(255)
 
-  @@index([month], map: "report_new_services_by_month_month_idx")
-  @@map("report_new_services_by_month")
+  @@index([month], map: "azure_report_new_services_by_month_month_idx")
+  @@map("azure_report_new_services_by_month")
 }
 
-model ReportForecastNextMonth {
+model AzureReportForecastNextMonth {
   id                    Int     @id @default(autoincrement()) @map("id")
   reportRunId           Int     @map("report_run_id")
   method                String  @map("method") @db.NVarChar(64)
   forecastedTotalCost   Decimal @map("forecasted_total_cost") @db.Decimal(18, 2)
 
-  @@map("report_forecast_next_month")
+  @@map("azure_report_forecast_next_month")
 }
 
-model ReportVolatility {
+model AzureReportVolatility {
   id                              Int     @id @default(autoincrement()) @map("id")
   reportRunId                     Int     @map("report_run_id")
   service                         String  @map("service") @db.NVarChar(255)
@@ -350,10 +414,10 @@ model ReportVolatility {
   stdDev                          Decimal @map("std_dev") @db.Decimal(18, 2)
   coefficientOfVariationPercent   Decimal @map("coefficient_of_variation_percent") @db.Decimal(10, 1)
 
-  @@map("report_volatility")
+  @@map("azure_report_volatility")
 }
 
-model ReportTopResources {
+model AzureReportTopResources {
   id             Int     @id @default(autoincrement()) @map("id")
   reportRunId    Int     @map("report_run_id")
   month          String  @map("month") @db.Char(7)
@@ -362,8 +426,8 @@ model ReportTopResources {
   service        String  @map("service") @db.NVarChar(255)
   cost           Decimal @map("cost") @db.Decimal(18, 2)
 
-  @@index([month], map: "report_top_resources_month_idx")
-  @@map("report_top_resources")
+  @@index([month], map: "azure_report_top_resources_month_idx")
+  @@map("azure_report_top_resources")
 }
 
 // =====================================================================
@@ -373,6 +437,12 @@ model ReportTopResources {
 // Added 2026-09-27. Replaces the two JSON documents the React app keeps
 // in Cloudflare R2 (user.json and accound_request.json). Everything
 // above this line is the Azure FOCUS pipeline and is untouched.
+//
+// NOT prefixed Azure*/azure_ — deliberately. This is auth/workflow
+// data for the dashboard app itself, not data sourced from or about
+// Azure, so an Azure prefix here would misdescribe it. See the AWS
+// Cost Pipeline section further down for the same reasoning applied
+// to a different non-Azure subsystem living in the same database.
 //
 // Conventions match the Azure section: snake_case @map, no native
 // enum (allowed values in /// comments, enforced in code), no native
@@ -1008,3 +1078,4 @@ model AwsGovernanceSummary {
 
   @@map("aws_governance_summary")
 }
+

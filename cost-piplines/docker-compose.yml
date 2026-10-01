@@ -14,6 +14,21 @@ services:
     volumes:
       - prisma_shadow_data:/var/opt/mssql
 
+  sqlserver-dev:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: prisma-dev-sqlserver
+    restart: unless-stopped
+
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "YourStrongPassword123!"
+
+    ports:
+      - "11434:1433"
+
+    volumes:
+      - prisma_dev_data:/var/opt/mssql
+
 volumes:
   prisma_shadow_data:
-
+  prisma_dev_data:
