@@ -1123,6 +1123,28 @@ async function main() {
     await processAccount(acc);
   }
 
+  // Attempt SQL Server seeding if configured
+  if (process.env.DATABASE_URL) {
+    try {
+      console.log(`\n==========================================================`);
+      console.log(`🌱 Seeding generated AWS reports into SQL Server database...`);
+      console.log(`==========================================================`);
+      const { spawnSync } = require("child_process");
+      const seedResult = spawnSync(
+        process.execPath,
+        ["node_modules/tsx/dist/cli.mjs", "src/aws_cost_report/index.ts"],
+        { stdio: "inherit", cwd: PROJECT_ROOT }
+      );
+      if (seedResult.status === 0) {
+        console.log(`✅ SQL Server seeding completed successfully.`);
+      } else {
+        console.warn(`⚠️ SQL Server seeding exited with code ${seedResult.status}. Preloaded CSVs remain active for fallback.`);
+      }
+    } catch (seedErr) {
+      console.warn(`⚠️ SQL Server seeding skipped: ${seedErr.message}. Preloaded CSVs remain active for fallback.`);
+    }
+  }
+
   console.log(`\n==========================================================`);
   console.log(`🎉 Multi-Account AWS Cost Pipeline Finished!`);
   console.log(`==========================================================\n`);
