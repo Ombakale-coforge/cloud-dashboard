@@ -137,12 +137,12 @@ export default function App() {
             });
     }, []);
 
-    // Fetch Azure accounts.json metadata if available
+    // Fetch Azure accounts from SQL Server database API (with fallback)
     useEffect(() => {
-        fetch("/data/azure/accounts.json")
+        fetch("/api/azure/accounts")
             .then((res) => {
                 if (res.ok) return res.json();
-                return null;
+                return fetch("/data/azure/accounts.json").then((r) => (r.ok ? r.json() : null));
             })
             .then((data) => {
                 if (Array.isArray(data) && data.length > 0) {

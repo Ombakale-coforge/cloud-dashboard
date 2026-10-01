@@ -5,10 +5,12 @@
   "type": "module",
   "scripts": {
     "sync-data": "node scripts/sync-data.js",
-    "server": "node server.js",
+    "predev": "node scripts/sync-data.js",
+    "server": "tsx ../src/server/index.ts",
     "dev:vite": "vite",
-    "dev": "npm run sync-data && concurrently -k -p \"[{name}]\" -n \"API,VITE\" -c \"cyan,magenta\" \"node server.js\" \"vite\"",
-    "build": "npm run sync-data && vite build",
+    "dev": "concurrently -k -p \"[{name}]\" -n \"API,VITE\" -c \"cyan,magenta\" \"tsx ../src/server/index.ts\" \"vite\"",
+    "prebuild": "node scripts/sync-data.js",
+    "build": "vite build",
     "deploy": "npm run build && wrangler pages deploy dist",
     "lint": "eslint .",
     "preview": "vite preview"
@@ -52,6 +54,7 @@
     "globals": "^17.7.0",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.65.0",
+    "tsx": "^4.23.15",
     "vite": "^8.2.0",
     "wrangler": "^4.127.1"
   }

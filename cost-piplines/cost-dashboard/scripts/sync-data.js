@@ -1,512 +1,59 @@
-import dotenv from "dotenv";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Load dotenv from both current directory and parent directory
-dotenv.config({ path: path.resolve(__dirname, "../.env") });
-dotenv.config({ path: path.resolve(__dirname, "../../.env") });
+const dashboardRoot = path.resolve(__dirname, "..");
+const projectRoot = path.resolve(dashboardRoot, "..");
+const awsLatestDir = path.join(projectRoot, "AWSReports", "latest");
+const awsAccountsDir = path.join(projectRoot, "AWSReports", "accounts");
+const publicDataDir = path.join(dashboardRoot, "public", "data");
 
-import {
-    S3Client,
-    ListObjectsV2Command,
-    GetObjectCommand,
-} from "@aws-sdk/client-s3";
-
-// ---------------------------------------------------------------------
-// Local AWS report paths
-// ---------------------------------------------------------------------
-
-const baseAwsReports = path.resolve(
-    __dirname,
-    "../../AWSReports"
-);
-
-const srcDir = path.resolve(
-    baseAwsReports,
-    "latest"
-);
-
-const accountsDir = path.resolve(
-    baseAwsReports,
-    "accounts"
-);
-
-const destDir = path.resolve(
-    __dirname,
-    "../public/data"
-);
-
-// ---------------------------------------------------------------------
-// Azure destination path
-// ---------------------------------------------------------------------
-
-const azureDestDir = path.resolve(
-    __dirname,
-    "../public/data/azure"
-);
-
-// ---------------------------------------------------------------------
-// R2 configuration
-// ---------------------------------------------------------------------
-
-const R2_AZURE_DATA_ACCOUNT_ID = process.env.R2_AZURE_DATA_ACCOUNT_ID || process.env.R2_ACCOUNT_ID;
-const R2_AZURE_DATA_ACCESS_KEY_ID = process.env.R2_AZURE_DATA_ACCESS_KEY_ID || process.env.R2_ACCESS_KEY_ID;
-const R2_AZURE_DATA_BUCKET_NAME = process.env.R2_AZURE_DATA_BUCKET_NAME || process.env.R2_BUCKET_NAME || "azure-reconciliation-data";
-const R2_AZURE_DATA_SECRET_ACCESS_KEY = process.env.R2_AZURE_DATA_SECRET_ACCESS_KEY || process.env.R2_SECRET_ACCESS_KEY;
-
-const requiredR2EnvironmentVariables = {
-    R2_AZURE_DATA_ACCOUNT_ID,
-    R2_AZURE_DATA_ACCESS_KEY_ID,
-    R2_AZURE_DATA_BUCKET_NAME,
-    R2_AZURE_DATA_SECRET_ACCESS_KEY,
-};
-
-const missingR2EnvironmentVariables = Object.entries(
-    requiredR2EnvironmentVariables
-)
-    .filter(([, value]) => !value)
-    .map(([name]) => name);
-
-if (missingR2EnvironmentVariables.length > 0) {
-    console.warn(
-        "Warning: Missing R2 environment variables for Azure sync: " +
-        missingR2EnvironmentVariables.join(", ") +
-        ". Azure sync will be skipped."
-    );
-}
-
-function normalizePrefix(value, fallback) {
-    const prefix = String(value || fallback)
-        .trim()
-        .replace(/^\/+/, "");
-
-    return prefix.endsWith("/")
-        ? prefix
-        : `${prefix}/`;
-}
-
-const AZURE_REPORT_PREFIX = normalizePrefix(
-    process.env.R2_AZURE_REPORT_PREFIX,
-    "usage-data-reports/latest/"
-);
-
-const r2Client = new S3Client({
-    region: "auto",
-
-    endpoint:
-        `https://${R2_AZURE_DATA_ACCOUNT_ID}` +
-        ".r2.cloudflarestorage.com",
-
-    credentials: {
-        accessKeyId:
-            R2_AZURE_DATA_ACCESS_KEY_ID,
-
-        secretAccessKey:
-            R2_AZURE_DATA_SECRET_ACCESS_KEY,
-    },
-});
-
-// ---------------------------------------------------------------------
-// Local filesystem helpers
-// ---------------------------------------------------------------------
-
-function recreateDirectory(directory) {
-    if (fs.existsSync(directory)) {
-        fs.rmSync(directory, {
-            recursive: true,
-            force: true,
-        });
+function copyDirFiles(srcDir, destDir) {
+  if (!fs.existsSync(srcDir)) return 0;
+  fs.mkdirSync(destDir, { recursive: true });
+  let count = 0;
+  for (const file of fs.readdirSync(srcDir)) {
+    const srcPath = path.join(srcDir, file);
+    if (fs.statSync(srcPath).isFile() && (file.endsWith(".csv") || file.endsWith(".json"))) {
+      fs.copyFileSync(srcPath, path.join(destDir, file));
+      count++;
     }
-
-    fs.mkdirSync(directory, {
-        recursive: true,
-    });
+  }
+  return count;
 }
 
-function ensureDirectory(directory) {
-    if (!fs.existsSync(directory)) {
-        fs.mkdirSync(directory, {
-            recursive: true,
-        });
-    }
-}
+function sync() {
+  console.log("🔄 Syncing AWS report files to cost-dashboard/public/data...");
 
-// ---------------------------------------------------------------------
-// AWS local report sync
-// ---------------------------------------------------------------------
+  // 1. Copy latest AWS root reports
+  const latestCount = copyDirFiles(awsLatestDir, publicDataDir);
+  console.log(`  ✓ Synced ${latestCount} reports from AWSReports/latest`);
 
-function syncAwsLatestReports() {
-    let count = 0;
+  // 2. Copy accounts.json if present
+  const accountsJson = path.join(awsAccountsDir, "accounts.json");
+  if (fs.existsSync(accountsJson)) {
+    fs.copyFileSync(accountsJson, path.join(publicDataDir, "accounts.json"));
+    console.log("  ✓ Synced AWS accounts.json");
+  }
 
-    if (!fs.existsSync(srcDir)) {
-        console.warn(
-            `AWS latest report folder not found: ${srcDir}`
-        );
-
-        return count;
-    }
-
-    const files = fs.readdirSync(srcDir);
-
-    for (const file of files) {
-        const sourcePath = path.join(
-            srcDir,
-            file
-        );
-
-        if (!fs.statSync(sourcePath).isFile()) {
-            continue;
+  // 3. Copy per-account reports (accounts/<account-id>/latest/*)
+  if (fs.existsSync(awsAccountsDir)) {
+    for (const entry of fs.readdirSync(awsAccountsDir, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        const accountLatest = path.join(awsAccountsDir, entry.name, "latest");
+        const accountDest = path.join(publicDataDir, "accounts", entry.name);
+        const accCount = copyDirFiles(accountLatest, accountDest);
+        if (accCount > 0) {
+          console.log(`  ✓ Synced ${accCount} reports for account ${entry.name}`);
         }
-
-        if (
-            !file.toLowerCase().endsWith(".csv") &&
-            !file.toLowerCase().endsWith(".json")
-        ) {
-            continue;
-        }
-
-        const destinationPath = path.join(
-            destDir,
-            file
-        );
-
-        fs.copyFileSync(
-            sourcePath,
-            destinationPath
-        );
-
-        count += 1;
-
-        console.log(
-            `Copied AWS report: ${file}`
-        );
+      }
     }
+  }
 
-    return count;
+  console.log("✅ AWS report synchronization complete.");
 }
 
-function syncAwsAccountReports() {
-    let count = 0;
-
-    if (!fs.existsSync(accountsDir)) {
-        console.warn(
-            `AWS accounts folder not found: ${accountsDir}`
-        );
-
-        return count;
-    }
-
-    const accountsDestDir = path.join(
-        destDir,
-        "accounts"
-    );
-
-    recreateDirectory(accountsDestDir);
-
-    const accountsJsonPath = path.join(
-        accountsDir,
-        "accounts.json"
-    );
-
-    if (fs.existsSync(accountsJsonPath)) {
-        fs.copyFileSync(
-            accountsJsonPath,
-            path.join(
-                destDir,
-                "accounts.json"
-            )
-        );
-
-        count += 1;
-
-        console.log(
-            "Copied AWS accounts.json"
-        );
-    }
-
-    const accountFolders = fs.readdirSync(
-        accountsDir,
-        {
-            withFileTypes: true,
-        }
-    );
-
-    for (const accountEntry of accountFolders) {
-        if (!accountEntry.isDirectory()) {
-            continue;
-        }
-
-        const accountLatestDir = path.join(
-            accountsDir,
-            accountEntry.name,
-            "latest"
-        );
-
-        if (!fs.existsSync(accountLatestDir)) {
-            continue;
-        }
-
-        if (
-            !fs.statSync(
-
-                accountLatestDir
-            ).isDirectory()
-        ) {
-            continue;
-        }
-
-        const targetDir = path.join(
-            accountsDestDir,
-            accountEntry.name
-        );
-
-        fs.mkdirSync(targetDir, {
-            recursive: true,
-        });
-
-        const accountFiles = fs.readdirSync(
-            accountLatestDir
-        );
-
-        for (const file of accountFiles) {
-            const sourcePath = path.join(
-                accountLatestDir,
-                file
-            );
-
-            if (
-                !fs.statSync(sourcePath).isFile()
-            ) {
-                continue;
-            }
-
-            if (
-                !file.toLowerCase().endsWith(".csv") &&
-                !file.toLowerCase().endsWith(".json")
-            ) {
-                continue;
-            }
-
-            fs.copyFileSync(
-                sourcePath,
-                path.join(
-                    targetDir,
-                    file
-                )
-            );
-
-            count += 1;
-
-            console.log(
-                `Copied AWS account report: ` +
-                `${accountEntry.name}/${file}`
-            );
-        }
-    }
-
-    return count;
-}
-
-// ---------------------------------------------------------------------
-// R2 Azure report helpers
-// ---------------------------------------------------------------------
-
-function shouldDownloadAzureReport(key) {
-    if (!key) {
-        return false;
-    }
-
-    const relativeKey = key.slice(
-        AZURE_REPORT_PREFIX.length
-    );
-
-    if (!relativeKey) {
-        return false;
-    }
-
-    /*
-     * Only download files directly inside the latest prefix.
-     * This prevents unexpected nested folders from being written locally.
-     */
-    if (relativeKey.includes("/")) {
-        return false;
-    }
-
-    return (
-        relativeKey.toLowerCase().endsWith(".csv") ||
-        relativeKey === "report_manifest.json" ||
-        relativeKey === "run_log.txt"
-    );
-}
-
-async function listAzureReportObjects() {
-    const objects = [];
-
-    let continuationToken;
-
-    do {
-        const response = await r2Client.send(
-            new ListObjectsV2Command({
-                Bucket:
-                    R2_AZURE_DATA_BUCKET_NAME,
-
-                Prefix:
-                    AZURE_REPORT_PREFIX,
-
-                ContinuationToken:
-                    continuationToken,
-            })
-        );
-
-        for (
-            const object of response.Contents || []
-        ) {
-            if (
-                shouldDownloadAzureReport(
-                    object.Key
-                )
-            ) {
-                objects.push({
-                    key: object.Key,
-                    size: object.Size || 0,
-                    lastModified:
-                        object.LastModified || null,
-                });
-            }
-        }
-
-        continuationToken =
-            response.IsTruncated
-                ? response.NextContinuationToken
-                : undefined;
-    } while (continuationToken);
-
-    objects.sort((first, second) =>
-        first.key.localeCompare(second.key)
-    );
-
-    return objects;
-}
-
-async function downloadR2ObjectToFile(
-    objectKey,
-    destinationPath
-) {
-    const response = await r2Client.send(
-        new GetObjectCommand({
-            Bucket:
-                R2_AZURE_DATA_BUCKET_NAME,
-
-            Key:
-                objectKey,
-        })
-    );
-
-    if (!response.Body) {
-        throw new Error(
-            `R2 returned an empty body for ${objectKey}`
-        );
-    }
-
-    /*
-     * transformToByteArray avoids converting CSV content to and from
-     * strings and preserves the exact bytes stored in R2.
-     */
-    const byteArray =
-        await response.Body.transformToByteArray();
-
-    fs.writeFileSync(
-        destinationPath,
-        Buffer.from(byteArray)
-    );
-}
-
-async function syncAzureReportsFromR2() {
-    console.log(
-        `Listing Azure reports from R2 prefix: ` +
-        `${AZURE_REPORT_PREFIX}`
-    );
-
-    const reportObjects =
-        await listAzureReportObjects();
-
-    if (reportObjects.length === 0) {
-        throw new Error(
-            `No Azure report files found in R2 under ` +
-            `${AZURE_REPORT_PREFIX}.`
-        );
-    }
-
-    /*
-     * Only clear the existing Azure folder after confirming that R2
-     * actually contains report files. This avoids deleting working local
-     * reports when the bucket or prefix is accidentally misconfigured.
-     */
-    recreateDirectory(azureDestDir);
-
-    let count = 0;
-
-    for (const object of reportObjects) {
-        const filename = object.key.slice(
-            AZURE_REPORT_PREFIX.length
-        );
-
-        const destinationPath = path.join(
-            azureDestDir,
-            filename
-        );
-
-        await downloadR2ObjectToFile(
-            object.key,
-            destinationPath
-        );
-
-        count += 1;
-
-        console.log(
-            `Downloaded Azure report: ` +
-            `${object.key} -> ${destinationPath}`
-        );
-    }
-
-    return count;
-}
-
-// ---------------------------------------------------------------------
-// Main
-// ---------------------------------------------------------------------
-
-async function main() {
-    console.log(
-        `Syncing Azure reports from R2://${R2_AZURE_DATA_BUCKET_NAME}/` +
-        `${AZURE_REPORT_PREFIX} to ${azureDestDir}...`
-    );
-
-    let azureCount = 0;
-    try {
-        azureCount = await syncAzureReportsFromR2();
-    } catch (e) {
-        console.warn("Azure sync skipped or failed:", e.message);
-    }
-
-    console.log("");
-    console.log("Data sync completed.");
-    console.log("AWS: Using live SQL Server Database API (No local CSV files created).");
-    console.log(`Azure synced files: ${azureCount || 0}`);
-}
-
-main().catch((error) => {
-    console.error(
-        "Failed to sync data:",
-        error
-    );
-
-    process.exit(1);
-});
-
+sync();
