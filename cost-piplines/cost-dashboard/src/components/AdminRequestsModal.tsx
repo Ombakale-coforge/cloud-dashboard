@@ -4,7 +4,7 @@ import {
   type AccountRequest,
   type RequestStatus,
 } from "@/lib/useAccountRequests";
-import { exportRequestsToJSON, syncRequestsToR2 } from "@/lib/storage";
+import { exportRequestsToJSON } from "@/lib/storage";
 import {
   X,
   CheckCircle,
@@ -12,7 +12,7 @@ import {
   Clock,
   Search,
   Download,
-  CloudUpload,
+  RotateCw,
   Layers,
   Building,
   DollarSign,
@@ -31,7 +31,7 @@ interface AdminRequestsModalProps {
 }
 
 export function AdminRequestsModal({ isOpen, onClose }: AdminRequestsModalProps) {
-  const { records, updateStatus, deleteRecord } = useAccountRequests();
+  const { records, updateStatus, deleteRecord, refresh } = useAccountRequests();
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [selectedRequest, setSelectedRequest] = useState<AccountRequest | null>(null);
@@ -66,11 +66,11 @@ export function AdminRequestsModal({ isOpen, onClose }: AdminRequestsModalProps)
     setAdminNote("");
   };
 
-  const handleSyncToR2 = async () => {
-    setSyncStatus("Syncing with Cloudflare R2...");
-    const result = await syncRequestsToR2(records);
-    setSyncStatus(result.message);
-    setTimeout(() => setSyncStatus(null), 4000);
+  const handleRefresh = async () => {
+    setSyncStatus("Refreshing from database...");
+    await refresh();
+    setSyncStatus("Updated from database");
+    setTimeout(() => setSyncStatus(null), 3000);
   };
 
   return (
@@ -89,18 +89,18 @@ export function AdminRequestsModal({ isOpen, onClose }: AdminRequestsModalProps)
                   {records.length} Total
                 </Badge>
               </div>
-              <p className="text-xs text-muted-foreground">Admin review, approval workflows, and Cloudflare R2 persistence</p>
+              <p className="text-xs text-muted-foreground">Admin review, approval workflows, and database records</p>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
             <button
-              onClick={handleSyncToR2}
+              onClick={handleRefresh}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs font-medium hover:bg-muted transition-colors"
-              title="Sync with Cloudflare R2 Bucket"
+              title="Refresh requests from database"
             >
-              <CloudUpload className="w-3.5 h-3.5 text-sky-500" />
-              <span>Sync to R2</span>
+              <RotateCw className="w-3.5 h-3.5 text-indigo-500" />
+              <span>Refresh</span>
             </button>
             <button
               onClick={() => exportRequestsToJSON(records)}

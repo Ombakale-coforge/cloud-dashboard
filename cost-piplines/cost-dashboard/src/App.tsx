@@ -57,16 +57,16 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
 const DEFAULT_AWS_ACCOUNTS: AccountOption[] = [
     {
         id: "account-1",
-        name: "Coforge Limited (5131-6780-3309)",
-        accountId: "5131-6780-3309",
-        accountName: "Coforge Limited",
+        name: "AWS Account 1 (5076-7238-5186)",
+        accountId: "5076-7238-5186",
+        accountName: "AWS Account 1",
         path: "/data",
     },
     {
         id: "account-2",
-        name: "Coforge OICL (0068-5003-1580)",
-        accountId: "0068-5003-1580",
-        accountName: "Coforge OICL",
+        name: "AWS Account 2 (5131-6780-3309)",
+        accountId: "5131-6780-3309",
+        accountName: "AWS Account 2",
         path: "/data/accounts/account-2",
     },
 ];
@@ -89,25 +89,23 @@ const DEFAULT_AZURE_ACCOUNTS: AccountOption[] = [
 ];
 
 const formatAwsAccount = (acc: AccountOption): AccountOption => {
-    let name = acc.name;
-    let accountName = acc.accountName;
-    let accountId = acc.accountId;
+    const rawName = (acc.name || "").replace(/\s*\(Primary\)/gi, "").replace(/\s*\(Secondary\)/gi, "").trim();
+    let accountName = acc.accountName ? acc.accountName.replace(/\s*\(Primary\)/gi, "").replace(/\s*\(Secondary\)/gi, "").trim() : "";
+    let accountId = acc.accountId || "";
 
-    if (acc.id === "account-1" || name.includes("Primary") || name.includes("AWS Account 1")) {
-        accountName = accountName || "Coforge Limited";
-        accountId = accountId || "5131-6780-3309";
-        name = `${accountName} (${accountId})`;
-    } else if (acc.id === "account-2" || name.includes("AWS Account 2")) {
-        accountName = accountName || "Coforge OICL";
-        accountId = accountId || "0068-5003-1580";
-        name = `${accountName} (${accountId})`;
+    const match = rawName.match(/\(([^)]+)\)/);
+    if (match) {
+        accountId = match[1];
+        accountName = rawName.replace(/\s*\([^)]+\)/, "").trim();
+    } else if (!accountName) {
+        accountName = rawName;
     }
 
     return {
         ...acc,
-        name,
-        accountName,
-        accountId,
+        name: accountId && accountName ? `${accountName} (${accountId})` : rawName,
+        accountName: accountName || rawName,
+        accountId: accountId || acc.id,
     };
 };
 

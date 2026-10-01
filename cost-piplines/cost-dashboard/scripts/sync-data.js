@@ -484,48 +484,21 @@ async function syncAzureReportsFromR2() {
 
 async function main() {
     console.log(
-        `Syncing local AWS reports from ${srcDir} ` +
-        `to ${destDir}...`
-    );
-
-    console.log(
         `Syncing Azure reports from R2://${R2_AZURE_DATA_BUCKET_NAME}/` +
         `${AZURE_REPORT_PREFIX} to ${azureDestDir}...`
     );
 
-    ensureDirectory(destDir);
-
-    let awsLatestCount = 0;
-    let awsAccountCount = 0;
     let azureCount = 0;
-
-    awsLatestCount =
-        syncAwsLatestReports();
-
-    awsAccountCount =
-        syncAwsAccountReports();
-
-    azureCount = await syncAzureReportsFromR2();
-
-    const totalCount =
-        (awsLatestCount || 0) +
-        (awsAccountCount || 0) +
-        (azureCount || 0);
+    try {
+        azureCount = await syncAzureReportsFromR2();
+    } catch (e) {
+        console.warn("Azure sync skipped or failed:", e.message);
+    }
 
     console.log("");
-    console.log("Data sync completed successfully.");
-    console.log(
-        `AWS latest files: ${awsLatestCount}`
-    );
-    console.log(
-        `AWS account files: ${awsAccountCount}`
-    );
-    console.log(
-        `Azure R2 files: ${azureCount || 0}`
-    );
-    console.log(
-        `Total synced files: ${totalCount}`
-    );
+    console.log("Data sync completed.");
+    console.log("AWS: Using live SQL Server Database API (No local CSV files created).");
+    console.log(`Azure synced files: ${azureCount || 0}`);
 }
 
 main().catch((error) => {
