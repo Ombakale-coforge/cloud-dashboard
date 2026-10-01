@@ -17,6 +17,27 @@ AzureAnomalyAlerts/
 .DS_Store
 Thumbs.db
 *.log
+logs/
+src/**/logs/
+.vscode/
+
+# Local data & debug dumps
+*.csv
+*-snapshots.json
+src/debug-snapshots.json
+
+# Scratch & prototype scripts
+src/azure_anomaly_alert.js
+src/azure_billing_data_fetch_script_proto.js
+src/azure_storage_access_check.js
+src/azure_storage_access_check_raw.js
+src/azure_storage_inspect_focus_export.js
+src/debugUsageData.js
+src/fetch_data/cleanupDuplicateUsageData.js
+src/fetch_data/ingest-dedup-patch.js
+src/fetch_data/ingest-focus-export-v2.js
+src/fetch_data/ingest-focus-export.js
+src/fetch_data/print_accounts.js
 
 da-work/
 env/
