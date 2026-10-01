@@ -1,10 +1,9 @@
 import React, { createContext, useContext, useState, useEffect } from "react";
-import { readJsonFromR2, writeJsonToR2 } from "@/lib/r2Client";
 
 export type UserRole = "admin" | "basic";
 
 export interface User {
-  id: string;
+  id: string | number;
   name: string;
   email: string;
   role: UserRole;
@@ -33,29 +32,11 @@ interface AuthContextType {
 }
 
 const AUTH_STORAGE_KEY = "cloud_dashboard_session_user";
-const USERS_CACHE_KEY = "r2_users_db_cache";
 
 export const ADMIN_CREDENTIALS = {
   email: "dashboard-admin@coforge.com",
   password: "8iie9gb",
 };
-
-function getCachedUsers(): any[] {
-  try {
-    const raw = localStorage.getItem(USERS_CACHE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
-function setCachedUsers(users: any[]) {
-  try {
-    localStorage.setItem(USERS_CACHE_KEY, JSON.stringify(users));
-  } catch {
-    // ignore
-  }
-}
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -70,10 +51,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   });
 
   useEffect(() => {
-    console.log("🚀 [App Version]: Loaded 100% Direct R2 Engine v2.0");
-  }, []);
-
-  useEffect(() => {
     if (user) {
       sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(user));
     } else {
@@ -81,104 +58,49 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [user]);
 
-  // 1. Admin Login (Strict credentials)
+  // 1. Admin Login
   const loginAdmin = async (password: string, email: string = ADMIN_CREDENTIALS.email): Promise<AuthResult> => {
-    const normEmail = email.trim().toLowerCase();
-    console.log("🚀 [Direct R2 Auth] Admin Login attempt:", normEmail);
-
-    if (normEmail !== ADMIN_CREDENTIALS.email.toLowerCase()) {
-      return {
-        success: false,
-        error: `Only "${ADMIN_CREDENTIALS.email}" is authorized for Admin access.`,
-      };
-    }
-
-    if (password !== ADMIN_CREDENTIALS.password) {
-      return {
-        success: false,
-        error: "Incorrect Admin password. Please check your credentials.",
-      };
-    }
-
-    const adminUser: User = {
-      id: "admin-01",
-      name: "Dashboard Administrator",
-      email: ADMIN_CREDENTIALS.email,
-      role: "admin",
-      department: "Cloud Governance & FinOps",
-      provider: "credentials",
-      loginTime: new Date().toISOString(),
-    };
-
-    setUser(adminUser);
-    return { success: true, user: adminUser };
+    return loginBasic(email, password);
   };
 
-  // 2. Basic Login for returning users (Directly from Cloudflare R2 user.json)
+  // 2. Basic Login (Queries SQL Server via /api/auth/login)
   const loginBasic = async (email: string, password: string): Promise<AuthResult> => {
     const normEmail = email.trim().toLowerCase();
-    console.log("🚀 [Direct R2 Auth] Basic Login attempt for:", normEmail);
 
     if (!normEmail || !password) {
       return { success: false, error: "Please enter your email and password." };
     }
 
-    if (normEmail === ADMIN_CREDENTIALS.email.toLowerCase()) {
-      if (password === ADMIN_CREDENTIALS.password) {
-        return loginAdmin(password, email);
-      } else {
-        return { success: false, error: "Incorrect Admin password." };
-      }
-    }
-
-    let users = getCachedUsers();
-
-    // Fetch live users array directly from Cloudflare R2 bucket
     try {
-      const { data: remoteUsers } = await readJsonFromR2("user.json", "users.json", []);
-      if (Array.isArray(remoteUsers) && remoteUsers.length > 0) {
-        users = remoteUsers;
-        setCachedUsers(remoteUsers);
-        console.log(`✅ [Direct R2 Auth] Fetched ${remoteUsers.length} users from R2 user.json`);
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: normEmail, password }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        return {
+          success: false,
+          error: data.message || data.error || "Login failed. Please check credentials.",
+          isNewUser: data.error === "USER_NOT_FOUND",
+        };
       }
+
+      const loggedInUser: User = data.user;
+      setUser(loggedInUser);
+      return { success: true, user: loggedInUser };
     } catch (err: any) {
-      console.warn("⚠️ [Direct R2 Auth] R2 fetch warning, using cached users:", err.message || err);
-    }
-
-    const existingUser = users.find(
-      (u: any) => u.email && u.email.toLowerCase() === normEmail
-    );
-
-    if (!existingUser) {
+      console.error("SQL Server Login error:", err);
       return {
         success: false,
-        error: "Account not found in Cloudflare R2 database. Please sign up.",
-        isNewUser: true,
+        error: "Unable to connect to authentication server. Please check SQL Server.",
       };
     }
-
-    if (existingUser.password !== password) {
-      return {
-        success: false,
-        error: "Incorrect password for this account.",
-      };
-    }
-
-    const basicUser: User = {
-      id: existingUser.id || `usr-${Date.now().toString(36)}`,
-      name: existingUser.name,
-      email: existingUser.email,
-      role: "basic",
-      department: existingUser.department || "Digital Engineering",
-      provider: existingUser.provider || "credentials",
-      loginTime: new Date().toISOString(),
-    };
-
-    setUser(basicUser);
-    return { success: true, user: basicUser };
   };
 
-  // 3. Signup for 1st time basic users (Directly writes to Cloudflare R2 user.json)
+  // 3. Signup (Persists directly into SQL Server dbo.users via /api/auth/signup)
   const signupBasic = async (
     name: string,
     email: string,
@@ -188,75 +110,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const normEmail = email.trim().toLowerCase();
     const finalName = name.trim() || normEmail.split("@")[0].replace(/[._-]/g, " ");
 
-    console.log("🚀 [Direct R2 Auth] Signup attempt for:", normEmail);
-
     if (!normEmail || !password) {
       return { success: false, error: "Email and password are required to sign up." };
     }
 
-    if (normEmail === ADMIN_CREDENTIALS.email.toLowerCase()) {
-      return { success: false, error: "This email is reserved for Admin." };
-    }
-
-    let users = getCachedUsers();
-    let actualKey = "user.json";
-
-    // Sync latest users from Cloudflare R2 bucket first
     try {
-      const res = await readJsonFromR2("user.json", "users.json", []);
-      if (Array.isArray(res.data) && res.data.length > 0) {
-        users = res.data;
-        actualKey = res.actualKey;
+      const res = await fetch("/api/auth/signup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: finalName,
+          email: normEmail,
+          password,
+          department,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        return {
+          success: false,
+          error: data.message || data.error || "Signup failed.",
+        };
       }
+
+      const newUser: User = data.user;
+      setUser(newUser);
+      return { success: true, user: newUser };
     } catch (err: any) {
-      console.warn("⚠️ [Direct R2 Auth] R2 sync warning during signup:", err.message || err);
-    }
-
-    const exists = users.find(
-      (u: any) => u.email && u.email.toLowerCase() === normEmail
-    );
-
-    if (exists) {
+      console.error("SQL Server Signup error:", err);
       return {
         success: false,
-        error: "An account with this email already exists in R2 database. Please log in.",
+        error: "Unable to connect to authentication server. Please check SQL Server.",
       };
     }
-
-    const newUser = {
-      id: `usr-${Date.now().toString(36)}`,
-      name: finalName,
-      email: normEmail,
-      password: password,
-      department: department.trim() || "Digital Engineering",
-      role: "basic",
-      provider: "credentials",
-      createdAt: new Date().toISOString(),
-    };
-
-    const updatedUsers = [...users, newUser];
-    setCachedUsers(updatedUsers);
-
-    // Save directly to Cloudflare R2 bucket
-    try {
-      await writeJsonToR2(actualKey || "user.json", updatedUsers);
-      console.log("✅ [Direct R2 Auth] User saved to R2 bucket user.json:", normEmail);
-    } catch (err: any) {
-      console.error("❌ [Direct R2 Auth] Failed to write new user to R2 bucket:", err.message || err);
-    }
-
-    const basicUser: User = {
-      id: newUser.id,
-      name: newUser.name,
-      email: newUser.email,
-      role: "basic",
-      department: newUser.department,
-      provider: "credentials",
-      loginTime: new Date().toISOString(),
-    };
-
-    setUser(basicUser);
-    return { success: true, user: basicUser };
   };
 
   const logout = () => {
