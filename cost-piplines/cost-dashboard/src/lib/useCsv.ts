@@ -34,15 +34,15 @@ export function useCsv<T = Record<string, any>>(path: string) {
       })
       .then((jsonData) => {
         if (!active) return;
-        if (Array.isArray(jsonData) && jsonData.length > 0) {
+        if (Array.isArray(jsonData)) {
           setData(jsonData as T[]);
           setLoading(false);
-        } else if (jsonData && typeof jsonData === "object" && !Array.isArray(jsonData)) {
+        } else if (jsonData && typeof jsonData === "object") {
           setData([jsonData] as unknown as T[]);
           setLoading(false);
         } else {
-          // Empty DB response -> trigger CSV fallback
-          throw new Error("Empty dataset from API");
+          setData([]);
+          setLoading(false);
         }
       })
       .catch((apiErr) => {

@@ -38,21 +38,45 @@ export function OrganizationGovernanceSection({
   selectedMonth,
   basePath = "/data",
 }: OrganizationGovernanceSectionProps) {
-  // 1. Fetch Summary JSON metadata
+  // 1. Fetch Summary JSON metadata (via API first, with fallback)
   const [summary, setSummary] = useState<GovernanceSummary | null>(null);
 
   useEffect(() => {
-    fetch(`${basePath}/governance_summary.json`)
+    let active = true;
+    let account = "account-1";
+    const accountMatch = basePath.match(/accounts\/([^/]+)/);
+    if (accountMatch) {
+      account = accountMatch[1];
+    }
+
+    const apiUrl = `/api/aws/dataset/governance_summary?account=${encodeURIComponent(account)}`;
+
+    fetch(apiUrl)
       .then((res) => {
         if (res.ok) return res.json();
-        return null;
+        throw new Error(`API error ${res.status}`);
       })
       .then((data) => {
-        if (data) setSummary(data);
+        if (!active) return;
+        if (data) {
+          const item = Array.isArray(data) ? data[0] : data;
+          setSummary(item);
+        }
       })
       .catch(() => {
-        setSummary(null);
+        fetch(`${basePath}/governance_summary.json`)
+          .then((res) => (res.ok ? res.json() : null))
+          .then((data) => {
+            if (active && data) setSummary(data);
+          })
+          .catch(() => {
+            if (active) setSummary(null);
+          });
       });
+
+    return () => {
+      active = false;
+    };
   }, [basePath]);
 
   // 2. Fetch Unbudgeted Accounts CSV
@@ -436,8 +460,8 @@ export function OrganizationGovernanceSection({
                 <TableBody>
                   {paginatedBudgets.length > 0 ? (
                     paginatedBudgets.map((b, i) => {
-                      const limit = Number(b.Limit || 0);
-                      const used = Number(b["Current Used"] || 0);
+                      const limit = Number(b.Limit ?? b["Budget Limit"] ?? 0);
+                      const used = Number(b["Current Used"] ?? b["Current Spend"] ?? 0);
                       const pct = limit > 0 ? Math.round((used / limit) * 100) : 0;
                       const isExceeded = b["Threshold Status"]?.toLowerCase().includes("exceeded") || pct >= 100;
 

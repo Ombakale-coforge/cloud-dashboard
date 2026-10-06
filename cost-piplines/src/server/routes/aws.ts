@@ -364,7 +364,9 @@ router.get('/dataset/:filename', async (req: Request, res: Response) => {
         const mapped = records.map((r) => ({
           'Budget Name': r.budgetName,
           'Budget Limit': Number(r.limitAmount),
+          'Limit': Number(r.limitAmount),
           'Current Spend': Number(r.currentUsed),
+          'Current Used': Number(r.currentUsed),
           'Forecasted Spend': r.forecastedSpend !== null ? Number(r.forecastedSpend) : '',
           'Current vs Budget %': Number(r.currentVsBudgetPercent),
           'Threshold Status': r.thresholdStatus,

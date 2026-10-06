@@ -139,9 +139,11 @@ export interface UnbudgetedAccountRow {
 
 export interface BudgetOverviewRow {
     "Budget Name": string;
-    "Limit": number;
-    "Current Used": number;
-    "Forecasted Spend": number;
+    "Limit"?: number;
+    "Budget Limit"?: number;
+    "Current Used"?: number;
+    "Current Spend"?: number;
+    "Forecasted Spend": number | string;
     "Current vs Budget %": number;
     "Threshold Status": string;
     "Health Status": string;
