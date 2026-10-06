@@ -119,6 +119,26 @@ async function runTests() {
       const claData = await claRes.json();
       console.log('    Account 1 Linked Accounts rows:', claData.length);
 
+      // 8. AWS Linked Accounts Directory Endpoint
+      console.log('\n[11] Testing GET /api/aws/linked-accounts?account=account-1 ...');
+      const laListRes = await fetch(`${baseUrl}/api/aws/linked-accounts?account=account-1`);
+      const laListData = await laListRes.json();
+      console.log('    Linked accounts status:', laListRes.status, '| Total count:', laListData?.totalLinkedAccounts, '| Active:', laListData?.activeAccountsCount, '| Total spend:', laListData?.totalSpend);
+      console.log('    Sample Linked Account:', laListData?.accounts?.[0]);
+
+      // 9. AWS Single Linked Account Deep Dive Endpoint (with Live AWS)
+      const sampleId = laListData?.accounts?.[0]?.linkedAccountId;
+      if (sampleId) {
+        console.log(`\n[12] Testing GET /api/aws/linked-accounts/${sampleId}?account=account-1 ...`);
+        const laDetailRes = await fetch(`${baseUrl}/api/aws/linked-accounts/${sampleId}?account=account-1`);
+        const laDetailData = await laDetailRes.json();
+        console.log('    Detail status:', laDetailRes.status, '| Account:', laDetailData?.account?.accountName, '| Live AWS Available:', laDetailData?.liveAws?.available);
+        if (laDetailData?.liveAws?.available) {
+          console.log('    Live Services count:', laDetailData?.liveAws?.services?.length, '| Top Service:', laDetailData?.liveAws?.services?.[0]);
+          console.log('    Live Org Details:', laDetailData?.liveAws?.orgDetails);
+        }
+      }
+
       console.log('\n====================================================');
       console.log('🎉 ALL API ENDPOINTS VERIFIED & WORKING PERFECTLY!');
       console.log('====================================================');

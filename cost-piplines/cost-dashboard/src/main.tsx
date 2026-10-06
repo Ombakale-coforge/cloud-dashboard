@@ -5,6 +5,8 @@ import './index.css'
 import App from './App.tsx'
 import { LoginPage } from './pages/LoginPage.tsx'
 import { NewRequestPage } from './pages/NewRequestPage.tsx'
+import { LinkedAccountsPage } from './pages/LinkedAccountsPage.tsx'
+import { LinkedAccountDetailPage } from './pages/LinkedAccountDetailPage.tsx'
 import { AuthProvider } from './lib/auth.tsx'
 import { ProtectedRoute } from './components/ProtectedRoute.tsx'
 
@@ -33,6 +35,26 @@ createRoot(document.getElementById('root')!).render(
             element={
               <ProtectedRoute allowedRoles={['admin']}>
                 <App />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* AWS Linked Accounts Directory */}
+          <Route
+            path="/linked-accounts"
+            element={
+              <ProtectedRoute allowedRoles={['admin']}>
+                <LinkedAccountsPage />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Dedicated Linked Account Deep Dive (Opens in a New Tab) */}
+          <Route
+            path="/linked-accounts/:linkedAccountId"
+            element={
+              <ProtectedRoute allowedRoles={['admin']}>
+                <LinkedAccountDetailPage />
               </ProtectedRoute>
             }
           />

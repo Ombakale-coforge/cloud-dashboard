@@ -33,12 +33,16 @@ interface AuthContextType {
 
 const AUTH_STORAGE_KEY = "cloud_dashboard_session_user";
 
-// Clean any previous browser storage tokens on module load to guarantee landing on /login
-try {
-  sessionStorage.removeItem(AUTH_STORAGE_KEY);
-  localStorage.removeItem(AUTH_STORAGE_KEY);
-} catch {
-  // Ignore storage access errors in restricted browser contexts
+function getStoredUser(): User | null {
+  try {
+    const stored = localStorage.getItem(AUTH_STORAGE_KEY) || sessionStorage.getItem(AUTH_STORAGE_KEY);
+    if (stored) {
+      return JSON.parse(stored);
+    }
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 export const ADMIN_CREDENTIALS = {
@@ -49,8 +53,7 @@ export const ADMIN_CREDENTIALS = {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  // Always start unauthenticated on app launch so the user is forced to log in first
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<User | null>(() => getStoredUser());
 
   // 1. Admin Login
   const loginAdmin = async (password: string, email: string = ADMIN_CREDENTIALS.email): Promise<AuthResult> => {
@@ -84,6 +87,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       const loggedInUser: User = data.user;
       setUser(loggedInUser);
+      try {
+        localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(loggedInUser));
+        sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(loggedInUser));
+      } catch {}
       return { success: true, user: loggedInUser };
     } catch (err: any) {
       console.error("SQL Server Login error:", err);
@@ -131,6 +138,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       const newUser: User = data.user;
       setUser(newUser);
+      try {
+        localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(newUser));
+        sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(newUser));
+      } catch {}
       return { success: true, user: newUser };
     } catch (err: any) {
       console.error("SQL Server Signup error:", err);
@@ -143,6 +154,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = () => {
     setUser(null);
+    try {
+      localStorage.removeItem(AUTH_STORAGE_KEY);
+      sessionStorage.removeItem(AUTH_STORAGE_KEY);
+    } catch {}
   };
 
   return (

@@ -1,7 +1,30 @@
 import { Router, Request, Response } from 'express';
+import { CostExplorerClient, GetCostAndUsageCommand } from '@aws-sdk/client-cost-explorer';
+import { OrganizationsClient, DescribeAccountCommand } from '@aws-sdk/client-organizations';
 import { prisma } from '../db.ts';
 
 const router = Router();
+
+function getAwsCredentials(configId: string) {
+  if (configId === 'account-2') {
+    if (process.env.AWS_ACCOUNT_2_ACCESS_KEY_ID && process.env.AWS_ACCOUNT_2_SECRET_ACCESS_KEY) {
+      return {
+        accessKeyId: process.env.AWS_ACCOUNT_2_ACCESS_KEY_ID,
+        secretAccessKey: process.env.AWS_ACCOUNT_2_SECRET_ACCESS_KEY,
+        region: process.env.AWS_ACCOUNT_2_REGION || process.env.AWS_REGION || 'us-east-1',
+      };
+    }
+  }
+  if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
+    return {
+      accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+      region: process.env.AWS_REGION || 'us-east-1',
+    };
+  }
+  return null;
+}
+
 
 async function getLatestRunForAccount(accountParam: string | string[] | any) {
   if (!prisma) return null;
@@ -516,6 +539,388 @@ router.get('/dataset/:filename', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error(`Error serving AWS dataset ${req.params.filename}:`, err.message);
     res.status(500).json({ error: 'DB_QUERY_ERROR', message: err.message });
+  }
+});
+
+// 3. List all linked accounts for a root account
+router.get('/linked-accounts', async (req: Request, res: Response) => {
+  try {
+    if (!prisma) {
+      return res.status(503).json({ error: 'DATABASE_NOT_CONFIGURED' });
+    }
+    const accountParam = req.query.account || 'account-1';
+    const accountContext = await getLatestRunForAccount(accountParam);
+    if (!accountContext || !accountContext.run) {
+      return res.status(404).json({ error: 'NO_RUN_FOUND', message: 'No AWS report run found in database' });
+    }
+
+    const { account, run } = accountContext;
+    const reportRunId = run.id;
+
+    const targetMonth = (req.query.month && String(req.query.month).match(/^\d{4}-\d{2}$/))
+      ? String(req.query.month).trim()
+      : (run.currentMonth || '');
+
+    // Compute previous month string
+    let prevMonthStr = '';
+    if (targetMonth && targetMonth.match(/^\d{4}-\d{2}$/)) {
+      const [yearStr, monthStr] = targetMonth.split('-');
+      const year = parseInt(yearStr, 10);
+      const month = parseInt(monthStr, 10);
+      const prevDate = new Date(Date.UTC(year, month - 2, 1));
+      prevMonthStr = `${prevDate.getUTCFullYear()}-${String(prevDate.getUTCMonth() + 1).padStart(2, '0')}`;
+    }
+
+    // 1. Fetch all linked accounts in directory
+    const linkedAccounts = await prisma.awsLinkedAccount.findMany({
+      where: { accountId: account.id },
+      orderBy: { name: 'asc' },
+    });
+
+    // 2. Fetch costs for current and previous month
+    const monthsToFetch = prevMonthStr ? [targetMonth, prevMonthStr] : [targetMonth];
+    const costRecords = await prisma.awsCostByLinkedAccount.findMany({
+      where: {
+        reportRunId,
+        month: { in: monthsToFetch },
+      },
+    });
+
+    const costMap: Record<string, { current: number; previous: number }> = {};
+    costRecords.forEach((c) => {
+      if (!costMap[c.linkedAccount]) costMap[c.linkedAccount] = { current: 0, previous: 0 };
+      if (c.month === targetMonth) {
+        costMap[c.linkedAccount].current = Number(c.cost);
+      } else if (c.month === prevMonthStr) {
+        costMap[c.linkedAccount].previous = Number(c.cost);
+      }
+    });
+
+    // 3. Fetch unbudgeted accounts
+    const unbudgetedList = await prisma.awsUnbudgetedAccount.findMany({
+      where: { reportRunId },
+    });
+    const unbudgetedMap = new Map(unbudgetedList.map((u) => [u.awsAccountId, u]));
+
+    // 4. Fetch variances
+    const variances = await prisma.awsAccountCostVariance.findMany({
+      where: { reportRunId },
+    });
+    const varianceMap = new Map(variances.map((v) => [v.linkedAccount, v]));
+
+    // Collect all accounts
+    const allAccountIds = new Set<string>();
+    linkedAccounts.forEach((la) => allAccountIds.add(la.linkedAccountId));
+    Object.keys(costMap).forEach((idOrName) => allAccountIds.add(idOrName));
+
+    const result = Array.from(allAccountIds).map((accId) => {
+      const dirInfo = linkedAccounts.find((la) => la.linkedAccountId === accId || la.name === accId);
+      const cleanId = dirInfo ? dirInfo.linkedAccountId : accId;
+      const name = dirInfo?.name || unbudgetedMap.get(cleanId)?.accountName || cleanId;
+      const status = dirInfo?.status || unbudgetedMap.get(cleanId)?.status || 'ACTIVE';
+
+      const costs = costMap[cleanId] || costMap[name] || { current: 0, previous: 0 };
+      const currentSpend = costs.current;
+      const previousSpend = costs.previous;
+      const diff = currentSpend - previousSpend;
+      const momChange = previousSpend > 0 ? Number(((diff / previousSpend) * 100).toFixed(1)) : 0;
+
+      const isUnbudgeted = unbudgetedMap.has(cleanId);
+      const topCostDriver = unbudgetedMap.get(cleanId)?.topCostDriver || 'Cloud Infrastructure';
+      const v = varianceMap.get(cleanId) || varianceMap.get(name);
+
+      return {
+        linkedAccountId: cleanId,
+        accountName: name,
+        status,
+        selectedMonth: targetMonth,
+        currentSpend: Number(currentSpend.toFixed(2)),
+        previousSpend: Number(previousSpend.toFixed(2)),
+        momChangePercent: momChange,
+        hasBudget: !isUnbudgeted,
+        budgetStatus: isUnbudgeted ? 'Unbudgeted' : 'Budgeted',
+        topCostDriver,
+        variance: v ? {
+          mean: Number(v.meanMonthlyCost),
+          stdDev: Number(v.stdDev),
+          min: Number(v.minCost),
+          max: Number(v.maxCost),
+          volatilityCategory: v.varianceCategory,
+        } : null,
+      };
+    });
+
+    result.sort((a, b) => b.currentSpend - a.currentSpend);
+
+    return res.json({
+      rootAccount: {
+        id: account.configId,
+        name: account.name,
+        awsAccountId: account.awsAccountId,
+      },
+      selectedMonth: targetMonth,
+      totalLinkedAccounts: result.length,
+      activeAccountsCount: result.filter((r) => r.status === 'ACTIVE').length,
+      suspendedAccountsCount: result.filter((r) => r.status === 'SUSPENDED').length,
+      budgetedCount: result.filter((r) => r.hasBudget).length,
+      unbudgetedCount: result.filter((r) => !r.hasBudget).length,
+      totalSpend: Number(result.reduce((sum, r) => sum + r.currentSpend, 0).toFixed(2)),
+      accounts: result,
+    });
+  } catch (err: any) {
+    console.error('Error in /linked-accounts:', err);
+    res.status(500).json({ error: 'SERVER_ERROR', message: err.message });
+  }
+});
+
+// 4. Get 360-degree deep dive details for a single linked account
+router.get('/linked-accounts/:linkedAccountId', async (req: Request, res: Response) => {
+  try {
+    if (!prisma) {
+      return res.status(503).json({ error: 'DATABASE_NOT_CONFIGURED' });
+    }
+    const { linkedAccountId } = req.params;
+    const accountParam = req.query.account || 'account-1';
+    const accountContext = await getLatestRunForAccount(accountParam);
+    if (!accountContext || !accountContext.run) {
+      return res.status(404).json({ error: 'NO_RUN_FOUND' });
+    }
+
+    const { account, run } = accountContext;
+    const reportRunId = run.id;
+    const targetMonth = (req.query.month && String(req.query.month).match(/^\d{4}-\d{2}$/))
+      ? String(req.query.month).trim()
+      : (run.currentMonth || '');
+
+    // 1. Account Directory Info
+    const dirInfo = await prisma.awsLinkedAccount.findFirst({
+      where: {
+        accountId: account.id,
+        OR: [
+          { linkedAccountId },
+          { name: linkedAccountId },
+        ],
+      },
+    });
+
+    const accountName = dirInfo?.name || linkedAccountId;
+    const cleanAccountId = dirInfo?.linkedAccountId || linkedAccountId;
+    const status = dirInfo?.status || 'ACTIVE';
+
+    // 2. 6-Month Spend History from DB
+    const historicalCosts = await prisma.awsCostByLinkedAccount.findMany({
+      where: {
+        reportRunId,
+        OR: [
+          { linkedAccount: cleanAccountId },
+          { linkedAccount: accountName },
+        ],
+      },
+      orderBy: { month: 'asc' },
+    });
+
+    const monthlyTrend = historicalCosts.map((c) => ({
+      month: c.month,
+      cost: Number(c.cost),
+    }));
+
+    // Current & previous month spend
+    let currentSpend = 0;
+    let previousSpend = 0;
+    let prevMonthStr = '';
+    if (targetMonth && targetMonth.match(/^\d{4}-\d{2}$/)) {
+      const [yearStr, monthStr] = targetMonth.split('-');
+      const year = parseInt(yearStr, 10);
+      const month = parseInt(monthStr, 10);
+      const prevDate = new Date(Date.UTC(year, month - 2, 1));
+      prevMonthStr = `${prevDate.getUTCFullYear()}-${String(prevDate.getUTCMonth() + 1).padStart(2, '0')}`;
+    }
+
+    const currRec = historicalCosts.find((c) => c.month === targetMonth);
+    const prevRec = historicalCosts.find((c) => c.month === prevMonthStr);
+    currentSpend = currRec ? Number(currRec.cost) : 0;
+    previousSpend = prevRec ? Number(prevRec.cost) : 0;
+    const diff = currentSpend - previousSpend;
+    const momChange = previousSpend > 0 ? Number(((diff / previousSpend) * 100).toFixed(1)) : 0;
+
+    // 3. Variance & Governance from DB
+    const varianceRec = await prisma.awsAccountCostVariance.findFirst({
+      where: {
+        reportRunId,
+        OR: [
+          { linkedAccount: cleanAccountId },
+          { linkedAccount: accountName },
+        ],
+      },
+    });
+
+    const unbudgetedRec = await prisma.awsUnbudgetedAccount.findFirst({
+      where: {
+        reportRunId,
+        OR: [
+          { awsAccountId: cleanAccountId },
+          { accountName },
+        ],
+      },
+    });
+
+    // 4. Live AWS Data (with try/catch fallback)
+    let liveAwsData: any = {
+      available: false,
+    };
+
+    const credentials = getAwsCredentials(account.configId);
+    if (credentials && cleanAccountId.match(/^\d{12}$/)) {
+      try {
+        const ceClient = new CostExplorerClient({
+          credentials: {
+            accessKeyId: credentials.accessKeyId,
+            secretAccessKey: credentials.secretAccessKey,
+          },
+          region: credentials.region,
+        });
+        const orgClient = new OrganizationsClient({
+          credentials: {
+            accessKeyId: credentials.accessKeyId,
+            secretAccessKey: credentials.secretAccessKey,
+          },
+          region: credentials.region,
+        });
+
+        const [yearStr, monthStr] = (targetMonth || '2026-09').split('-');
+        const year = parseInt(yearStr, 10);
+        const month = parseInt(monthStr, 10);
+        const startStr = `${year}-${String(month).padStart(2, '0')}-01`;
+        const nextMonthDate = new Date(Date.UTC(year, month, 1));
+        const endStr = `${nextMonthDate.getUTCFullYear()}-${String(nextMonthDate.getUTCMonth() + 1).padStart(2, '0')}-01`;
+
+        const [descResult, serviceResult, regionResult] = await Promise.allSettled([
+          orgClient.send(new DescribeAccountCommand({ AccountId: cleanAccountId })),
+          ceClient.send(new GetCostAndUsageCommand({
+            TimePeriod: { Start: startStr, End: endStr },
+            Granularity: 'MONTHLY',
+            Metrics: ['UnblendedCost'],
+            Filter: {
+              Dimensions: { Key: 'LINKED_ACCOUNT', Values: [cleanAccountId] },
+            },
+            GroupBy: [{ Type: 'DIMENSION', Key: 'SERVICE' }],
+          })),
+          ceClient.send(new GetCostAndUsageCommand({
+            TimePeriod: { Start: startStr, End: endStr },
+            Granularity: 'MONTHLY',
+            Metrics: ['UnblendedCost'],
+            Filter: {
+              Dimensions: { Key: 'LINKED_ACCOUNT', Values: [cleanAccountId] },
+            },
+            GroupBy: [{ Type: 'DIMENSION', Key: 'REGION' }],
+          })),
+        ]);
+
+        let orgDetails = null;
+        if (descResult.status === 'fulfilled' && descResult.value.Account) {
+          const acc = descResult.value.Account;
+          orgDetails = {
+            name: acc.Name,
+            email: acc.Email,
+            status: acc.Status,
+            arn: acc.Arn,
+            joinedMethod: acc.JoinedMethod,
+            joinedTimestamp: acc.JoinedTimestamp,
+          };
+        }
+
+        let services: Array<{ service: string; cost: number; sharePct: number }> = [];
+        if (serviceResult.status === 'fulfilled') {
+          const groups = serviceResult.value.ResultsByTime?.[0]?.Groups || [];
+          let totalServCost = 0;
+          const mappedServices = groups
+            .map((g) => {
+              const cost = parseFloat(g.Metrics?.UnblendedCost?.Amount || '0') || 0;
+              totalServCost += cost;
+              return { service: g.Keys?.[0] || 'Unknown', cost: Number(cost.toFixed(2)) };
+            })
+            .filter((s) => s.cost > 0)
+            .sort((a, b) => b.cost - a.cost);
+
+          services = mappedServices.map((s) => ({
+            ...s,
+            sharePct: totalServCost > 0 ? Number(((s.cost / totalServCost) * 100).toFixed(1)) : 0,
+          }));
+        }
+
+        let regions: Array<{ region: string; cost: number; sharePct: number }> = [];
+        if (regionResult.status === 'fulfilled') {
+          const groups = regionResult.value.ResultsByTime?.[0]?.Groups || [];
+          let totalRegCost = 0;
+          const mappedRegions = groups
+            .map((g) => {
+              const cost = parseFloat(g.Metrics?.UnblendedCost?.Amount || '0') || 0;
+              totalRegCost += cost;
+              return { region: g.Keys?.[0] || 'Unknown', cost: Number(cost.toFixed(2)) };
+            })
+            .filter((r) => r.cost > 0)
+            .sort((a, b) => b.cost - a.cost);
+
+          regions = mappedRegions.map((r) => ({
+            ...r,
+            sharePct: totalRegCost > 0 ? Number(((r.cost / totalRegCost) * 100).toFixed(1)) : 0,
+          }));
+        }
+
+        liveAwsData = {
+          available: true,
+          orgDetails,
+          services,
+          regions,
+        };
+      } catch (awsErr: any) {
+        console.warn(`[Live AWS Query] Error for account ${cleanAccountId}:`, awsErr.message);
+        liveAwsData = {
+          available: false,
+          error: awsErr.message,
+        };
+      }
+    }
+
+    return res.json({
+      account: {
+        linkedAccountId: cleanAccountId,
+        accountName,
+        status,
+        rootAccount: {
+          id: account.configId,
+          name: account.name,
+          awsAccountId: account.awsAccountId,
+        },
+        firstSeenAt: dirInfo?.firstSeenAt,
+        lastSeenAt: dirInfo?.lastSeenAt,
+      },
+      selectedMonth: targetMonth,
+      financials: {
+        currentMonth: targetMonth,
+        currentSpend: Number(currentSpend.toFixed(2)),
+        previousSpend: Number(previousSpend.toFixed(2)),
+        momChangePercent: momChange,
+        historicalMonthlySpend: monthlyTrend,
+      },
+      variance: varianceRec ? {
+        mean: Number(varianceRec.meanMonthlyCost),
+        stdDev: Number(varianceRec.stdDev),
+        min: Number(varianceRec.minCost),
+        max: Number(varianceRec.maxCost),
+        latestVsMeanPct: Number(varianceRec.latestVsMeanPct),
+        volatilityCategory: varianceRec.varianceCategory,
+      } : null,
+      governance: {
+        hasBudget: !unbudgetedRec,
+        status: unbudgetedRec ? 'Unbudgeted' : 'Budgeted',
+        topCostDriver: unbudgetedRec?.topCostDriver || (liveAwsData?.services?.[0]?.service) || 'Cloud Infrastructure',
+      },
+      liveAws: liveAwsData,
+    });
+  } catch (err: any) {
+    console.error('Error in /linked-accounts/:linkedAccountId:', err);
+    res.status(500).json({ error: 'SERVER_ERROR', message: err.message });
   }
 });
 
