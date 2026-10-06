@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from "react";
+import React, { createContext, useContext, useState } from "react";
 
 export type UserRole = "admin" | "basic";
 
@@ -33,6 +33,14 @@ interface AuthContextType {
 
 const AUTH_STORAGE_KEY = "cloud_dashboard_session_user";
 
+// Clean any previous browser storage tokens on module load to guarantee landing on /login
+try {
+  sessionStorage.removeItem(AUTH_STORAGE_KEY);
+  localStorage.removeItem(AUTH_STORAGE_KEY);
+} catch {
+  // Ignore storage access errors in restricted browser contexts
+}
+
 export const ADMIN_CREDENTIALS = {
   email: "dashboard-admin@coforge.com",
   password: "8iie9gb",
@@ -41,22 +49,8 @@ export const ADMIN_CREDENTIALS = {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(() => {
-    try {
-      const stored = sessionStorage.getItem(AUTH_STORAGE_KEY);
-      return stored ? JSON.parse(stored) : null;
-    } catch {
-      return null;
-    }
-  });
-
-  useEffect(() => {
-    if (user) {
-      sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(user));
-    } else {
-      sessionStorage.removeItem(AUTH_STORAGE_KEY);
-    }
-  }, [user]);
+  // Always start unauthenticated on app launch so the user is forced to log in first
+  const [user, setUser] = useState<User | null>(null);
 
   // 1. Admin Login
   const loginAdmin = async (password: string, email: string = ADMIN_CREDENTIALS.email): Promise<AuthResult> => {

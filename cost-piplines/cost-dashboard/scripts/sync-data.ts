@@ -11,7 +11,7 @@ const awsLatestDir = path.join(projectRoot, "AWSReports", "latest");
 const awsAccountsDir = path.join(projectRoot, "AWSReports", "accounts");
 const publicDataDir = path.join(dashboardRoot, "public", "data");
 
-function copyDirFiles(srcDir, destDir) {
+function copyDirFiles(srcDir: string, destDir: string): number {
   if (!fs.existsSync(srcDir)) return 0;
   fs.mkdirSync(destDir, { recursive: true });
   let count = 0;
@@ -25,7 +25,7 @@ function copyDirFiles(srcDir, destDir) {
   return count;
 }
 
-function sync() {
+export function sync(): void {
   console.log("🔄 Syncing AWS report files to cost-dashboard/public/data...");
 
   // 1. Copy latest AWS root reports

@@ -363,11 +363,12 @@ router.get('/dataset/:filename', async (req: Request, res: Response) => {
         });
         const mapped = records.map((r) => ({
           'Budget Name': r.budgetName,
-          'Budget Limit': Number(r.budgetLimit),
-          'Current Spend': Number(r.currentSpend),
+          'Budget Limit': Number(r.limitAmount),
+          'Current Spend': Number(r.currentUsed),
           'Forecasted Spend': r.forecastedSpend !== null ? Number(r.forecastedSpend) : '',
-          Unit: r.unit,
-          'Time Unit': r.timeUnit,
+          'Current vs Budget %': Number(r.currentVsBudgetPercent),
+          'Threshold Status': r.thresholdStatus,
+          'Health Status': r.healthStatus,
         }));
         return res.json(mapped);
       }
@@ -378,10 +379,13 @@ router.get('/dataset/:filename', async (req: Request, res: Response) => {
           orderBy: { id: 'asc' },
         });
         const mapped = records.map((r) => ({
-          'Account ID': r.awsAccountId,
           'Account Name': r.accountName,
-          'Monthly Spend': Number(r.monthlySpend),
-          'Top Cost Driver': r.topCostDriver,
+          'Account ID': r.awsAccountId,
+          Status: r.status,
+          'Current Month Spend': Number(r.currentMonthSpend),
+          'Previous Month Spend': Number(r.previousMonthSpend),
+          'MoM Change %': Number(r.momChangePercent),
+          'Top Cost Driver': r.topCostDriver || '',
         }));
         return res.json(mapped);
       }
