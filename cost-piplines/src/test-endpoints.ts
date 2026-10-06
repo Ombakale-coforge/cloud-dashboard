@@ -42,6 +42,26 @@ async function runTests() {
       const healthData = await healthRes.json();
       console.log('    Status:', healthRes.status, '| Response:', JSON.stringify(healthData));
 
+      // 1b. Test Admin Login
+      console.log('\n[1b] Testing POST /api/auth/login (Admin) ...');
+      const adminLoginRes = await fetch(`${baseUrl}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: 'dashboard-admin@coforge.com', password: '8iie9gb' })
+      });
+      const adminLoginData = await adminLoginRes.json();
+      console.log('    Admin login status:', adminLoginRes.status, '| Success:', adminLoginData?.success, '| User:', adminLoginData?.user?.name);
+
+      // 1c. Test Requester Login
+      console.log('\n[1c] Testing POST /api/auth/login (Requester) ...');
+      const reqLoginRes = await fetch(`${baseUrl}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: 'omparashuram.b@coforge.com', password: 'plain' })
+      });
+      const reqLoginData = await reqLoginRes.json();
+      console.log('    Requester login status:', reqLoginRes.status, '| Result:', reqLoginData);
+
       // 2. AWS Accounts endpoint
       console.log('\n[2] Testing GET /api/aws/accounts ...');
       const accRes = await fetch(`${baseUrl}/api/aws/accounts`);
@@ -71,16 +91,21 @@ async function runTests() {
       const bgData2 = await bgRes2.json();
       console.log('    Account 2 Budgets count:', bgData2.length, '| Sample:', bgData2[0]);
 
-      // 5. AWS Governance Summary
+      // 5. AWS Governance Summary (Default vs Historical Month)
       console.log('\n[7] Testing GET /api/aws/dataset/governance_summary?account=account-1 ...');
       const govRes1 = await fetch(`${baseUrl}/api/aws/dataset/governance_summary?account=account-1`);
       const govData1 = await govRes1.json();
-      console.log('    Account 1 Governance:', govData1);
+      console.log('    Account 1 Governance (Latest):', govData1?.activeSpendTotal, '| Month:', govData1?.selectedMonth);
+
+      console.log('\n[7b] Testing GET /api/aws/dataset/governance_summary?account=account-1&month=2026-06 ...');
+      const govResJune = await fetch(`${baseUrl}/api/aws/dataset/governance_summary?account=account-1&month=2026-06`);
+      const govDataJune = await govResJune.json();
+      console.log('    Account 1 Governance (June 2026):', govDataJune?.activeSpendTotal, '| Under budget:', govDataJune?.spendUnderBudget, '| Unbudgeted:', govDataJune?.spendWithNoBudget);
 
       console.log('\n[8] Testing GET /api/aws/dataset/governance_summary?account=account-2 ...');
       const govRes2 = await fetch(`${baseUrl}/api/aws/dataset/governance_summary?account=account-2`);
       const govData2 = await govRes2.json();
-      console.log('    Account 2 Governance:', govData2);
+      console.log('    Account 2 Governance (Latest):', govData2?.activeSpendTotal, '| Coverage:', govData2?.budgetCoveragePct);
 
       // 6. AWS Top 10 Services
       console.log('\n[9] Testing GET /api/aws/dataset/top_10_services?account=account-1 ...');

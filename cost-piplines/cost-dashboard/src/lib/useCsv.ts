@@ -22,8 +22,13 @@ export function useCsv<T = Record<string, any>>(path: string) {
       account = accountMatch[1];
     }
 
-    const filename = path.split("/").pop()?.replace(/\.csv$/, "") || "";
-    const apiUrl = `/api/${provider}/dataset/${filename}?account=${encodeURIComponent(account)}`;
+    const [cleanPath, queryString] = path.split("?");
+    const filename = cleanPath.split("/").pop()?.replace(/\.csv$/, "") || "";
+    const params = new URLSearchParams(queryString || "");
+    if (!params.has("account")) {
+      params.set("account", account);
+    }
+    const apiUrl = `/api/${provider}/dataset/${filename}?${params.toString()}`;
 
     fetch(apiUrl)
       .then(async (res) => {

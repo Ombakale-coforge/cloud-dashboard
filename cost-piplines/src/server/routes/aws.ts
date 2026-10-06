@@ -86,6 +86,7 @@ router.get('/dataset/:filename', async (req: Request, res: Response) => {
     const rawFilename = req.params.filename || '';
     const cleanFilename = rawFilename.toLowerCase().replace(/\.csv$/, '').replace(/\.json$/, '');
     const accountParam = req.query.account || req.query.path || 'account-1';
+    const targetMonth = req.query.month ? String(req.query.month).trim() : null;
 
     const accountContext = await getLatestRunForAccount(accountParam);
     if (!accountContext || !accountContext.run) {
@@ -380,6 +381,54 @@ router.get('/dataset/:filename', async (req: Request, res: Response) => {
           where: { reportRunId },
           orderBy: { id: 'asc' },
         });
+
+        if (targetMonth && targetMonth.match(/^\d{4}-\d{2}$/)) {
+          const [yearStr, monthStr] = targetMonth.split('-');
+          const year = parseInt(yearStr, 10);
+          const month = parseInt(monthStr, 10);
+          const prevDate = new Date(Date.UTC(year, month - 2, 1));
+          const prevMonthStr = `${prevDate.getUTCFullYear()}-${String(prevDate.getUTCMonth() + 1).padStart(2, '0')}`;
+
+          const accountCosts = await prisma.awsCostByLinkedAccount.findMany({
+            where: {
+              reportRunId,
+              month: { in: [targetMonth, prevMonthStr] },
+            },
+          });
+
+          const costMap: Record<string, { current: number; previous: number }> = {};
+          accountCosts.forEach((ac) => {
+            if (!costMap[ac.linkedAccount]) costMap[ac.linkedAccount] = { current: 0, previous: 0 };
+            if (ac.month === targetMonth) {
+              costMap[ac.linkedAccount].current = Number(ac.cost);
+            } else if (ac.month === prevMonthStr) {
+              costMap[ac.linkedAccount].previous = Number(ac.cost);
+            }
+          });
+
+          const mapped = records
+            .map((r) => {
+              const costs = costMap[r.awsAccountId] || { current: 0, previous: 0 };
+              const currentSpend = costs.current;
+              const prevSpend = costs.previous;
+              const diff = currentSpend - prevSpend;
+              const momChange = prevSpend > 0 ? Number(((diff / prevSpend) * 100).toFixed(1)) : 0;
+
+              return {
+                'Account Name': r.accountName,
+                'Account ID': r.awsAccountId,
+                Status: r.status,
+                'Current Month Spend': currentSpend,
+                'Previous Month Spend': prevSpend,
+                'MoM Change %': momChange,
+                'Top Cost Driver': r.topCostDriver || 'Cloud Services',
+              };
+            })
+            .sort((a, b) => b['Current Month Spend'] - a['Current Month Spend']);
+
+          return res.json(mapped);
+        }
+
         const mapped = records.map((r) => ({
           'Account Name': r.accountName,
           'Account ID': r.awsAccountId,
@@ -397,6 +446,51 @@ router.get('/dataset/:filename', async (req: Request, res: Response) => {
           where: { reportRunId },
         });
         if (!record) return res.json(null);
+
+        // If targetMonth is provided and different from pipeline run latest month, dynamically compute spend for that month
+        if (targetMonth && targetMonth.match(/^\d{4}-\d{2}$/) && targetMonth !== record.selectedMonth) {
+          const unbudgetedList = await prisma.awsUnbudgetedAccount.findMany({ where: { reportRunId } });
+          const unbudgetedIds = new Set(unbudgetedList.map((u) => u.awsAccountId));
+
+          const monthCosts = await prisma.awsCostByLinkedAccount.findMany({
+            where: { reportRunId, month: targetMonth },
+          });
+
+          let totalActive = 0;
+          let underBudget = 0;
+          let noBudget = 0;
+
+          for (const c of monthCosts) {
+            const cost = Number(c.cost);
+            totalActive += cost;
+            if (unbudgetedIds.has(c.linkedAccount)) {
+              noBudget += cost;
+            } else {
+              underBudget += cost;
+            }
+          }
+
+          const shareUncovered = totalActive > 0 ? Number(((noBudget / totalActive) * 100).toFixed(1)) : 0;
+
+          return res.json({
+            totalAccounts: record.totalAccounts,
+            activeAccounts: record.activeAccounts,
+            suspendedAccounts: record.suspendedAccounts,
+            accountsWithBudget: record.accountsWithBudget,
+            accountsWithNoBudget: record.accountsWithNoBudget,
+            budgetCoveragePct: Number(record.budgetCoveragePct),
+            selectedMonth: targetMonth,
+            activeSpendTotal: Number(totalActive.toFixed(2)),
+            spendUnderBudget: Number(underBudget.toFixed(2)),
+            spendWithNoBudget: Number(noBudget.toFixed(2)),
+            shareSpendUncoveredPct: shareUncovered,
+            sumBudgetLimits: Number(record.sumBudgetLimits),
+            suspendedAccountsChargingCount: record.suspendedAccountsChargingCount,
+            suspendedAccountsSpendTotal: Number(record.suspendedAccountsSpendTotal),
+            suspendedPeriodLabel: record.suspendedPeriodLabel,
+          });
+        }
+
         return res.json({
           totalAccounts: record.totalAccounts,
           activeAccounts: record.activeAccounts,

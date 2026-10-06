@@ -49,7 +49,8 @@ export function OrganizationGovernanceSection({
       account = accountMatch[1];
     }
 
-    const apiUrl = `/api/aws/dataset/governance_summary?account=${encodeURIComponent(account)}`;
+    const monthParam = selectedMonth ? `&month=${encodeURIComponent(selectedMonth)}` : "";
+    const apiUrl = `/api/aws/dataset/governance_summary?account=${encodeURIComponent(account)}${monthParam}`;
 
     fetch(apiUrl)
       .then((res) => {
@@ -77,12 +78,13 @@ export function OrganizationGovernanceSection({
     return () => {
       active = false;
     };
-  }, [basePath]);
+  }, [basePath, selectedMonth]);
 
-  // 2. Fetch Unbudgeted Accounts CSV
-  const { data: unbudgetedAccounts } = useCsv<UnbudgetedAccountRow>(
-    `${basePath}/unbudgeted_accounts.csv`
-  );
+  // 2. Fetch Unbudgeted Accounts CSV (dynamic for selectedMonth)
+  const unbudgetedPath = selectedMonth
+    ? `${basePath}/unbudgeted_accounts.csv?month=${encodeURIComponent(selectedMonth)}`
+    : `${basePath}/unbudgeted_accounts.csv`;
+  const { data: unbudgetedAccounts } = useCsv<UnbudgetedAccountRow>(unbudgetedPath);
 
   // 3. Fetch Budgets Overview CSV
   const { data: budgetsOverview } = useCsv<BudgetOverviewRow>(
@@ -425,9 +427,14 @@ export function OrganizationGovernanceSection({
                   Live budget limits, actual consumption, and forecasted alerts
                 </p>
               </div>
-              <Badge variant="outline" className="text-xs font-semibold text-indigo-600 border-indigo-300 dark:border-indigo-800">
-                {filteredBudgets.length} budgets
-              </Badge>
+              <div className="flex items-center gap-2">
+                <Badge variant="outline" className="text-[10px] font-semibold text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800">
+                  Live Active Budgets
+                </Badge>
+                <Badge variant="outline" className="text-xs font-semibold text-indigo-600 border-indigo-300 dark:border-indigo-800">
+                  {filteredBudgets.length} budgets
+                </Badge>
+              </div>
             </div>
           </CardHeader>
           <CardContent className="flex flex-col flex-1 pb-4">
