@@ -1,6 +1,6 @@
 import { ALERT_CONFIG, RESOURCE_ALERT_EXCLUSIONS, logger } from './config';
 import { getPreviousDates, getDateDaysBefore } from './data-loader';
-import type { Alert, AlertReport, AlertSeverity, UsageRecord, BaselineStats } from './types';
+import type { Alert, AlertReport, AlertSeverity, UsageRecord, BaselineStats, MeterBudget, MeterBudgetStatus, MeterBudgetAlert, BudgetThresholdLevel } from './types';
 
 // ── Exported Functions ───────────────────────────────────────────────────────
 
@@ -449,3 +449,73 @@ export function generateAlerts(records: UsageRecord[]): AlertReport {
         alerts: allAlerts
     };
 }
+
+export function evaluateMeterBudgets(
+    records: UsageRecord[],
+    budgets: MeterBudget[],
+    evaluationDate: string
+): { statuses: MeterBudgetStatus[]; alertsToNotify: MeterBudgetAlert[] } {
+    const evaluationMonth = evaluationDate.slice(0, 7);
+
+    // Aggregate current month spend per meter up to evaluationDate
+    const meterSpendMap = new Map<string, number>();
+    for (const r of records) {
+        if (!r.date || !r.date.startsWith(evaluationMonth) || r.date > evaluationDate) continue;
+        const key = (r.meterName || '').trim().toLowerCase();
+        if (!key) continue;
+        meterSpendMap.set(key, (meterSpendMap.get(key) || 0) + (Number(r.cost) || 0));
+    }
+
+    const statuses: MeterBudgetStatus[] = [];
+    const alertsToNotify: MeterBudgetAlert[] = [];
+
+    for (const budget of budgets) {
+        if (!budget.isActive) continue;
+        const key = (budget.meterName || '').trim().toLowerCase();
+        const currentMonthSpend = meterSpendMap.get(key) || 0;
+        const budgetLimit = Number(budget.monthlyBudget) || 1;
+        const percentUsed = (currentMonthSpend / budgetLimit) * 100;
+
+        let status: MeterBudgetStatus['status'] = 'NORMAL';
+        let crossedThreshold: BudgetThresholdLevel | null = null;
+
+        if (percentUsed >= 100) {
+            status = percentUsed > 100 ? 'OVER_BUDGET' : 'AT_100';
+            crossedThreshold = percentUsed > 100 ? 'OVER_BUDGET' : '100%';
+        } else if (percentUsed >= 75) {
+            status = 'NEAR_75';
+            crossedThreshold = '75%';
+        } else if (percentUsed >= 50) {
+            status = 'NEAR_50';
+            crossedThreshold = '50%';
+        }
+
+        const budgetStatus: MeterBudgetStatus = {
+            ...budget,
+            currentMonthSpend,
+            percentUsed: Math.round(percentUsed * 10) / 10,
+            status,
+            evaluationMonth,
+        };
+        statuses.push(budgetStatus);
+
+        if (crossedThreshold) {
+            const alreadyPingedToday = budget.lastNotifiedDate === evaluationDate;
+            const alreadyPingedThreshold = budget.lastNotifiedThreshold === crossedThreshold;
+
+            if (!alreadyPingedToday || !alreadyPingedThreshold) {
+                alertsToNotify.push({
+                    budget,
+                    currentMonthSpend,
+                    budgetLimit,
+                    percentUsed: Math.round(percentUsed * 10) / 10,
+                    thresholdCrossed: crossedThreshold,
+                    evaluationDate,
+                });
+            }
+        }
+    }
+
+    return { statuses, alertsToNotify };
+}
+

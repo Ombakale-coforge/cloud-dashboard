@@ -9,16 +9,21 @@
  *   tsx src/alerts/index.ts --days 45             # lookback window (default 38)
  */
 
+import fs from 'node:fs';
+import path from 'node:path';
 import {
     validateEnvironment,
     ALERT_CONFIG,
     EMAIL_MODE,
+    LOG_DIR_PATH,
     logger,
 } from './config';
 import { getPrismaClient, disconnectDb } from './db';
 import { loadActiveUsageRecords, getDateDaysBefore, todayUTC } from './data-loader';
-import { generateAlerts } from './alert-service';
-import { sendAlertEmail } from './email-service';
+import { generateAlerts, evaluateMeterBudgets } from './alert-service';
+import { sendAlertEmail, sendBudgetAlertEmail } from './email-service';
+import { ensureAlertTablesExist } from '../server/db-alert-tables';
+import type { AlertReport, UsageRecord, MeterBudget } from './types';
 
 function parseArgs(): { mode: 'preview' | 'send'; endDate: string; lookbackDays: number } {
     const args = process.argv.slice(2);
@@ -37,11 +42,110 @@ function parseArgs(): { mode: 'preview' | 'send'; endDate: string; lookbackDays:
     return { mode, endDate, lookbackDays };
 }
 
+async function persistAlertsToDb(prisma: any, alertReport: AlertReport): Promise<void> {
+    if (!prisma) return;
+    try {
+        await ensureAlertTablesExist(prisma);
+
+        // Remove existing alerts for this evaluationDate to keep it clean and idempotent
+        await prisma.azureCostAlert.deleteMany({
+            where: { evaluationDate: alertReport.evaluationDate },
+        });
+
+        const data = alertReport.alerts.map((a) => ({
+            evaluationDate: alertReport.evaluationDate,
+            alertType: a.alertType,
+            severity: a.severity,
+            billingCurrency: a.billingCurrency || 'INR',
+            currentCost: Number(a.currentCost || 0).toFixed(2),
+            baselineCost: a.baselineCost !== undefined ? Number(a.baselineCost).toFixed(2) : null,
+            absoluteIncrease: Number(a.absoluteIncrease || 0).toFixed(2),
+            percentIncrease: a.percentIncrease !== null && a.percentIncrease !== undefined ? Number(a.percentIncrease).toFixed(2) : null,
+            nonZeroBaselineDays: a.nonZeroBaselineDays || null,
+            subscriptionId: a.subscriptionId || 'unknown',
+            subscriptionName: a.subscriptionName || null,
+            resourceId: a.resourceId || null,
+            resourceName: a.resourceName || null,
+            resourceGroup: a.resourceGroup || null,
+            service: a.service || null,
+            firstSeenDate: a.firstSeenDate || null,
+            currentQuantity: a.currentQuantity !== undefined ? Number(a.currentQuantity).toFixed(6) : null,
+            baselineQuantity: a.baselineQuantity !== undefined ? Number(a.baselineQuantity).toFixed(6) : null,
+            meterId: a.meterId || null,
+            meterName: a.meterName || null,
+            meterCategory: a.meterCategory || null,
+            meterSubCategory: a.meterSubCategory || null,
+            unitOfMeasure: a.unitOfMeasure || null,
+            driverAnnotationJson: a.likelyDrivenBy ? JSON.stringify(a.likelyDrivenBy) : null,
+        }));
+
+        const chunkSize = 100;
+        for (let i = 0; i < data.length; i += chunkSize) {
+            await prisma.azureCostAlert.createMany({
+                data: data.slice(i, i + chunkSize),
+            });
+        }
+        logger.info(`Persisted ${data.length} alerts to azure_cost_alerts database table.`);
+    } catch (dbErr: any) {
+        logger.error('Failed to persist alerts to database:', { error: dbErr.message });
+    }
+}
+
+async function processMeterBudgets(prisma: any, records: UsageRecord[], evaluationDate: string, mode: 'preview' | 'send'): Promise<void> {
+    if (!prisma) return;
+    try {
+        await ensureAlertTablesExist(prisma);
+        const rawBudgets = await prisma.azureMeterBudget.findMany({
+            where: { isActive: true },
+        });
+
+        if (!rawBudgets || rawBudgets.length === 0) {
+            logger.info('No active meter budgets found.');
+            return;
+        }
+
+        const budgets: MeterBudget[] = rawBudgets.map((b: any) => ({
+            id: b.id,
+            meterName: b.meterName,
+            meterCategory: b.meterCategory,
+            service: b.service,
+            monthlyBudget: Number(b.monthlyBudget),
+            billingCurrency: b.billingCurrency || 'INR',
+            alertEmail: b.alertEmail,
+            isActive: Boolean(b.isActive),
+            lastNotifiedThreshold: b.lastNotifiedThreshold,
+            lastNotifiedDate: b.lastNotifiedDate,
+        }));
+
+        const { statuses, alertsToNotify } = evaluateMeterBudgets(records, budgets, evaluationDate);
+        logger.info(`Evaluated ${statuses.length} meter budgets. Triggered alerts: ${alertsToNotify.length}`);
+
+        if (alertsToNotify.length > 0) {
+            const emailResult = await sendBudgetAlertEmail(alertsToNotify, { mode });
+            if (emailResult.sent || emailResult.previewed) {
+                for (const item of alertsToNotify) {
+                    await prisma.azureMeterBudget.update({
+                        where: { id: item.budget.id },
+                        data: {
+                            lastNotifiedThreshold: item.thresholdCrossed,
+                            lastNotifiedDate: evaluationDate,
+                            updatedAt: new Date(),
+                        },
+                    });
+                }
+                logger.info(`Updated notification tracking for ${alertsToNotify.length} meter budget(s).`);
+            }
+        }
+    } catch (err: any) {
+        logger.error('Error evaluating meter budgets in pipeline:', { error: err.message });
+    }
+}
+
 export async function runAlertPipeline(options?: {
     mode?: 'preview' | 'send';
     endDate?: string;
     lookbackDays?: number;
-    records?: import('./types').UsageRecord[];
+    records?: UsageRecord[];
 }) {
     const startedAt = Date.now();
     const cliArgs = parseArgs();
@@ -54,12 +158,14 @@ export async function runAlertPipeline(options?: {
     logger.info('========================================================');
 
     try {
+        const prisma = getPrismaClient();
+
         // Step 1: Load usage records
         let records = options?.records;
         if (!records) {
             validateEnvironment(true);
             const startDate = getDateDaysBefore(endDate, lookbackDays);
-            records = await loadActiveUsageRecords(startDate, endDate, getPrismaClient());
+            records = await loadActiveUsageRecords(startDate, endDate, prisma);
         }
 
         if (!records.length) {
@@ -77,7 +183,19 @@ export async function runAlertPipeline(options?: {
             summary: alertReport.summary,
         });
 
-        // Step 3: Email / preview
+        // Step 3: Persist alerts to DB and JSON log
+        await persistAlertsToDb(prisma, alertReport);
+        try {
+            const reportPath = path.join(LOG_DIR_PATH, `alert-report-${alertReport.evaluationDate}.json`);
+            fs.writeFileSync(reportPath, JSON.stringify(alertReport, null, 2), 'utf8');
+        } catch (jsonErr: any) {
+            logger.warn('Failed to write backup alert report JSON:', { error: jsonErr.message });
+        }
+
+        // Step 4: Evaluate manual meter budgets and trigger daily pings
+        await processMeterBudgets(prisma, records, alertReport.evaluationDate, mode);
+
+        // Step 5: Email / preview spike & anomaly report
         logger.info(`Processing alert notification (mode: ${mode})...`);
         const emailResult = await sendAlertEmail(alertReport, { mode });
 

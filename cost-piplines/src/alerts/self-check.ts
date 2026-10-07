@@ -6,6 +6,7 @@
 import assert from 'node:assert';
 import {
     generateAlerts,
+    evaluateMeterBudgets,
     average,
     median,
     calculatePercentChange,
@@ -13,7 +14,7 @@ import {
     shouldExcludeFromResourceAlerts,
     getSeverity,
 } from './alert-service';
-import type { UsageRecord, AlertReport } from './types';
+import type { UsageRecord, AlertReport, MeterBudget } from './types';
 
 // ── Fixture helpers ─────────────────────────────────────────────────
 
@@ -538,9 +539,42 @@ export async function runSelfCheck(): Promise<void> {
     testNewResourceBlackHolePrevention();
     testDriverCoverageClamping();
     testBasicAlertGeneration();
+    testMeterBudgetThresholds();
     await testEmailPreviewGeneration();
 
     console.log('\n✓ All azure alerts self-check tests passed.');
+}
+
+function testMeterBudgetThresholds(): void {
+    const records: UsageRecord[] = [
+        makeRecord({ date: '2026-10-01', meterName: 'Meter-A', cost: 1000 }),
+        makeRecord({ date: '2026-10-02', meterName: 'Meter-A', cost: 2000 }),
+        makeRecord({ date: '2026-10-03', meterName: 'Meter-B', cost: 7600 }),
+        makeRecord({ date: '2026-10-04', meterName: 'Meter-C', cost: 12000 }),
+        makeRecord({ date: '2026-10-05', meterName: 'Meter-D', cost: 300 }),
+    ];
+
+    const budgets: MeterBudget[] = [
+        { id: 1, meterName: 'Meter-A', monthlyBudget: 5000, billingCurrency: 'INR', alertEmail: 'a@test.com', isActive: true },
+        { id: 2, meterName: 'Meter-B', monthlyBudget: 10000, billingCurrency: 'INR', alertEmail: 'b@test.com', isActive: true },
+        { id: 3, meterName: 'Meter-C', monthlyBudget: 10000, billingCurrency: 'INR', alertEmail: 'c@test.com', isActive: true },
+        { id: 4, meterName: 'Meter-D', monthlyBudget: 1000, billingCurrency: 'INR', alertEmail: 'd@test.com', isActive: true },
+    ];
+
+    const { statuses, alertsToNotify } = evaluateMeterBudgets(records, budgets, '2026-10-05');
+
+    assert.strictEqual(statuses.length, 4);
+    assert.strictEqual(statuses.find(s => s.meterName === 'Meter-A')?.status, 'NEAR_50');
+    assert.strictEqual(statuses.find(s => s.meterName === 'Meter-B')?.status, 'NEAR_75');
+    assert.strictEqual(statuses.find(s => s.meterName === 'Meter-C')?.status, 'OVER_BUDGET');
+    assert.strictEqual(statuses.find(s => s.meterName === 'Meter-D')?.status, 'NORMAL');
+
+    assert.strictEqual(alertsToNotify.length, 3);
+    assert.strictEqual(alertsToNotify.find(a => a.budget.meterName === 'Meter-A')?.thresholdCrossed, '50%');
+    assert.strictEqual(alertsToNotify.find(a => a.budget.meterName === 'Meter-B')?.thresholdCrossed, '75%');
+    assert.strictEqual(alertsToNotify.find(a => a.budget.meterName === 'Meter-C')?.thresholdCrossed, 'OVER_BUDGET');
+
+    console.log('  ✓ Meter budget thresholds (50%, 75%, 100%, OVER_BUDGET) passed');
 }
 
 if (process.argv[1] && process.argv[1].includes('self-check')) {

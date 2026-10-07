@@ -48,12 +48,18 @@ interface AzureDataTablesProps {
  */
 interface AzureTopMeter {
     Month: string;
-    Meter: string;
-    Category: string;
+    Meter?: string;
+    MeterName?: string;
+    Category?: string;
+    MeterCategory?: string;
     Service: string;
-    ResourceGroup: string;
+    ResourceGroup?: string;
     Cost: number;
 }
+
+const getMeterName = (m: AzureTopMeter) => m.Meter || m.MeterName || "";
+const getCategory = (m: AzureTopMeter) => m.Category || m.MeterCategory || "";
+const getResourceGroup = (m: AzureTopMeter) => m.ResourceGroup || "";
 
 type SortKey =
     | "Meter"
@@ -171,10 +177,10 @@ export function AzureDataTables({
             }
 
             return [
-                meter.Meter,
-                meter.Category,
+                getMeterName(meter),
+                getCategory(meter),
                 meter.Service,
-                meter.ResourceGroup,
+                getResourceGroup(meter),
             ].some((value) =>
                 normalizeText(value).includes(query)
             );
@@ -186,6 +192,30 @@ export function AzureDataTables({
             if (sortKey === "Cost") {
                 comparison =
                     Number(a.Cost) - Number(b.Cost);
+            } else if (sortKey === "Meter") {
+                comparison = getMeterName(a).localeCompare(
+                    getMeterName(b),
+                    undefined,
+                    {
+                        sensitivity: "base",
+                    }
+                );
+            } else if (sortKey === "Category") {
+                comparison = getCategory(a).localeCompare(
+                    getCategory(b),
+                    undefined,
+                    {
+                        sensitivity: "base",
+                    }
+                );
+            } else if (sortKey === "ResourceGroup") {
+                comparison = getResourceGroup(a).localeCompare(
+                    getResourceGroup(b),
+                    undefined,
+                    {
+                        sensitivity: "base",
+                    }
+                );
             } else {
                 comparison = String(
                     a[sortKey] ?? ""
@@ -442,26 +472,26 @@ export function AzureDataTables({
                                             index
                                         ) => (
                                             <TableRow
-                                                key={`${meter.Month}-${meter.Meter}-${meter.ResourceGroup}-${index}`}
+                                                key={`${meter.Month}-${getMeterName(meter)}-${getResourceGroup(meter)}-${index}`}
                                                 className="hover:bg-muted/30"
                                             >
                                                 <TableCell
                                                     className="max-w-[280px] truncate py-3 font-medium"
                                                     title={
-                                                        meter.Meter
+                                                        getMeterName(meter)
                                                     }
                                                 >
-                                                    {meter.Meter ||
+                                                    {getMeterName(meter) ||
                                                         "Unknown Meter"}
                                                 </TableCell>
 
                                                 <TableCell
                                                     className="max-w-[200px] truncate py-3 text-muted-foreground"
                                                     title={
-                                                        meter.Category
+                                                        getCategory(meter)
                                                     }
                                                 >
-                                                    {meter.Category ||
+                                                    {getCategory(meter) ||
                                                         "Uncategorized"}
                                                 </TableCell>
 
@@ -478,10 +508,10 @@ export function AzureDataTables({
                                                 <TableCell
                                                     className="max-w-[230px] truncate py-3 text-muted-foreground"
                                                     title={
-                                                        meter.ResourceGroup
+                                                        getResourceGroup(meter)
                                                     }
                                                 >
-                                                    {meter.ResourceGroup ||
+                                                    {getResourceGroup(meter) ||
                                                         "Unassigned"}
                                                 </TableCell>
 

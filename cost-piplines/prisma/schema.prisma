@@ -59,11 +59,7 @@ datasource db {
 }
 
 generator client {
-  provider               = "prisma-client"
-  output                 = "../generated/prisma"
-  moduleFormat           = "esm"
-  generatedFileExtension = "mts"
-  importFileExtension    = "mts"
+  provider = "prisma-client-js"
 }
 
 // ---------------------------------------------------------------
@@ -1077,5 +1073,64 @@ model AwsGovernanceSummary {
   reportRun                       AwsReportRun @relation(fields: [reportRunId], references: [id], onDelete: Cascade, onUpdate: Cascade)
 
   @@map("aws_governance_summary")
+}
+
+model AzureCostAlert {
+  id                   Int       @id @default(autoincrement()) @map("id")
+  evaluationDate       String    @map("evaluation_date") @db.Char(10)
+  alertType            String    @map("alert_type") @db.NVarChar(64)
+  severity             String    @map("severity") @db.NVarChar(16)
+  billingCurrency      String    @default("INR") @map("billing_currency") @db.NVarChar(8)
+
+  currentCost          Decimal   @map("current_cost") @db.Decimal(18, 2)
+  baselineCost         Decimal?  @map("baseline_cost") @db.Decimal(18, 2)
+  absoluteIncrease     Decimal   @map("absolute_increase") @db.Decimal(18, 2)
+  percentIncrease      Decimal?  @map("percent_increase") @db.Decimal(10, 2)
+  nonZeroBaselineDays  Int?      @map("non_zero_baseline_days")
+
+  subscriptionId       String    @map("subscription_id") @db.NVarChar(100)
+  subscriptionName     String?   @map("subscription_name") @db.NVarChar(255)
+  resourceId           String?   @map("resource_id") @db.NVarChar(300)
+  resourceName         String?   @map("resource_name") @db.NVarChar(255)
+  resourceGroup        String?   @map("resource_group") @db.NVarChar(255)
+  service              String?   @map("service") @db.NVarChar(255)
+
+  firstSeenDate        String?   @map("first_seen_date") @db.Char(10)
+
+  currentQuantity      Decimal?  @map("current_quantity") @db.Decimal(24, 6)
+  baselineQuantity     Decimal?  @map("baseline_quantity") @db.Decimal(24, 6)
+  meterId              String?   @map("meter_id") @db.NVarChar(100)
+  meterName            String?   @map("meter_name") @db.NVarChar(255)
+  meterCategory        String?   @map("meter_category") @db.NVarChar(255)
+  meterSubCategory     String?   @map("meter_sub_category") @db.NVarChar(255)
+  unitOfMeasure        String?   @map("unit_of_measure") @db.NVarChar(64)
+
+  driverAnnotationJson String?   @map("driver_annotation_json") @db.NVarChar(Max)
+  createdAt            DateTime  @default(now()) @map("created_at")
+
+  @@index([evaluationDate], map: "azure_cost_alerts_date_idx")
+  @@index([alertType], map: "azure_cost_alerts_type_idx")
+  @@index([severity], map: "azure_cost_alerts_severity_idx")
+  @@map("azure_cost_alerts")
+}
+
+model AzureMeterBudget {
+  id                    Int       @id @default(autoincrement()) @map("id")
+  meterName             String    @map("meter_name") @db.NVarChar(255)
+  meterCategory         String?   @map("meter_category") @db.NVarChar(255)
+  service               String?   @map("service") @db.NVarChar(255)
+  monthlyBudget         Decimal   @map("monthly_budget") @db.Decimal(18, 2)
+  billingCurrency       String    @default("INR") @map("billing_currency") @db.NVarChar(8)
+  alertEmail            String    @map("alert_email") @db.NVarChar(255)
+  isActive              Boolean   @default(true) @map("is_active")
+
+  lastNotifiedThreshold String?   @map("last_notified_threshold") @db.NVarChar(32)
+  lastNotifiedDate      String?   @map("last_notified_date") @db.Char(10)
+
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  @@index([meterName], map: "azure_meter_budgets_meter_idx")
+  @@map("azure_meter_budgets")
 }
 

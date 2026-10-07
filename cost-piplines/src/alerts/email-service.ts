@@ -1,7 +1,7 @@
 import nodemailer from 'nodemailer';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { AlertReport, Alert, EmailResult, AlertSeverity } from './types';
+import type { AlertReport, Alert, EmailResult, AlertSeverity, MeterBudgetAlert } from './types';
 import { EMAIL_MODE, LOG_DIR_PATH, validateEmailEnvironment, logger } from './config';
 
 function escapeHtml(value: string | number | null | undefined): string {
@@ -245,3 +245,94 @@ export async function sendAlertEmail(alertReport: AlertReport, options?: { mode?
         throw err;
     }
 }
+
+export function createBudgetAlertHtml(budgetAlerts: MeterBudgetAlert[]): string {
+    const rows = budgetAlerts.map((ba) => {
+        const isOver = ba.thresholdCrossed === 'OVER_BUDGET';
+        const color = isOver ? '#b91c1c' : ba.thresholdCrossed === '100%' ? '#dc2626' : ba.thresholdCrossed === '75%' ? '#d97706' : '#2563eb';
+        return `
+        <div style="border:1px solid #e2e8f0;border-left:4px solid ${color};border-radius:6px;padding:16px;margin-bottom:16px;background:#ffffff;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                <h3 style="margin:0;font-size:16px;color:#0f172a;">${escapeHtml(ba.budget.meterName)}</h3>
+                <span style="background:${color};color:#ffffff;padding:3px 8px;border-radius:4px;font-size:12px;font-weight:600;">${ba.thresholdCrossed} REACHED</span>
+            </div>
+            <p style="margin:4px 0;font-size:13px;color:#64748b;">
+                Category: <strong>${escapeHtml(ba.budget.meterCategory || 'N/A')}</strong> | Service: <strong>${escapeHtml(ba.budget.service || 'N/A')}</strong>
+            </p>
+            <table style="width:100%;font-size:13px;margin-top:12px;border-collapse:collapse;">
+                <tr><td style="color:#64748b;padding:4px 0;">Current Month Spend:</td><td style="font-weight:600;">${formatCurrency(ba.currentMonthSpend, ba.budget.billingCurrency)}</td></tr>
+                <tr><td style="color:#64748b;padding:4px 0;">Monthly Budget Limit:</td><td style="font-weight:600;">${formatCurrency(ba.budgetLimit, ba.budget.billingCurrency)}</td></tr>
+                <tr><td style="color:#64748b;padding:4px 0;">Budget Consumed:</td><td style="font-weight:700;color:${color};">${ba.percentUsed.toFixed(1)}%</td></tr>
+            </table>
+        </div>`;
+    }).join('');
+
+    return `<!DOCTYPE html><html><body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f8fafc;padding:24px;color:#1e293b;">
+    <div style="max-width:600px;margin:0 auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;">
+        <h2 style="margin-top:0;color:#0f172a;">Azure Meter Budget Alert Notification</h2>
+        <p style="color:#64748b;font-size:14px;">The following Azure meters have reached or exceeded their configured budget thresholds:</p>
+        ${rows}
+        <p style="font-size:12px;color:#94a3b8;margin-top:24px;border-top:1px solid #f1f5f9;padding-top:12px;">Automated Cloud Cost Intelligence Alert</p>
+    </div>
+    </body></html>`;
+}
+
+export async function sendBudgetAlertEmail(budgetAlerts: MeterBudgetAlert[], options?: { mode?: 'preview' | 'send' }): Promise<EmailResult> {
+    if (!budgetAlerts || budgetAlerts.length === 0) {
+        return { sent: false, reason: 'NO_ALERTS' };
+    }
+
+    const mode = options?.mode || EMAIL_MODE;
+    const dateStr = budgetAlerts[0]?.evaluationDate || new Date().toISOString().slice(0, 10);
+
+    if (mode === 'preview') {
+        const previewHtml = createBudgetAlertHtml(budgetAlerts);
+        const previewPath = path.join(LOG_DIR_PATH, `budget-alert-preview-${dateStr}.html`);
+        fs.writeFileSync(previewPath, previewHtml, 'utf8');
+        logger.info(`Wrote budget alert preview to ${previewPath}`);
+        return { sent: false, previewed: true, previewPath };
+    }
+
+    validateEmailEnvironment();
+
+    const transporter = nodemailer.createTransport({
+        host: process.env.SMTP_HOST,
+        port: Number(process.env.SMTP_PORT),
+        secure: String(process.env.SMTP_SECURE).toLowerCase() === 'true',
+        auth: {
+            user: process.env.SMTP_USER,
+            pass: process.env.SMTP_PASSWORD,
+        },
+    });
+
+    const recipientSet = new Set<string>();
+    for (const ba of budgetAlerts) {
+        if (ba.budget.alertEmail) recipientSet.add(ba.budget.alertEmail);
+    }
+    const recipients = Array.from(recipientSet).length > 0
+        ? Array.from(recipientSet).join(',')
+        : (process.env.ALERT_EMAIL_TO || '');
+
+    const subject = `[BUDGET ALERT] ${budgetAlerts.length} Azure Meter(s) reached budget thresholds (${dateStr})`;
+
+    const mailOptions = {
+        from: process.env.ALERT_EMAIL_FROM,
+        to: recipients,
+        subject,
+        html: createBudgetAlertHtml(budgetAlerts),
+    };
+
+    try {
+        const info = await transporter.sendMail(mailOptions);
+        return {
+            sent: true,
+            messageId: info.messageId,
+            accepted: info.accepted as string[],
+            rejected: info.rejected as string[],
+        };
+    } catch (err: any) {
+        logger.error('Failed to send budget alert email', { error: err });
+        throw err;
+    }
+}
+

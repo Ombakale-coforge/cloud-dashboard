@@ -137,3 +137,37 @@ export interface EmailResult {
     rejected?: string[];
     reason?: string;
 }
+
+export type BudgetThresholdLevel = '50%' | '75%' | '100%' | 'OVER_BUDGET';
+
+export interface MeterBudget {
+    id: number;
+    meterName: string;
+    meterCategory?: string | null;
+    service?: string | null;
+    monthlyBudget: number;
+    billingCurrency: string;
+    alertEmail: string;
+    isActive: boolean;
+    lastNotifiedThreshold?: string | null;
+    lastNotifiedDate?: string | null;
+    createdAt?: string;
+    updatedAt?: string;
+}
+
+export interface MeterBudgetStatus extends MeterBudget {
+    currentMonthSpend: number;
+    percentUsed: number;
+    status: 'NORMAL' | 'NEAR_50' | 'NEAR_75' | 'AT_100' | 'OVER_BUDGET';
+    evaluationMonth: string;
+}
+
+export interface MeterBudgetAlert {
+    budget: MeterBudget;
+    currentMonthSpend: number;
+    budgetLimit: number;
+    percentUsed: number;
+    thresholdCrossed: BudgetThresholdLevel;
+    evaluationDate: string;
+}
+
