@@ -59,6 +59,12 @@ interface AzurePricingModelCost {
     Cost: number;
 }
 
+interface AzureCategoryCost {
+    Month: string;
+    Category: string;
+    Cost: number;
+}
+
 interface AzureChartsProps {
     selectedMonth: string;
     basePath?: string;
@@ -78,6 +84,17 @@ const PRICING_MODEL_COLORS = [
     "#0d9488",
     "#f59e0b",
     "#e11d48",
+    "#64748b",
+];
+
+const AZURE_CATEGORY_COLORS = [
+    "#4f46e5",
+    "#0284c7",
+    "#0d9488",
+    "#10b981",
+    "#8b5cf6",
+    "#f59e0b",
+    "#ec4899",
     "#64748b",
 ];
 
@@ -216,6 +233,11 @@ export function AzureCharts({
     const { data: pricingModelCosts } =
         useCsv<AzurePricingModelCost>(
             `${basePath}/azure_usage_by_pricing_model.csv`
+        );
+
+    const { data: categoryCosts } =
+        useCsv<AzureCategoryCost>(
+            `${basePath}/category_monthly_costs.csv`
         );
 
     /*
@@ -381,6 +403,35 @@ export function AzureCharts({
             0
         );
     }, [pricingModelData]);
+
+    const categoryData = useMemo(() => {
+        const grouped = new Map<string, number>();
+
+        for (const row of categoryCosts) {
+            if (row.Month !== effectiveMonth) {
+                continue;
+            }
+
+            const cost = Number(row.Cost);
+            if (!Number.isFinite(cost) || cost <= 0) {
+                continue;
+            }
+
+            const category = row.Category?.trim() || "Other";
+            grouped.set(category, (grouped.get(category) ?? 0) + cost);
+        }
+
+        return Array.from(grouped.entries())
+            .map(([name, cost]) => ({
+                name,
+                cost,
+            }))
+            .sort((a, b) => b.cost - a.cost);
+    }, [categoryCosts, effectiveMonth]);
+
+    const totalCategoryCost = useMemo(() => {
+        return categoryData.reduce((sum, row) => sum + row.cost, 0);
+    }, [categoryData]);
 
     return (
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -967,6 +1018,81 @@ export function AzureCharts({
                         <EmptyChartMessage
                             message={`No resource cost data is available for ${activeMonthName}.`}
                         />
+                    )}
+                </CardContent>
+            </Card>
+
+            {/* Cost by Service Category */}
+            <Card className={`lg:col-span-2 ${chartCardClass}`}>
+                <CardHeader className="pb-2">
+                    <CardTitle className="text-lg font-semibold tracking-tight">
+                        Cost by Service Category
+                    </CardTitle>
+                    <p className="text-xs text-muted-foreground">
+                        {activeMonthName} spend grouped by standard FinOps cloud categories
+                    </p>
+                </CardHeader>
+                <CardContent>
+                    {categoryData.length > 0 ? (
+                        <div className="flex flex-col items-center gap-6 xl:flex-row">
+                            <div className="relative h-[280px] w-full xl:w-1/2">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <PieChart>
+                                        <Pie
+                                            data={categoryData}
+                                            dataKey="cost"
+                                            nameKey="name"
+                                            innerRadius={70}
+                                            outerRadius={105}
+                                            paddingAngle={3}
+                                        >
+                                            {categoryData.map((row, index) => (
+                                                <Cell
+                                                    key={`${row.name}-${index}`}
+                                                    fill={AZURE_CATEGORY_COLORS[index % AZURE_CATEGORY_COLORS.length]}
+                                                />
+                                            ))}
+                                        </Pie>
+                                        <Tooltip
+                                            contentStyle={tooltipStyle}
+                                            formatter={(value, _name, item) => [
+                                                formatFullCurrency(value),
+                                                item.payload?.name ?? "Category",
+                                            ]}
+                                        />
+                                    </PieChart>
+                                </ResponsiveContainer>
+                                <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+                                    <span className="text-xs text-muted-foreground">Total Cost</span>
+                                    <span className="mt-1 text-lg font-bold text-foreground">
+                                        {formatCompactCurrency(totalCategoryCost)}
+                                    </span>
+                                </div>
+                            </div>
+                            <div className="w-full grid grid-cols-1 sm:grid-cols-2 gap-2 xl:w-1/2">
+                                {categoryData.map((row, index) => {
+                                    const percentage = totalCategoryCost > 0 ? (row.cost / totalCategoryCost) * 100 : 0;
+                                    const color = AZURE_CATEGORY_COLORS[index % AZURE_CATEGORY_COLORS.length];
+                                    return (
+                                        <div
+                                            key={`${row.name}-${index}`}
+                                            className="flex items-center justify-between gap-2 rounded-md px-2.5 py-1.5 hover:bg-muted/30"
+                                        >
+                                            <div className="flex min-w-0 items-center gap-2">
+                                                <span className="h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: color }} />
+                                                <span className="truncate text-xs font-medium">{row.name}</span>
+                                            </div>
+                                            <div className="text-right shrink-0">
+                                                <span className="text-xs font-semibold">{formatCompactCurrency(row.cost)}</span>
+                                                <span className="ml-1.5 text-[10px] text-muted-foreground">({percentage.toFixed(1)}%)</span>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    ) : (
+                        <EmptyChartMessage message={`No category cost data available for ${activeMonthName}.`} />
                     )}
                 </CardContent>
             </Card>

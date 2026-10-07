@@ -1,6 +1,7 @@
 import { AzureKpiCards } from "@/components/azure/AzureKpiCards";
 import { AzureCharts } from "@/components/azure/AzureCharts";
 import { AzureDataTables } from "@/components/azure/AzureDataTables";
+import { AzureGovernanceSection } from "@/components/azure/AzureGovernanceSection";
 
 interface AzureDashboardProps {
     selectedMonth: string;
@@ -13,6 +14,7 @@ export function AzureDashboard({ selectedMonth, basePath = "/data/azure" }: Azur
             <AzureKpiCards selectedMonth={selectedMonth} basePath={basePath} />
             <AzureCharts selectedMonth={selectedMonth} basePath={basePath} />
             <AzureDataTables selectedMonth={selectedMonth} basePath={basePath} />
+            <AzureGovernanceSection selectedMonth={selectedMonth} basePath={basePath} />
         </div>
     );
 }

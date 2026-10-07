@@ -1134,3 +1134,23 @@ model AzureMeterBudget {
   @@map("azure_meter_budgets")
 }
 
+model AzureSubscriptionBudget {
+  id               Int       @id @default(autoincrement()) @map("id")
+  subscriptionId   String    @map("subscription_id") @db.NVarChar(100)
+  subscriptionName String?   @map("subscription_name") @db.NVarChar(255)
+  budgetName       String?   @map("budget_name") @db.NVarChar(255)
+  amount           Decimal?  @map("amount") @db.Decimal(18, 2)
+  timeGrain        String    @default("Monthly") @map("time_grain") @db.NVarChar(32)
+  startDate        DateTime? @map("start_date")
+  endDate          DateTime? @map("end_date")
+  thresholds       String?   @map("thresholds") @db.NVarChar(512)
+  contactEmails    String?   @map("contact_emails") @db.NVarChar(1024)
+  status           String    @default("BUDGETED") @map("status") @db.NVarChar(32)
+  errorMessage     String?   @map("error_message") @db.NVarChar(1024)
+  lastSyncedAt     DateTime  @default(now()) @map("last_synced_at")
+
+  @@unique([subscriptionId, budgetName], map: "azure_sub_budget_unique")
+  @@index([subscriptionId], map: "azure_sub_budget_sub_idx")
+  @@map("azure_subscription_budgets")
+}
+

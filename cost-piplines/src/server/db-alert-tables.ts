@@ -62,6 +62,28 @@ BEGIN
     );
     CREATE NONCLUSTERED INDEX [azure_meter_budgets_meter_idx] ON [dbo].[azure_meter_budgets]([meter_name]);
 END;
+
+IF OBJECT_ID('dbo.azure_subscription_budgets', 'U') IS NULL
+BEGIN
+    CREATE TABLE [dbo].[azure_subscription_budgets] (
+        [id] INT IDENTITY(1,1) NOT NULL,
+        [subscription_id] NVARCHAR(100) NOT NULL,
+        [subscription_name] NVARCHAR(255) NULL,
+        [budget_name] NVARCHAR(255) NULL,
+        [amount] DECIMAL(18,2) NULL,
+        [time_grain] NVARCHAR(32) NOT NULL CONSTRAINT [DF_azure_sub_budgets_grain] DEFAULT ('Monthly'),
+        [start_date] DATETIME2 NULL,
+        [end_date] DATETIME2 NULL,
+        [thresholds] NVARCHAR(512) NULL,
+        [contact_emails] NVARCHAR(1024) NULL,
+        [status] NVARCHAR(32) NOT NULL CONSTRAINT [DF_azure_sub_budgets_status] DEFAULT ('BUDGETED'),
+        [error_message] NVARCHAR(1024) NULL,
+        [last_synced_at] DATETIME2 NOT NULL CONSTRAINT [DF_azure_sub_budgets_synced] DEFAULT SYSUTCDATETIME(),
+        CONSTRAINT [PK_azure_subscription_budgets] PRIMARY KEY CLUSTERED ([id])
+    );
+    CREATE UNIQUE NONCLUSTERED INDEX [azure_sub_budget_unique] ON [dbo].[azure_subscription_budgets]([subscription_id], [budget_name]);
+    CREATE NONCLUSTERED INDEX [azure_sub_budget_sub_idx] ON [dbo].[azure_subscription_budgets]([subscription_id]);
+END;
 `;
 
     await client.$executeRawUnsafe(ddl);

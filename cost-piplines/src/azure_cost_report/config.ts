@@ -1,7 +1,11 @@
 import 'dotenv/config';
 import path from 'node:path';
 import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import winston from 'winston';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 export const DATABASE_URL = process.env.DATABASE_URL || '';
 

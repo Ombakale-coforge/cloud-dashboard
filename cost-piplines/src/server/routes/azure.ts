@@ -4,6 +4,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { prisma } from '../db.ts';
 import { ensureAlertTablesExist } from '../db-alert-tables.ts';
+import { categorizeAzureService } from './azure-categories.ts';
+import { syncAzureBudgets } from '../../fetch_data/sync-azure-budgets.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -398,6 +400,7 @@ router.get('/dataset/:filename', async (req: Request, res: Response) => {
       .replace(/\.csv$/, '')
       .replace(/\.json$/, '');
     const normalized = cleanFilename.replace(/^(azure_usage_|azure_)/, '');
+    const targetMonth = req.query.month ? String(req.query.month).trim() : null;
 
     const latestRun = await getLatestAzureReportRun();
     if (!latestRun) {
@@ -657,6 +660,139 @@ router.get('/dataset/:filename', async (req: Request, res: Response) => {
           'Max Cost': Number(r.maxCost),
           Volatility: r.volatility,
         }));
+        return res.json(mapped);
+      }
+
+      case 'category_monthly_costs': {
+        const records = await prisma.azureReportByService.findMany({
+          where: { reportRunId },
+          orderBy: { month: 'asc' },
+        });
+        const categoryMap = new Map<string, number>();
+        for (const r of records) {
+          const category = categorizeAzureService(r.consumedService);
+          const key = `${r.month}|${category}`;
+          categoryMap.set(key, (categoryMap.get(key) || 0) + Number(r.cost));
+        }
+        const mapped = Array.from(categoryMap.entries()).map(([key, cost]) => {
+          const [month, category] = key.split('|');
+          return {
+            Month: month,
+            Category: category,
+            Cost: Math.round(cost * 100) / 100,
+          };
+        });
+        return res.json(mapped);
+      }
+
+      case 'governance_summary': {
+        const activeSubRecords = await prisma.azureReportBySubscription.findMany({
+          where: { reportRunId },
+          orderBy: { cost: 'desc' },
+        });
+
+        const distinctSubs = [...new Set(activeSubRecords.map((s) => s.subscription))];
+        const latestMonth = activeSubRecords[0]?.month || targetMonth || '';
+        const currentMonthSpend = activeSubRecords
+          .filter((s) => !targetMonth || s.month === targetMonth)
+          .reduce((sum, s) => sum + Number(s.cost), 0);
+
+        const budgets = await prisma.azureSubscriptionBudget.findMany();
+        const budgetedList = budgets.filter((b) => b.status === 'BUDGETED');
+        const unbudgetedList = budgets.filter((b) => b.status === 'UNBUDGETED');
+        const permDeniedList = budgets.filter((b) => b.status === 'PERMISSION_DENIED' || b.status === 'ERROR');
+
+        const totalBudgetAmount = budgetedList.reduce((sum, b) => sum + Number(b.amount || 0), 0);
+
+        return res.json({
+          rootAccount: {
+            id: 'azure-root',
+            name: 'Azure Subscriptions (Consolidated)',
+            accountId: 'azure-root',
+          },
+          selectedMonth: latestMonth,
+          totalAccounts: distinctSubs.length || budgets.length || 1,
+          budgetedAccounts: budgetedList.length,
+          unbudgetedAccounts: unbudgetedList.length + Math.max(0, distinctSubs.length - budgets.length),
+          permissionDeniedAccounts: permDeniedList.length,
+          totalBudgetedSpend: Math.round(totalBudgetAmount * 100) / 100,
+          activeSpend: Math.round(currentMonthSpend * 100) / 100,
+          currency: 'INR',
+        });
+      }
+
+      case 'budgets_overview': {
+        const budgets = await prisma.azureSubscriptionBudget.findMany({
+          orderBy: { amount: 'desc' },
+        });
+
+        const activeSubRecords = await prisma.azureReportBySubscription.findMany({
+          where: { reportRunId, ...(targetMonth ? { month: targetMonth } : {}) },
+        });
+
+        const spendMap = new Map<string, number>();
+        for (const s of activeSubRecords) {
+          spendMap.set(s.subscription, (spendMap.get(s.subscription) || 0) + Number(s.cost));
+        }
+
+        const mapped = budgets.map((b) => {
+          const actualSpend = spendMap.get(b.subscriptionId) || spendMap.get(b.subscriptionName || '') || 0;
+          const limit = Number(b.amount || 0);
+          const percentUsed = limit > 0 ? Math.round((actualSpend / limit) * 1000) / 10 : 0;
+
+          let status = 'On Track';
+          if (b.status === 'PERMISSION_DENIED' || b.status === 'ERROR') {
+            status = 'Permission Denied';
+          } else if (b.status === 'UNBUDGETED') {
+            status = 'Unbudgeted';
+          } else if (percentUsed > 100) {
+            status = 'Exceeded';
+          } else if (percentUsed >= 80) {
+            status = 'Warning';
+          }
+
+          return {
+            'Linked Account': b.subscriptionName || b.subscriptionId,
+            'Account ID': b.subscriptionId,
+            'Budget Name': b.budgetName || 'Default Budget',
+            'Budget Limit': limit,
+            'Actual Spend': Math.round(actualSpend * 100) / 100,
+            '% Utilized': percentUsed,
+            Status: status,
+            'Permission Error': b.errorMessage || '',
+          };
+        });
+
+        return res.json(mapped);
+      }
+
+      case 'unbudgeted_accounts': {
+        const budgets = await prisma.azureSubscriptionBudget.findMany();
+        const budgetedSubIds = new Set(budgets.filter((b) => b.status === 'BUDGETED').map((b) => b.subscriptionId));
+        const permDeniedMap = new Map(
+          budgets
+            .filter((b) => b.status === 'PERMISSION_DENIED' || b.status === 'ERROR')
+            .map((b) => [b.subscriptionId, b.errorMessage || ''])
+        );
+
+        const activeSubRecords = await prisma.azureReportBySubscription.findMany({
+          where: { reportRunId, ...(targetMonth ? { month: targetMonth } : {}) },
+          orderBy: { cost: 'desc' },
+        });
+
+        const mapped = activeSubRecords
+          .filter((s) => !budgetedSubIds.has(s.subscription))
+          .map((s) => {
+            const isPermDenied = permDeniedMap.has(s.subscription);
+            return {
+              'Linked Account': s.subscription,
+              'Account ID': s.subscription,
+              Cost: Math.round(Number(s.cost) * 100) / 100,
+              Status: isPermDenied ? 'Permission Denied' : 'Unbudgeted',
+              'Error Message': permDeniedMap.get(s.subscription) || 'No active Azure budget defined for this subscription.',
+            };
+          });
+
         return res.json(mapped);
       }
 

@@ -1,5 +1,5 @@
 import { PrismaMssql } from '@prisma/adapter-mssql';
-import { PrismaClient } from '../../generated/prisma/client.mjs';
+import { PrismaClient } from '@prisma/client';
 import {
     DATABASE_URL,
     REQUEST_TIMEOUT_MS,
