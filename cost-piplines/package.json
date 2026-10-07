@@ -16,7 +16,8 @@
     "test:report": "tsx src/azure_cost_report/self-check.ts",
     "alert:azure": "tsx src/alerts/index.ts",
     "test:alerts": "tsx src/alerts/self-check.ts",
-    "sync:azure-budgets": "tsx src/fetch_data/sync-azure-budgets.ts"
+    "sync:azure-budgets": "tsx src/fetch_data/sync-azure-budgets.ts",
+    "reconcile:arm": "tsx src/fetch_data/reconcile-azure-arm.ts"
   },
   "engines": {
     "node": ">=18.0.0"
