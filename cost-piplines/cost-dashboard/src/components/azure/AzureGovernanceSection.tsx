@@ -117,11 +117,14 @@ export function AzureGovernanceSection({
     }
   };
 
-  // Filtered & Paginated Budgets
+  // Filtered & Paginated Budgets (strictly active budgets only)
   const filteredBudgets = useMemo(() => {
-    if (!searchBudgets) return budgets;
+    const activeBudgets = budgets.filter(
+      (b) => b.Status !== "Permission Denied" && b.Status !== "Unbudgeted"
+    );
+    if (!searchBudgets) return activeBudgets;
     const q = searchBudgets.toLowerCase();
-    return budgets.filter(
+    return activeBudgets.filter(
       (b) =>
         (b["Linked Account"] || "").toLowerCase().includes(q) ||
         (b["Account ID"] || "").toLowerCase().includes(q) ||

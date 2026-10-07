@@ -723,6 +723,7 @@ router.get('/dataset/:filename', async (req: Request, res: Response) => {
 
       case 'budgets_overview': {
         const budgets = await prisma.azureSubscriptionBudget.findMany({
+          where: { status: 'BUDGETED' },
           orderBy: { amount: 'desc' },
         });
 
