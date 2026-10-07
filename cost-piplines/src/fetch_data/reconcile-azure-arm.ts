@@ -2,6 +2,8 @@ import { ClientSecretCredential } from '@azure/identity';
 import { SubscriptionClient } from '@azure/arm-subscriptions';
 import { CostManagementClient } from '@azure/arm-costmanagement';
 import { getPrismaClient, disconnectDb } from '../azure_cost_report/db';
+import fs from 'node:fs';
+import path from 'node:path';
 import 'dotenv/config';
 
 interface ReconcileOptions {
@@ -40,14 +42,14 @@ function getMonthDateRange(monthStr: string): { from: Date; to: Date } {
     return { from, to: lastDay };
 }
 
-async function withRetry<T>(fn: () => Promise<T>, maxRetries = 4, delayMs = 2000): Promise<T> {
+async function withRetry<T>(fn: () => Promise<T>, maxRetries = 5, baseDelayMs = 2500): Promise<T> {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
             return await fn();
         } catch (err: any) {
             const isThrottled = err.statusCode === 429 || err.message?.includes('Too many requests');
             if (isThrottled && attempt < maxRetries) {
-                const wait = delayMs * attempt;
+                const wait = baseDelayMs * attempt;
                 process.stdout.write(` [429 throttled, waiting ${wait / 1000}s...]`);
                 await new Promise((r) => setTimeout(r, wait));
                 continue;
@@ -66,7 +68,6 @@ export async function runDeduplicationAudit(prisma = getPrismaClient()) {
     const totalRecords = await prisma.azureUsageRecord.count();
     console.log(`Total usage records in DB: ${totalRecords.toLocaleString()}`);
 
-    // Check 1: Duplicate stable_row_hash (identical row duplicates)
     const dupStableRes: any = await prisma.$queryRawUnsafe(`
         SELECT COUNT(*) as dup_count 
         FROM (
@@ -84,7 +85,6 @@ export async function runDeduplicationAudit(prisma = getPrismaClient()) {
         console.log(`  ⚠ WARNING: Found ${dupStableCount} duplicate rows.`);
     }
 
-    // Check 2: Active runs per period
     const runs = await prisma.azureIngestionRun.findMany({
         orderBy: { id: 'desc' },
         take: 6,
@@ -131,7 +131,6 @@ export async function runArmReconciliation(options: ReconcileOptions) {
 
     const prisma = getPrismaClient();
 
-    // Query top spend subscriptions in DB for target month
     let queryFilter = `WHERE usage_month = '${month}'`;
     if (subId) {
         queryFilter += ` AND (subscription_id LIKE '%${subId}%')`;
@@ -186,13 +185,15 @@ export async function runArmReconciliation(options: ReconcileOptions) {
         status: string;
     }> = [];
 
+    let count = 0;
     for (const c of candidates) {
-        process.stdout.write(`Fetching ARM cost for ${c.nameInDb} (${c.cleanId.slice(0, 8)}...)...`);
+        count++;
+        const pct = Math.round((count / candidates.length) * 100);
+        process.stdout.write(`[${count}/${candidates.length} - ${pct}%] ${c.nameInDb} (${c.cleanId.slice(0, 8)}...)...`);
         const scope = `/subscriptions/${c.cleanId}`;
 
         try {
-            // Ponytail: single delay between calls to respect rate limit
-            await new Promise((r) => setTimeout(r, 600));
+            await new Promise((r) => setTimeout(r, 700));
 
             const armRes = await withRetry(() =>
                 costClient.query.usage(scope, {
@@ -214,7 +215,7 @@ export async function runArmReconciliation(options: ReconcileOptions) {
             const status = variancePct < 0.05 ? 'MATCH' : variancePct < 1.0 ? 'WARN (<1%)' : 'DIFF';
 
             results.push({
-                subscription: c.nameInDb.slice(0, 28),
+                subscription: c.nameInDb,
                 subId: c.cleanId,
                 armCost: Number(armCost.toFixed(2)),
                 dbBilled: Number(c.totalBilled.toFixed(2)),
@@ -224,29 +225,83 @@ export async function runArmReconciliation(options: ReconcileOptions) {
                 status,
             });
 
-            console.log(` Done: ARM=₹${armCost.toFixed(2)} | DB=₹${c.totalBilled.toFixed(2)} [${status}]`);
+            console.log(` ARM=₹${armCost.toFixed(2)} | DB=₹${c.totalBilled.toFixed(2)} [${status}]`);
         } catch (err: any) {
             console.log(` Error: ${err.message?.split('\n')[0]}`);
+            results.push({
+                subscription: c.nameInDb,
+                subId: c.cleanId,
+                armCost: -1,
+                dbBilled: Number(c.totalBilled.toFixed(2)),
+                dbEffective: Number(c.totalEffective.toFixed(2)),
+                delta: 0,
+                variancePct: -1,
+                status: 'ARM_ERROR',
+            });
         }
     }
 
-    console.log('\n========================================================================================================');
-    console.log(`RECONCILIATION SUMMARY TABLE (${month})`);
-    console.log('========================================================================================================');
-    console.table(
-        results.map((r) => ({
-            'Subscription Name': r.subscription,
-            'ARM ActualCost': `₹${r.armCost.toLocaleString()}`,
-            'DB Billed': `₹${r.dbBilled.toLocaleString()}`,
-            'DB Effective': `₹${r.dbEffective.toLocaleString()}`,
-            'Delta (DB-ARM)': `₹${r.delta.toLocaleString()}`,
-            'Variance %': `${r.variancePct}%`,
-            Status: r.status,
-        }))
-    );
-
     const matches = results.filter((r) => r.status === 'MATCH').length;
-    console.log(`\nReconciliation Results: ${matches}/${results.length} subscriptions matched with < 0.05% variance.`);
+    const diffs = results.filter((r) => r.status === 'DIFF' || r.status === 'WARN (<1%)').length;
+    const errors = results.filter((r) => r.status === 'ARM_ERROR').length;
+
+    const totalArmSpend = results.filter(r => r.armCost > 0).reduce((sum, r) => sum + r.armCost, 0);
+    const totalDbSpend = results.filter(r => r.armCost > 0).reduce((sum, r) => sum + r.dbBilled, 0);
+    const netDelta = totalDbSpend - totalArmSpend;
+    const netVariance = totalArmSpend > 0 ? Math.abs((netDelta / totalArmSpend) * 100) : 0;
+
+    console.log('\n========================================================================================================');
+    console.log(`RECONCILIATION SUMMARY SCORECARD (${month})`);
+    console.log('========================================================================================================');
+    console.log(`Total Subscriptions Reconciled: ${results.length}`);
+    console.log(`- Exact Matches (< 0.05%):      ${matches} (${Math.round((matches / results.length) * 100)}%)`);
+    console.log(`- Discrepancies (>= 0.05%):     ${diffs} (${Math.round((diffs / results.length) * 100)}%)`);
+    if (errors > 0) {
+        console.log(`- ARM Query Errors:             ${errors}`);
+    }
+    console.log(`\nPortfolio Spend (Reconciled Accounts):`);
+    console.log(`- Total Azure ARM Cost:         ₹${totalArmSpend.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`);
+    console.log(`- Total DB Billed Cost:         ₹${totalDbSpend.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`);
+    console.log(`- Net Difference:               ₹${netDelta.toLocaleString('en-IN', { maximumFractionDigits: 2 })} (${netVariance.toFixed(2)}%)`);
+
+    // Output top discrepancies
+    const topDiscrepancies = results
+        .filter((r) => r.status === 'DIFF')
+        .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+
+    if (topDiscrepancies.length > 0) {
+        console.log('\nTOP DISCREPANCIES (Sorted by absolute delta):');
+        console.table(
+            topDiscrepancies.slice(0, 15).map((r) => ({
+                Subscription: r.subscription.slice(0, 30),
+                'ARM Cost': `₹${r.armCost.toLocaleString()}`,
+                'DB Billed': `₹${r.dbBilled.toLocaleString()}`,
+                'Delta (DB-ARM)': `₹${r.delta.toLocaleString()}`,
+                'Variance %': `${r.variancePct}%`,
+                Status: r.status,
+            }))
+        );
+    }
+
+    // Save full scorecard to output directory
+    const outputDir = path.join(__dirname, '..', 'output');
+    if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
+    const jsonPath = path.join(outputDir, `arm-reconciliation-${month}.json`);
+    fs.writeFileSync(jsonPath, JSON.stringify({
+        month,
+        summary: {
+            totalReconciled: results.length,
+            matches,
+            discrepancies: diffs,
+            errors,
+            totalArmSpend,
+            totalDbSpend,
+            netDelta,
+            netVariancePct: Number(netVariance.toFixed(4)),
+        },
+        subscriptions: results,
+    }, null, 2));
+    console.log(`\nFull detailed report saved to: ${jsonPath}`);
 }
 
 export async function main() {
