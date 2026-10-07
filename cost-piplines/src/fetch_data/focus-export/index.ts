@@ -115,11 +115,7 @@ async function processPeriodRun(
                     continue;
                 }
 
-                // In-memory deduplication: drop identical row (e.g. repeated in part files)
-                if (seenRowHashes.has(row.stableRowHash)) {
-                    counters.duplicatesDropped++;
-                    continue;
-                }
+                // Ingest all valid rows from official export; retireOldRunsForPeriod handles run-level deduplication
                 seenRowHashes.add(row.stableRowHash);
 
                 const dateStr = fmtDate(row.usageDate);
@@ -179,7 +175,12 @@ export async function runIngestionPipeline(): Promise<void> {
     for (const { exportPeriod, exportRunId, blobs } of periodRuns) {
         const latestSuccessfulExportRunId = await getLatestSuccessfulExportRunId(exportPeriod);
 
-        if (latestSuccessfulExportRunId === exportRunId) {
+        const isForce = process.argv.includes('--force');
+        const targetPeriod = process.argv.find(a => a.startsWith('--period='))?.split('=')[1];
+        if (targetPeriod && exportPeriod !== targetPeriod) {
+            continue;
+        }
+        if (latestSuccessfulExportRunId === exportRunId && !isForce) {
             logger.info(`Skipping period ${exportPeriod} — run ${exportRunId} already ingested`, {
                 exportPeriod,
                 exportRunId,
@@ -252,7 +253,7 @@ export async function runIngestionPipeline(): Promise<void> {
 }
 
 // Direct execution entrypoint
-if (require.main === module || (typeof process !== 'undefined' && process.argv[1] && process.argv[1].endsWith('focus-export/index.ts'))) {
+if (typeof process !== 'undefined' && process.argv[1] && process.argv[1].endsWith('focus-export/index.ts')) {
     runIngestionPipeline().catch(async (err) => {
         logger.error('Fatal error in pipeline runner', { message: err.message, stack: err.stack });
         try {

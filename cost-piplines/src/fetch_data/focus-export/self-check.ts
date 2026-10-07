@@ -41,13 +41,13 @@ export function runSelfCheck(): void {
 
     const stableKeys = getStableKeys(sampleRowA);
 
-    // 1. Stable keys should exclude x_SkuDetails
-    assert.strictEqual(stableKeys.includes('x_SkuDetails'), false, 'x_SkuDetails must be excluded from stable keys');
+    // 1. Stable keys should retain metadata including x_SkuDetails
+    assert.strictEqual(stableKeys.includes('x_SkuDetails'), true, 'x_SkuDetails must be retained in stable keys');
 
-    // 2. Stable row hash should be IDENTICAL despite different x_SkuDetails
+    // 2. Stable row hash should differ when x_SkuDetails differs to protect parallel cluster instances
     const hashA = computeStableRowHash(sampleRowA, stableKeys);
     const hashB = computeStableRowHash(sampleRowB, stableKeys);
-    assert.strictEqual(hashA, hashB, 'Stable row hash must match when only x_SkuDetails differs');
+    assert.notStrictEqual(hashA, hashB, 'Stable row hash must differ when x_SkuDetails differs');
 
     // 3. Stable row hash should DIFFER when cost changes
     const hashC = computeStableRowHash(sampleRowC, stableKeys);
@@ -89,6 +89,6 @@ export function runSelfCheck(): void {
     console.log('✓ All self-check assertions passed successfully.');
 }
 
-if (require.main === module || (typeof process !== 'undefined' && process.argv[1] && process.argv[1].endsWith('self-check.ts'))) {
+if (typeof process !== 'undefined' && process.argv[1] && process.argv[1].endsWith('self-check.ts')) {
     runSelfCheck();
 }

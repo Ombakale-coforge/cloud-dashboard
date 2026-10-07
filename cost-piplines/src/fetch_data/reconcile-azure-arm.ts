@@ -284,7 +284,7 @@ export async function runArmReconciliation(options: ReconcileOptions) {
     }
 
     // Save full scorecard to output directory
-    const outputDir = path.join(__dirname, '..', 'output');
+    const outputDir = path.join(process.cwd(), '..', 'output');
     if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
     const jsonPath = path.join(outputDir, `arm-reconciliation-${month}.json`);
     fs.writeFileSync(jsonPath, JSON.stringify({

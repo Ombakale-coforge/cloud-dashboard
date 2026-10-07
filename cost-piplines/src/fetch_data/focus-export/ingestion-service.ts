@@ -1,5 +1,5 @@
 import { PrismaMssql } from '@prisma/adapter-mssql';
-import { PrismaClient } from '../../../generated/prisma/client.mjs';
+import { PrismaClient } from '@prisma/client';
 import {
     DATABASE_URL,
     REQUEST_TIMEOUT_MS,
@@ -96,6 +96,14 @@ export async function upsertIngestionRun(
             supersedesFlagged: 0,
         },
     });
+    // Purge any existing records for this run before writing to guarantee clean idempotency on re-ingest
+    while (true) {
+        const deleted = await prisma.$executeRawUnsafe(
+            `DELETE TOP (5000) FROM azure_usage_records WHERE ingestion_run_id = ${run.id}`
+        );
+        if (deleted === 0) break;
+    }
+
     return run.id;
 }
 

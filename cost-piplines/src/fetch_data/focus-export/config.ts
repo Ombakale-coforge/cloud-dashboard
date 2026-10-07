@@ -18,7 +18,8 @@ export const REQUEST_TIMEOUT_MS = Number.parseInt(process.env.DB_REQUEST_TIMEOUT
 export const CONNECTION_TIMEOUT_MS = Number.parseInt(process.env.DB_CONNECTION_TIMEOUT_MS || '30000', 10);
 
 // Fields hashed to detect duplicate rows. Excludes x_SkuDetails (volatile metadata).
-export const VOLATILE_FIELDS = ['x_SkuDetails'];
+// All metadata fields retained to preserve parallel cluster instances
+export const VOLATILE_FIELDS: string[] = [];
 
 // Fields identifying the charge line dimensionally
 export const CHARGE_KEY_FIELDS = [
@@ -88,7 +89,7 @@ export function parseSqlServerUrl(url: string) {
 }
 
 // Logger setup
-const LOG_DIR = path.join(__dirname, '..', 'logs');
+const LOG_DIR = path.resolve(process.cwd(), 'src', 'logs');
 if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
 
 export const logger = winston.createLogger({
