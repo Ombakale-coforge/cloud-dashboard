@@ -17,13 +17,15 @@ import {
 } from "lucide-react";
 
 export function LoginPage() {
-  const { loginAdmin, loginBasic, signupBasic } = useAuth();
+  const { user, isAuthenticated, loginAdmin, loginBasic, signupBasic } = useAuth();
   const navigate = useNavigate();
 
-  // Clear any stale localStorage session left over from before the sessionStorage migration
+  // If already logged in, redirect directly to dashboard
   React.useEffect(() => {
-    localStorage.removeItem("cloud_dashboard_session_user");
-  }, []);
+    if (isAuthenticated && user) {
+      navigate(user.role === "basic" ? "/newrequest" : "/", { replace: true });
+    }
+  }, [isAuthenticated, user, navigate]);
 
   // Mobile view panel switcher
   const [activePanel, setActivePanel] = useState<"admin" | "basic">("admin");

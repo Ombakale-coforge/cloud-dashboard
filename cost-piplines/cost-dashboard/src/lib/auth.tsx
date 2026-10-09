@@ -35,8 +35,16 @@ const AUTH_STORAGE_KEY = "cloud_dashboard_session_user";
 
 function getStoredUser(): User | null {
   try {
-    const stored = localStorage.getItem(AUTH_STORAGE_KEY) || sessionStorage.getItem(AUTH_STORAGE_KEY);
+    const local = localStorage.getItem(AUTH_STORAGE_KEY);
+    const session = sessionStorage.getItem(AUTH_STORAGE_KEY);
+    const stored = local || session;
     if (stored) {
+      if (!local && session) {
+        try { localStorage.setItem(AUTH_STORAGE_KEY, session); } catch {}
+      }
+      if (!session && local) {
+        try { sessionStorage.setItem(AUTH_STORAGE_KEY, local); } catch {}
+      }
       return JSON.parse(stored);
     }
   } catch {
