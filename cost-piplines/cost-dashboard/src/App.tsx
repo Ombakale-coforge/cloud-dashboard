@@ -226,9 +226,6 @@ export default function App() {
                     awsAccounts={awsAccounts}
                     selectedAwsAccount={selectedAwsAccount}
                     onAwsAccountChange={handleAwsAccountChange}
-                    azureAccounts={azureAccounts}
-                    selectedAzureAccount={selectedAzureAccount}
-                    onAzureAccountChange={handleAzureAccountChange}
                 />
 
                 {/* Main Dashboard Analytics */}

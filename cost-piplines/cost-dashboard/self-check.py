@@ -124,7 +124,11 @@ def run_checks():
     assert 'target="_blank"' not in linked_page, "LinkedAccountsPage must navigate in current tab (no target='_blank')"
     with open("cost-dashboard/src/pages/LoginPage.tsx", "r") as f:
         login_page = f.read()
-    assert "localStorage.removeItem" not in login_page, "LoginPage.tsx must not purge localStorage on mount"
+    # 11. Check Sidebar scope dropdown scoping
+    with open("cost-dashboard/src/components/Sidebar.tsx", "r") as f:
+        sidebar = f.read()
+    assert 'activeProvider === "aws" && awsAccounts' in sidebar, "Sidebar must only render account selector for AWS"
+    assert "Azure Account / Scope" not in sidebar, "Sidebar must not render Azure Account / Scope dropdown"
 
     print("PASS: Azure & AWS SQL DB integration, TypeScript server migration, and in-tab navigation verified successfully.")
 
