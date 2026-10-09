@@ -18,7 +18,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import {
   Search,
-  ExternalLink,
+  ArrowRight,
   ShieldCheck,
   AlertTriangle,
   Building2,
@@ -651,16 +651,14 @@ export function LinkedAccountsPage() {
                           {acc.topCostDriver}
                         </TableCell>
 
-                        {/* Action: Open in New Tab */}
+                        {/* Action: Open in Current Tab */}
                         <TableCell className="py-3 px-4 text-center">
                           <Link
-                            to={`/linked-accounts/${acc.linkedAccountId}?account=${selectedAwsAccount}&month=${selectedMonth}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
+                            to={`/linked-accounts/${encodeURIComponent(acc.linkedAccountId || "")}?account=${encodeURIComponent(selectedAwsAccount)}${selectedMonth ? `&month=${encodeURIComponent(selectedMonth)}` : ""}`}
                             className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md border border-input bg-background hover:bg-muted text-foreground transition-colors cursor-pointer"
                           >
                             <span>Open</span>
-                            <ExternalLink className="w-3 h-3 text-muted-foreground" />
+                            <ArrowRight className="w-3 h-3 text-muted-foreground" />
                           </Link>
                         </TableCell>
                       </TableRow>

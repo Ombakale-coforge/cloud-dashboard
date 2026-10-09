@@ -7,6 +7,8 @@ import { LoginPage } from './pages/LoginPage.tsx'
 import { NewRequestPage } from './pages/NewRequestPage.tsx'
 import { LinkedAccountsPage } from './pages/LinkedAccountsPage.tsx'
 import { LinkedAccountDetailPage } from './pages/LinkedAccountDetailPage.tsx'
+import { AzureSubscriptionsPage } from './pages/AzureSubscriptionsPage.tsx'
+import { AzureSubscriptionDetailPage } from './pages/AzureSubscriptionDetailPage.tsx'
 import { AuthProvider } from './lib/auth.tsx'
 import { ProtectedRoute } from './components/ProtectedRoute.tsx'
 
@@ -49,12 +51,72 @@ createRoot(document.getElementById('root')!).render(
             }
           />
 
-          {/* Dedicated Linked Account Deep Dive (Opens in a New Tab) */}
+          {/* Dedicated AWS Linked Account Deep Dive */}
+          <Route
+            path="/linked-accounts/:linkedAccountId/*"
+            element={
+              <ProtectedRoute allowedRoles={['admin']}>
+                <LinkedAccountDetailPage />
+              </ProtectedRoute>
+            }
+          />
           <Route
             path="/linked-accounts/:linkedAccountId"
             element={
               <ProtectedRoute allowedRoles={['admin']}>
                 <LinkedAccountDetailPage />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Azure Subscriptions Directory */}
+          <Route
+            path="/azure/subscriptions"
+            element={
+              <ProtectedRoute allowedRoles={['admin']}>
+                <AzureSubscriptionsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/azure/linked-accounts"
+            element={
+              <ProtectedRoute allowedRoles={['admin']}>
+                <AzureSubscriptionsPage />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Dedicated Azure Subscription Deep Dive */}
+          <Route
+            path="/azure/subscriptions/:subscriptionId/*"
+            element={
+              <ProtectedRoute allowedRoles={['admin']}>
+                <AzureSubscriptionDetailPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/azure/subscriptions/:subscriptionId"
+            element={
+              <ProtectedRoute allowedRoles={['admin']}>
+                <AzureSubscriptionDetailPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/azure/linked-accounts/:subscriptionId/*"
+            element={
+              <ProtectedRoute allowedRoles={['admin']}>
+                <AzureSubscriptionDetailPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/azure/linked-accounts/:subscriptionId"
+            element={
+              <ProtectedRoute allowedRoles={['admin']}>
+                <AzureSubscriptionDetailPage />
               </ProtectedRoute>
             }
           />
@@ -69,8 +131,8 @@ createRoot(document.getElementById('root')!).render(
             }
           />
 
-          {/* Fallback Catch-all */}
-          <Route path="*" element={<Navigate to="/login" replace />} />
+          {/* Fallback Catch-all: redirect to dashboard root, never forcefully to login */}
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>
     </AuthProvider>
