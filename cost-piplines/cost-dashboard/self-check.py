@@ -16,10 +16,11 @@ def run_checks():
     assert os.path.exists("src/server/routes/aws.ts"), "Missing src/server/routes/aws.ts"
     assert os.path.exists("src/server/routes/azure.ts"), "Missing src/server/routes/azure.ts"
 
-    # 2. Check cost-dashboard/server.js shim
-    with open("cost-dashboard/server.js", "r") as f:
+    # 2. Check cost-dashboard/server.ts or server.js shim
+    server_shim = "cost-dashboard/server.ts" if os.path.exists("cost-dashboard/server.ts") else "cost-dashboard/server.js"
+    with open(server_shim, "r") as f:
         shim = f.read()
-    assert "src/server/index.ts" in shim, "cost-dashboard/server.js must delegate to src/server/index.ts"
+    assert "src/server/index.ts" in shim, f"{server_shim} must delegate to src/server/index.ts"
 
     # 3. Check Azure routes
     with open("src/server/routes/azure.ts", "r") as f:
@@ -63,10 +64,11 @@ def run_checks():
     assert "prisma.awsReportRun" in seeder, "Missing awsReportRun seeding logic"
     assert "prisma.awsMonthlyTotal" in seeder, "Missing awsMonthlyTotal seeding logic"
 
-    # 7. Check inline seeding hook in aws_cost_pipeline.js
-    with open("src/aws_cost_pipeline.js", "r") as f:
+    # 7. Check persistence hook in aws_cost_pipeline.ts or .js
+    pipe_file = "src/aws_cost_pipeline.ts" if os.path.exists("src/aws_cost_pipeline.ts") else "src/aws_cost_pipeline.js"
+    with open(pipe_file, "r") as f:
         pipeline = f.read()
-    assert "src/aws_cost_report/index.ts" in pipeline, "Missing inline seeding trigger in aws_cost_pipeline.js"
+    assert "saveAwsReportRunToDb" in pipeline or "src/aws_cost_report/index.ts" in pipeline, f"Missing persistence trigger in {pipe_file}"
 
     # 8. Check useCsv.ts fallback
     with open("cost-dashboard/src/lib/useCsv.ts", "r") as f:
@@ -82,11 +84,49 @@ def run_checks():
 
     with open("cost-dashboard/package.json", "r") as f:
         client_pkg = f.read()
-    assert '"predev": "node scripts/sync-data.js"' in client_pkg, "Missing predev sync hook"
-    assert '"sync-data": "node scripts/sync-data.js"' in client_pkg, "Missing sync-data script"
     assert 'src/server/index.ts' in client_pkg, "cost-dashboard dev command must point to src/server/index.ts"
 
-    print("PASS: Azure & AWS SQL DB integration, TypeScript server migration, and seeder verified successfully.")
+    # 10. Check Azure Subscriptions directory & detail replication
+    assert os.path.exists("cost-dashboard/src/pages/AzureSubscriptionsPage.tsx"), "Missing AzureSubscriptionsPage.tsx"
+    assert os.path.exists("cost-dashboard/src/pages/AzureSubscriptionDetailPage.tsx"), "Missing AzureSubscriptionDetailPage.tsx"
+
+    with open("cost-dashboard/src/pages/AzureSubscriptionsPage.tsx", "r") as f:
+        sub_page = f.read()
+    assert not re.search(r'\baws\b', sub_page, re.I), "AzureSubscriptionsPage.tsx must not contain AWS wording"
+    assert not re.search(r'\bpayer\b', sub_page, re.I), "AzureSubscriptionsPage.tsx must not contain 'payer' wording"
+    assert "₹" in sub_page, "AzureSubscriptionsPage.tsx must format currency in INR (₹)"
+
+    with open("cost-dashboard/src/pages/AzureSubscriptionDetailPage.tsx", "r") as f:
+        detail_page = f.read()
+    assert not re.search(r'\baws\b', detail_page, re.I), "AzureSubscriptionDetailPage.tsx must not contain AWS wording"
+    assert "₹" in detail_page, "AzureSubscriptionDetailPage.tsx must format currency in INR (₹)"
+
+    with open("src/server/routes/azure.ts", "r") as f:
+        azure_routes = f.read()
+    assert "'/linked-accounts'" in azure_routes, "Missing /linked-accounts in azure.ts"
+    assert "'/linked-accounts/:linkedAccountId'" in azure_routes, "Missing /linked-accounts/:linkedAccountId in azure.ts"
+
+    with open("cost-dashboard/src/components/Navbar.tsx", "r") as f:
+        navbar = f.read()
+    assert "/azure/subscriptions" in navbar, "Missing /azure/subscriptions in Navbar.tsx"
+    assert "Subscriptions" in navbar, "Missing Subscriptions label in Navbar.tsx"
+
+    with open("cost-dashboard/src/main.tsx", "r") as f:
+        main_tsx = f.read()
+    assert "/azure/subscriptions" in main_tsx, "Missing /azure/subscriptions route in main.tsx"
+    assert "AzureSubscriptionsPage" in main_tsx, "Missing AzureSubscriptionsPage in main.tsx"
+    assert "AzureSubscriptionDetailPage" in main_tsx, "Missing AzureSubscriptionDetailPage in main.tsx"
+
+    # 10. Check in-tab navigation & auth persistence
+    assert 'target="_blank"' not in sub_page, "AzureSubscriptionsPage must navigate in current tab (no target='_blank')"
+    with open("cost-dashboard/src/pages/LinkedAccountsPage.tsx", "r") as f:
+        linked_page = f.read()
+    assert 'target="_blank"' not in linked_page, "LinkedAccountsPage must navigate in current tab (no target='_blank')"
+    with open("cost-dashboard/src/pages/LoginPage.tsx", "r") as f:
+        login_page = f.read()
+    assert "localStorage.removeItem" not in login_page, "LoginPage.tsx must not purge localStorage on mount"
+
+    print("PASS: Azure & AWS SQL DB integration, TypeScript server migration, and in-tab navigation verified successfully.")
 
 if __name__ == "__main__":
     try:

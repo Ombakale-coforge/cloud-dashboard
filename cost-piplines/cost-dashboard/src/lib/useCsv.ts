@@ -46,6 +46,7 @@ export function useCsv<T = Record<string, any>>(path: string) {
           setData([jsonData] as unknown as T[]);
           setLoading(false);
         } else {
+          console.warn("Empty dataset from API:", apiUrl);
           setData([]);
           setLoading(false);
         }
