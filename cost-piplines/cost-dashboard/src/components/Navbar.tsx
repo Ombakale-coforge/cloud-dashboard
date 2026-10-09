@@ -1,5 +1,5 @@
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { BarChart3, Layers } from "lucide-react";
 
 export type Provider = "aws" | "azure";
@@ -34,8 +34,19 @@ export function Navbar({
     onProviderChange = () => { },
 }: NavbarProps) {
     const location = useLocation();
+    const navigate = useNavigate();
     const isLinkedAccounts = location.pathname.startsWith("/linked-accounts");
+    const isSubscriptions = location.pathname.startsWith("/azure/subscriptions") || location.pathname.startsWith("/azure/linked-accounts");
     const isOverview = location.pathname === "/" || location.pathname === "";
+
+    const handleProviderToggle = (v: Provider) => {
+        onProviderChange(v);
+        if (v === "azure" && isLinkedAccounts) {
+            navigate("/azure/subscriptions");
+        } else if (v === "aws" && isSubscriptions) {
+            navigate("/linked-accounts");
+        }
+    };
 
     return (
         <header className="sticky top-0 z-40 flex items-center justify-between border-b border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-slate-900/95 px-6 py-3 backdrop-blur shadow-xs">
@@ -53,7 +64,7 @@ export function Navbar({
                 </div>
 
                 {/* Main Navigation Links */}
-                {activeProvider === "aws" && (
+                {activeProvider === "aws" ? (
                     <nav className="hidden sm:flex items-center gap-1 bg-slate-100 dark:bg-slate-800/60 p-1 rounded-lg border border-slate-200/80 dark:border-slate-700/80">
                         <Link
                             to="/"
@@ -78,6 +89,31 @@ export function Navbar({
                             Linked Accounts
                         </Link>
                     </nav>
+                ) : (
+                    <nav className="hidden sm:flex items-center gap-1 bg-slate-100 dark:bg-slate-800/60 p-1 rounded-lg border border-slate-200/80 dark:border-slate-700/80">
+                        <Link
+                            to="/"
+                            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md transition-all ${
+                                isOverview
+                                    ? "bg-white dark:bg-slate-900 text-sky-600 dark:text-sky-400 shadow-xs"
+                                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200"
+                            }`}
+                        >
+                            <BarChart3 className="w-3.5 h-3.5" />
+                            Overview
+                        </Link>
+                        <Link
+                            to="/azure/subscriptions"
+                            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md transition-all ${
+                                isSubscriptions
+                                    ? "bg-white dark:bg-slate-900 text-sky-600 dark:text-sky-400 shadow-xs"
+                                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200"
+                            }`}
+                        >
+                            <Layers className="w-3.5 h-3.5" />
+                            Subscriptions
+                        </Link>
+                    </nav>
                 )}
             </div>
 
@@ -85,7 +121,7 @@ export function Navbar({
             <div className="flex items-center gap-4">
                 <Tabs
                     value={activeProvider}
-                    onValueChange={(v) => onProviderChange(v as Provider)}
+                    onValueChange={(v) => handleProviderToggle(v as Provider)}
                     className="w-auto"
                 >
                     <TabsList className="bg-slate-100 dark:bg-slate-800 p-1 rounded-lg border border-slate-200 dark:border-slate-700">
