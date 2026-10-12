@@ -1,10 +1,24 @@
 import { Router, Request, Response } from 'express';
 import { prisma } from '../db.ts';
+import { verifyPassword } from '../auth/password.ts';
+import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
+dotenv.config({ path: path.resolve(__dirname, '../../../../.env') });
 
 const router = Router();
 
-const ADMIN_EMAIL = 'dashboard-admin@coforge.com';
-const ADMIN_PASSWORD = '8iie9gb';
+function getAdminEmail(): string {
+  return (process.env.ADMIN_EMAIL || 'dashboard-admin@coforge.com').trim().toLowerCase();
+}
+
+function getAdminPassword(): string {
+  return process.env.ADMIN_PASSWORD || process.env.ADMIN_PASS || '8iie9gb';
+}
 
 // Login Endpoint (Strictly queries SQL Server dbo.users)
 router.post('/login', async (req: Request, res: Response) => {
@@ -19,10 +33,37 @@ router.post('/login', async (req: Request, res: Response) => {
     }
 
     const normalizedEmail = email.trim().toLowerCase();
+    const adminEmail = getAdminEmail();
+    const envAdminPassword = getAdminPassword();
 
     // 1. Admin Verification
-    if (normalizedEmail === ADMIN_EMAIL.toLowerCase()) {
-      if (password === ADMIN_PASSWORD) {
+    if (normalizedEmail === adminEmail) {
+      let isMatch = password === envAdminPassword || password === envAdminPassword.trim();
+
+      // Also check fallback to legacy password
+      if (!isMatch && password === '8iie9gb') {
+        isMatch = true;
+      }
+
+      // If not matched by env password, check if admin user exists in SQL Server dbo.users
+      let dbUser: any = null;
+      if (!isMatch && prisma) {
+        try {
+          dbUser = await prisma.user.findUnique({
+            where: { email: normalizedEmail },
+          });
+          if (dbUser && dbUser.role === 'admin') {
+            const { ok } = await verifyPassword(password, dbUser.passwordHash, dbUser.passwordAlgo);
+            if (ok || dbUser.passwordHash === password) {
+              isMatch = true;
+            }
+          }
+        } catch {
+          // Ignore DB lookup error and proceed to failure
+        }
+      }
+
+      if (isMatch) {
         await prisma.userLoginEvent.create({
           data: {
             emailAttempted: normalizedEmail,
@@ -33,11 +74,11 @@ router.post('/login', async (req: Request, res: Response) => {
         return res.json({
           success: true,
           user: {
-            id: 'admin-01',
-            name: 'Dashboard Administrator',
-            email: ADMIN_EMAIL,
+            id: dbUser?.id || 'admin-01',
+            name: dbUser?.name || 'Dashboard Administrator',
+            email: adminEmail,
             role: 'admin',
-            department: 'Cloud Governance & FinOps',
+            department: dbUser?.department || 'Cloud Governance & FinOps',
             provider: 'credentials',
             loginTime: new Date().toISOString(),
           },
@@ -76,7 +117,13 @@ router.post('/login', async (req: Request, res: Response) => {
       });
     }
 
-    if (user.passwordHash !== password) {
+    const { ok: passwordMatches } = await verifyPassword(
+      password,
+      user.passwordHash,
+      user.passwordAlgo
+    );
+
+    if (!passwordMatches && user.passwordHash !== password) {
       await prisma.userLoginEvent.create({
         data: {
           userId: user.id,
@@ -138,7 +185,7 @@ router.post('/signup', async (req: Request, res: Response) => {
     const normalizedEmail = email.trim().toLowerCase();
     const finalName = name?.trim() || normalizedEmail.split('@')[0].replace(/[._-]/g, ' ');
 
-    if (normalizedEmail === ADMIN_EMAIL.toLowerCase()) {
+    if (normalizedEmail === getAdminEmail()) {
       return res.status(400).json({
         error: 'RESERVED_EMAIL',
         message: 'This email is reserved for Admin authentication.',
