@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, Component, ReactNode, ErrorInfo } from "react";
+import { useLocation } from "react-router-dom";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Navbar, type Provider, type AccountOption } from "@/components/Navbar";
 import { Sidebar } from "@/components/Sidebar";
@@ -110,7 +111,14 @@ const formatAwsAccount = (acc: AccountOption): AccountOption => {
 };
 
 export default function App() {
-    const [activeProvider, setActiveProvider] = useState<Provider>("aws");
+    const location = useLocation();
+    const isAzure = location.pathname.startsWith("/azure") || new URLSearchParams(location.search).get("provider") === "azure";
+    const [activeProvider, setActiveProvider] = useState<Provider>(isAzure ? "azure" : "aws");
+
+    useEffect(() => {
+        const isAzureRoute = location.pathname.startsWith("/azure") || new URLSearchParams(location.search).get("provider") === "azure";
+        setActiveProvider(isAzureRoute ? "azure" : "aws");
+    }, [location.pathname, location.search]);
     const [awsAccounts, setAwsAccounts] = useState<AccountOption[]>(DEFAULT_AWS_ACCOUNTS);
     const [selectedAwsAccount, setSelectedAwsAccount] = useState<string>("account-1");
     const [azureAccounts, setAzureAccounts] = useState<AccountOption[]>(DEFAULT_AZURE_ACCOUNTS);

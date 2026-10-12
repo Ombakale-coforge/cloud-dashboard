@@ -40,6 +40,14 @@ createRoot(document.getElementById('root')!).render(
               </ProtectedRoute>
             }
           />
+          <Route
+            path="/azure"
+            element={
+              <ProtectedRoute allowedRoles={['admin']}>
+                <App />
+              </ProtectedRoute>
+            }
+          />
 
           {/* AWS Linked Accounts Directory */}
           <Route

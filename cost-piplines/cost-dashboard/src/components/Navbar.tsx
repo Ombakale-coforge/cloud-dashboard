@@ -37,14 +37,22 @@ export function Navbar({
     const navigate = useNavigate();
     const isLinkedAccounts = location.pathname.startsWith("/linked-accounts");
     const isSubscriptions = location.pathname.startsWith("/azure/subscriptions") || location.pathname.startsWith("/azure/linked-accounts");
-    const isOverview = location.pathname === "/" || location.pathname === "";
+    const isOverview = location.pathname === "/" || location.pathname === "" || location.pathname === "/azure";
 
     const handleProviderToggle = (v: Provider) => {
         onProviderChange(v);
-        if (v === "azure" && isLinkedAccounts) {
-            navigate("/azure/subscriptions");
-        } else if (v === "aws" && isSubscriptions) {
-            navigate("/linked-accounts");
+        if (v === "azure") {
+            if (isLinkedAccounts) {
+                navigate("/azure/subscriptions");
+            } else if (isOverview) {
+                navigate("/azure");
+            }
+        } else if (v === "aws") {
+            if (isSubscriptions) {
+                navigate("/linked-accounts");
+            } else if (isOverview) {
+                navigate("/");
+            }
         }
     };
 
@@ -92,7 +100,7 @@ export function Navbar({
                 ) : (
                     <nav className="hidden sm:flex items-center gap-1 bg-slate-100 dark:bg-slate-800/60 p-1 rounded-lg border border-slate-200/80 dark:border-slate-700/80">
                         <Link
-                            to="/"
+                            to="/azure"
                             className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md transition-all ${
                                 isOverview
                                     ? "bg-white dark:bg-slate-900 text-sky-600 dark:text-sky-400 shadow-xs"

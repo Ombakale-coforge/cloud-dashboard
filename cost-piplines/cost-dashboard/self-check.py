@@ -110,10 +110,12 @@ def run_checks():
         navbar = f.read()
     assert "/azure/subscriptions" in navbar, "Missing /azure/subscriptions in Navbar.tsx"
     assert "Subscriptions" in navbar, "Missing Subscriptions label in Navbar.tsx"
+    assert 'to="/azure"' in navbar, "Navbar Azure Overview must link to /azure"
 
     with open("cost-dashboard/src/main.tsx", "r") as f:
         main_tsx = f.read()
     assert "/azure/subscriptions" in main_tsx, "Missing /azure/subscriptions route in main.tsx"
+    assert 'path="/azure"' in main_tsx, "Missing /azure route in main.tsx"
     assert "AzureSubscriptionsPage" in main_tsx, "Missing AzureSubscriptionsPage in main.tsx"
     assert "AzureSubscriptionDetailPage" in main_tsx, "Missing AzureSubscriptionDetailPage in main.tsx"
 
