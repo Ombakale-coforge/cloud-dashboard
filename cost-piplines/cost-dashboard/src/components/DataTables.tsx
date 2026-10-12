@@ -30,53 +30,107 @@ export function DataTables({ selectedMonth, basePath = "/data" }: DataTablesProp
   // Wide service costs containing full 6 months history
   const { data: wideServices } = useCsv<any>(`${basePath}/cost_by_service_wide.csv`);
 
-  // Determine sorted months list from wide CSV
-  const sortedMonths = useMemo(() => {
-    if (wideServices.length === 0) return [];
-    return [...new Set(wideServices.filter(r => r && r.Month).map((r) => r.Month))].sort();
+  // Determine if wideServices is formatted as:
+  // Format A (Month-first): [{ Month: "2026-09", "EC2": 100, ... }]
+  // Format B (Service-first): [{ Service: "EC2", "2026-09": 100, "Total Cost": 500, ... }]
+  const isServiceFirst = useMemo(() => {
+    if (!wideServices || wideServices.length === 0) return false;
+    return Boolean(wideServices[0] && ("Service" in wideServices[0] || !("Month" in wideServices[0])));
   }, [wideServices]);
 
-  // Determine previous month relative to the selected month
-  const prevMonth = useMemo(() => {
-    if (sortedMonths.length === 0 || !selectedMonth) return null;
-    const idx = sortedMonths.indexOf(selectedMonth);
-    return idx > 0 ? sortedMonths[idx - 1] : null;
-  }, [sortedMonths, selectedMonth]);
+  // Determine sorted months list from wide dataset
+  const sortedMonths = useMemo(() => {
+    if (!wideServices || wideServices.length === 0) return [];
+    if (isServiceFirst) {
+      const sample = wideServices[0] || {};
+      return Object.keys(sample).filter((k) => /^\d{4}-\d{2}$/.test(k)).sort();
+    }
+    return [...new Set(wideServices.filter((r) => r && r.Month).map((r) => r.Month))].sort();
+  }, [wideServices, isServiceFirst]);
 
-  // Dynamically compute the services and costs for the selected month and previous month from the wide CSV
+  // Determine effective current month (selectedMonth if available; else latest month in dataset)
+  const effectiveMonth = useMemo(() => {
+    if (selectedMonth && sortedMonths.includes(selectedMonth)) {
+      return selectedMonth;
+    }
+    if (sortedMonths.length > 0) {
+      return sortedMonths[sortedMonths.length - 1];
+    }
+    return selectedMonth || "";
+  }, [selectedMonth, sortedMonths]);
+
+  // Determine previous month relative to effectiveMonth
+  const prevMonth = useMemo(() => {
+    if (sortedMonths.length === 0 || !effectiveMonth) return null;
+    const idx = sortedMonths.indexOf(effectiveMonth);
+    return idx > 0 ? sortedMonths[idx - 1] : null;
+  }, [sortedMonths, effectiveMonth]);
+
+  // Dynamically compute the services and costs for effectiveMonth and prevMonth
   const serviceComparisons = useMemo(() => {
-    if (!selectedMonth || wideServices.length === 0) {
+    if (!wideServices || wideServices.length === 0) {
       return (services || []).map((s) => ({
         Service: s ? s.Service : "",
         CurrentCost: s ? s.Cost : 0,
         PreviousCost: 0,
       }));
     }
-    const currentMonthRow = wideServices.find((r) => r && r.Month === selectedMonth);
-    const previousMonthRow = prevMonth ? wideServices.find((r) => r && r.Month === prevMonth) : null;
-
-    const rowKeys = currentMonthRow ? Object.keys(currentMonthRow) : [];
-    const serviceKeys = rowKeys.filter((k) => k !== "Month" && k !== "Total Cost");
 
     const list: { Service: string; CurrentCost: number; PreviousCost: number }[] = [];
 
-    for (const service of serviceKeys) {
-      const currentCost = currentMonthRow ? Number(currentMonthRow[service]) : 0;
-      const previousCost = previousMonthRow ? Number(previousMonthRow[service]) : 0;
+    if (isServiceFirst) {
+      // Each row is a service, with months as columns
+      for (const row of wideServices) {
+        if (!row || !row.Service) continue;
+        const currentCost = effectiveMonth ? Number(row[effectiveMonth]) : 0;
+        const previousCost = prevMonth ? Number(row[prevMonth]) : 0;
 
-      const cleanCurrent = isNaN(currentCost) ? 0 : currentCost;
-      const cleanPrevious = isNaN(previousCost) ? 0 : previousCost;
+        const cleanCurrent = isNaN(currentCost) ? 0 : currentCost;
+        const cleanPrevious = isNaN(previousCost) ? 0 : previousCost;
 
-      if (cleanCurrent > 0 || cleanPrevious > 0) {
-        list.push({
-          Service: service,
-          CurrentCost: cleanCurrent,
-          PreviousCost: cleanPrevious,
-        });
+        if (cleanCurrent > 0 || cleanPrevious > 0) {
+          list.push({
+            Service: row.Service,
+            CurrentCost: cleanCurrent,
+            PreviousCost: cleanPrevious,
+          });
+        }
+      }
+    } else {
+      // Each row is a month, with services as columns
+      const currentMonthRow = wideServices.find((r) => r && r.Month === effectiveMonth);
+      const previousMonthRow = prevMonth ? wideServices.find((r) => r && r.Month === prevMonth) : null;
+
+      const rowKeys = currentMonthRow ? Object.keys(currentMonthRow) : [];
+      const serviceKeys = rowKeys.filter((k) => k !== "Month" && k !== "Total Cost");
+
+      for (const service of serviceKeys) {
+        const currentCost = currentMonthRow ? Number(currentMonthRow[service]) : 0;
+        const previousCost = previousMonthRow ? Number(previousMonthRow[service]) : 0;
+
+        const cleanCurrent = isNaN(currentCost) ? 0 : currentCost;
+        const cleanPrevious = isNaN(previousCost) ? 0 : previousCost;
+
+        if (cleanCurrent > 0 || cleanPrevious > 0) {
+          list.push({
+            Service: service,
+            CurrentCost: cleanCurrent,
+            PreviousCost: cleanPrevious,
+          });
+        }
       }
     }
+
+    if (list.length === 0 && services && services.length > 0) {
+      return services.map((s) => ({
+        Service: s ? s.Service : "",
+        CurrentCost: s ? s.Cost : 0,
+        PreviousCost: 0,
+      }));
+    }
+
     return list.sort((a, b) => b.CurrentCost - a.CurrentCost || b.PreviousCost - a.PreviousCost);
-  }, [services, wideServices, selectedMonth, prevMonth]);
+  }, [services, wideServices, effectiveMonth, prevMonth, isServiceFirst]);
 
   // Search states
   const [searchServices, setSearchServices] = useState("");
@@ -146,7 +200,7 @@ export function DataTables({ selectedMonth, basePath = "/data" }: DataTablesProp
       <Card className="flex flex-col h-full border border-muted/40 shadow-sm bg-card/60 backdrop-blur-md">
         <CardHeader className="pb-3">
           <CardTitle className="text-lg font-semibold tracking-tight">
-            Cost by Service ({selectedMonth ? formatMonthName(selectedMonth) : "Latest Month"})
+            Cost by Service ({effectiveMonth ? formatMonthName(effectiveMonth) : (selectedMonth ? formatMonthName(selectedMonth) : "Latest Month")})
           </CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col flex-1 pb-4">
@@ -172,7 +226,7 @@ export function DataTables({ selectedMonth, basePath = "/data" }: DataTablesProp
                     {prevMonth ? formatShortMonthName(prevMonth) : "Prev"}
                   </TableHead>
                   <TableHead className="text-right whitespace-nowrap w-[100px]">
-                    {selectedMonth ? formatShortMonthName(selectedMonth) : "Curr"}
+                    {effectiveMonth ? formatShortMonthName(effectiveMonth) : (selectedMonth ? formatShortMonthName(selectedMonth) : "Curr")}
                   </TableHead>
                 </TableRow>
               </TableHeader>
@@ -270,7 +324,7 @@ export function DataTables({ selectedMonth, basePath = "/data" }: DataTablesProp
                         {r.Service}
                       </TableCell>
                       <TableCell className="whitespace-nowrap w-[60px] py-2.5 text-muted-foreground font-medium">
-                        {r["Months Active"]}/{r["Total Months"]}
+                        {(r["Months Active"] ?? (r as any)["Active Months"] ?? "-")}/{(r["Total Months"] ?? (r as any)["Months in Scope"] ?? (r as any)["Total Months in Run"] ?? "-")}
                       </TableCell>
                       <TableCell className="w-[120px] py-2.5">
                         <Badge

@@ -1,4 +1,6 @@
 import { Router, Request, Response } from 'express';
+import fs from 'fs';
+import path from 'path';
 import { CostExplorerClient, GetCostAndUsageCommand } from '@aws-sdk/client-cost-explorer';
 import { OrganizationsClient, DescribeAccountCommand } from '@aws-sdk/client-organizations';
 import { prisma } from '../db.ts';
@@ -168,10 +170,25 @@ router.get('/dataset/:filename', async (req: Request, res: Response) => {
       }
 
       case 'latest_month_services': {
-        const records = await prisma.awsCostByService.findMany({
+        let records = await prisma.awsCostByService.findMany({
           where: { reportRunId, month: run.currentMonth || undefined },
           orderBy: { cost: 'desc' },
         });
+        if (records.length === 0) {
+          records = await prisma.awsCostByService.findMany({
+            where: { reportRunId },
+            orderBy: [{ month: 'desc' }, { cost: 'desc' }],
+          });
+        }
+        if (records.length === 0) {
+          const topServices = await prisma.awsTopService.findMany({
+            where: { reportRunId },
+            orderBy: { rank: 'asc' },
+          });
+          if (topServices.length > 0) {
+            return res.json(topServices.map((t) => ({ Service: t.service, Cost: Number(t.cost) })));
+          }
+        }
         const mapped = records.map((r) => ({
           Service: r.service,
           Cost: Number(r.cost),
@@ -184,6 +201,36 @@ router.get('/dataset/:filename', async (req: Request, res: Response) => {
           where: { reportRunId },
           orderBy: [{ month: 'asc' }, { cost: 'desc' }],
         });
+
+        if (records.length === 0) {
+          try {
+            const configId = account.configId || 'account-1';
+            let csvPath = path.join(process.cwd(), 'AWSReports', 'accounts', configId, 'latest', 'cost_by_service_wide.csv');
+            if (!fs.existsSync(csvPath)) {
+              csvPath = path.join(process.cwd(), 'AWSReports', 'latest', 'cost_by_service_wide.csv');
+            }
+            if (fs.existsSync(csvPath)) {
+              const content = fs.readFileSync(csvPath, 'utf-8');
+              const lines = content.split(/\r?\n/).filter((l) => l.trim().length > 0);
+              if (lines.length >= 2) {
+                const headers = lines[0].split(',').map((h) => h.trim());
+                const parsedRows = lines.slice(1).map((line) => {
+                  const vals = line.split(',').map((v) => v.trim());
+                  const row: Record<string, any> = {};
+                  headers.forEach((h, idx) => {
+                    const numVal = Number(vals[idx]);
+                    row[h] = isNaN(numVal) ? vals[idx] : numVal;
+                  });
+                  return row;
+                });
+                return res.json(parsedRows);
+              }
+            }
+          } catch (e) {
+            // fallback gracefully
+          }
+        }
+
         const monthsSet = new Set<string>();
         const serviceMap: Record<string, Record<string, number>> = {};
 
@@ -310,7 +357,9 @@ router.get('/dataset/:filename', async (req: Request, res: Response) => {
           Service: r.service,
           'Total Cost': Number(r.totalCost),
           'Active Months': r.activeMonths,
+          'Months Active': r.activeMonths,
           'Months in Scope': r.monthsInScope,
+          'Total Months': r.monthsInScope,
           'Presence %': Number(r.presencePct),
           Classification: r.classification,
           'Avg Monthly Cost (Active)': Number(r.avgMonthlyCostActive),

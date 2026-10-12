@@ -208,20 +208,46 @@ export async function seedAwsReports(): Promise<{ success: boolean; message: str
     if (serviceWideRows.length > 0) {
       const unpivoted: Array<{ reportRunId: number; month: string; service: string; cost: number }> = [];
       const sample = serviceWideRows[0];
-      const monthCols = Object.keys(sample).filter((k) => /^\d{4}-\d{2}$/.test(k));
+      const hasMonthCol = 'Month' in sample;
+      const hasServiceCol = 'Service' in sample;
 
-      serviceWideRows.forEach((row) => {
-        const srv = row.Service;
-        if (!srv) return;
-        monthCols.forEach((m) => {
-          unpivoted.push({
-            reportRunId,
-            month: m,
-            service: srv,
-            cost: num(row[m]),
+      if (hasMonthCol) {
+        // Format where each row is a month, and columns are service names
+        const serviceCols = Object.keys(sample).filter((k) => k !== 'Month' && k !== 'Total Cost');
+        serviceWideRows.forEach((row) => {
+          const m = row.Month;
+          if (!m) return;
+          serviceCols.forEach((srv) => {
+            const costVal = num(row[srv]);
+            if (costVal > 0) {
+              unpivoted.push({
+                reportRunId,
+                month: m,
+                service: srv,
+                cost: costVal,
+              });
+            }
           });
         });
-      });
+      } else if (hasServiceCol) {
+        // Format where each row is a service, and columns are months
+        const monthCols = Object.keys(sample).filter((k) => /^\d{4}-\d{2}$/.test(k));
+        serviceWideRows.forEach((row) => {
+          const srv = row.Service;
+          if (!srv) return;
+          monthCols.forEach((m) => {
+            const costVal = num(row[m]);
+            if (costVal > 0) {
+              unpivoted.push({
+                reportRunId,
+                month: m,
+                service: srv,
+                cost: costVal,
+              });
+            }
+          });
+        });
+      }
 
       if (unpivoted.length > 0) {
         // Chunk to avoid SQL Server param limits
