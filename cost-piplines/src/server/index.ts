@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import authRoutes from './routes/auth.ts';
@@ -31,6 +32,19 @@ app.use('/api/azure', azureRoutes);
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
+
+// Serve frontend static build if dist exists (Production VM deployment)
+const distPath = path.resolve(__dirname, '../../cost-dashboard/dist');
+if (fs.existsSync(distPath)) {
+  app.use(express.static(distPath));
+  // Client-side SPA routing fallback for non-API GET requests (Express 5 compatible)
+  app.use((req, res, next) => {
+    if (req.method === 'GET' && !req.path.startsWith('/api')) {
+      return res.sendFile(path.join(distPath, 'index.html'));
+    }
+    next();
+  });
+}
 
 app.listen(PORT, () => {
   console.log(`🚀 Cost Intelligence API listening on http://localhost:${PORT}`);

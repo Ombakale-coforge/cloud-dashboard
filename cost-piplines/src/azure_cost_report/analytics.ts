@@ -19,7 +19,7 @@ import {
     VolatilityRow,
     TopResourcesRow,
     ReportPipelineOptions,
-} from './types';
+} from './types.ts';
 
 export function round(value: number, decimals = 2): number {
     if (!Number.isFinite(value)) return 0;

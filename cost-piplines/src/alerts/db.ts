@@ -6,7 +6,7 @@ import {
     REQUEST_TIMEOUT_MS,
     CONNECTION_TIMEOUT_MS,
     parseSqlServerUrl,
-} from './config';
+} from './config.ts';
 
 let prismaInstance: PrismaClient | null = null;
 

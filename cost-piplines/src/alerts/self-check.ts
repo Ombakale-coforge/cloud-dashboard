@@ -13,8 +13,8 @@ import {
     normalizeResourceId,
     shouldExcludeFromResourceAlerts,
     getSeverity,
-} from './alert-service';
-import type { UsageRecord, AlertReport, MeterBudget } from './types';
+} from './alert-service.ts';
+import type { UsageRecord, AlertReport, MeterBudget } from './types.ts';
 
 // ── Fixture helpers ─────────────────────────────────────────────────
 

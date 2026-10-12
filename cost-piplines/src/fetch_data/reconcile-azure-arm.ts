@@ -1,7 +1,7 @@
 import { ClientSecretCredential } from '@azure/identity';
 import { SubscriptionClient } from '@azure/arm-subscriptions';
 import { CostManagementClient } from '@azure/arm-costmanagement';
-import { getPrismaClient, disconnectDb } from '../azure_cost_report/db';
+import { getPrismaClient, disconnectDb } from '../azure_cost_report/db.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import 'dotenv/config';

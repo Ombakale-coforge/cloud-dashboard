@@ -1,6 +1,6 @@
-import { getPrismaClient } from './db';
-import { logger } from './config';
-import type { UsageRecord } from './types';
+import { getPrismaClient } from './db.ts';
+import { logger } from './config.ts';
+import type { UsageRecord } from './types.ts';
 
 // ── Date helpers ────────────────────────────────────────────────────
 

@@ -5,7 +5,6 @@ import { fileURLToPath } from 'node:url';
 import { prisma } from '../db.ts';
 import { ensureAlertTablesExist } from '../db-alert-tables.ts';
 import { categorizeAzureService } from './azure-categories.ts';
-import { syncAzureBudgets } from '../../fetch_data/sync-azure-budgets.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
