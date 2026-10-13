@@ -1,8 +1,8 @@
 import nodemailer from 'nodemailer';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { AlertReport, Alert, EmailResult, AlertSeverity, MeterBudgetAlert } from './types';
-import { EMAIL_MODE, LOG_DIR_PATH, validateEmailEnvironment, logger } from './config';
+import type { AlertReport, Alert, EmailResult, AlertSeverity, MeterBudgetAlert } from './types.ts';
+import { EMAIL_MODE, LOG_DIR_PATH, validateEmailEnvironment, logger } from './config.ts';
 
 function escapeHtml(value: string | number | null | undefined): string {
     return String(value ?? "")

@@ -17,13 +17,13 @@ import {
     EMAIL_MODE,
     LOG_DIR_PATH,
     logger,
-} from './config';
-import { getPrismaClient, disconnectDb } from './db';
-import { loadActiveUsageRecords, getDateDaysBefore, todayUTC } from './data-loader';
-import { generateAlerts, evaluateMeterBudgets } from './alert-service';
-import { sendAlertEmail, sendBudgetAlertEmail } from './email-service';
-import { ensureAlertTablesExist } from '../server/db-alert-tables';
-import type { AlertReport, UsageRecord, MeterBudget } from './types';
+} from './config.ts';
+import { getPrismaClient, disconnectDb } from './db.ts';
+import { loadActiveUsageRecords, getDateDaysBefore, todayUTC } from './data-loader.ts';
+import { generateAlerts, evaluateMeterBudgets } from './alert-service.ts';
+import { sendAlertEmail, sendBudgetAlertEmail } from './email-service.ts';
+import { ensureAlertTablesExist } from '../server/db-alert-tables.ts';
+import type { AlertReport, UsageRecord, MeterBudget } from './types.ts';
 
 function parseArgs(): { mode: 'preview' | 'send'; endDate: string; lookbackDays: number } {
     const args = process.argv.slice(2);

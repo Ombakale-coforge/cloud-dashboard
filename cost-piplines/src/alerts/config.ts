@@ -2,7 +2,7 @@ import 'dotenv/config';
 import path from 'node:path';
 import fs from 'node:fs';
 import winston from 'winston';
-import type { AlertConfiguration } from './types';
+import type { AlertConfiguration } from './types.ts';
 
 // ── Database ────────────────────────────────────────────────────────
 export const DATABASE_URL = process.env.DATABASE_URL || '';

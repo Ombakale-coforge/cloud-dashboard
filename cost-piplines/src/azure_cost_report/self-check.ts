@@ -4,10 +4,10 @@
  */
 
 import assert from 'node:assert';
-import { normalizeTransaction } from './data-loader';
-import { calculateReports, round, safeDivide } from './analytics';
-import { computeInsertChunkSize, chunk } from './report-service';
-import { UsageTransaction } from './types';
+import { normalizeTransaction } from './data-loader.ts';
+import { calculateReports, round, safeDivide } from './analytics.ts';
+import { computeInsertChunkSize, chunk } from './report-service.ts';
+import { UsageTransaction } from './types.ts';
 
 export function runSelfCheck(): void {
     console.log('Running azure_cost_report self-check tests...');

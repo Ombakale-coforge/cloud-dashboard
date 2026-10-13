@@ -11,17 +11,17 @@ import {
     ANOMALY_THRESHOLD_PERCENT,
     ANOMALY_ROLLING_MONTHS,
     logger,
-} from './config';
-import { getPrismaClient, disconnectDb } from './db';
-import { loadActiveUsageRecords } from './data-loader';
-import { calculateReports } from './analytics';
+} from './config.ts';
+import { getPrismaClient, disconnectDb } from './db.ts';
+import { loadActiveUsageRecords } from './data-loader.ts';
+import { calculateReports } from './analytics.ts';
 import {
     createReportRun,
     saveReportData,
     completeReportRun,
     failReportRun,
-} from './report-service';
-import { ReportRunSummary } from './types';
+} from './report-service.ts';
+import { ReportRunSummary } from './types.ts';
 
 export async function runAzureCostReportPipeline(): Promise<ReportRunSummary> {
     const startedAt = Date.now();

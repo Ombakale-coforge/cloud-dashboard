@@ -1,4 +1,4 @@
-import { getPrismaClient } from './db';
+import { getPrismaClient } from './db.ts';
 import {
     SQLSERVER_MAX_PARAMS,
     SQLSERVER_MAX_ROWS_PER_INSERT,
@@ -6,8 +6,8 @@ import {
     ANOMALY_THRESHOLD_PERCENT,
     ANOMALY_ROLLING_MONTHS,
     logger,
-} from './config';
-import { CalculatedReports } from './types';
+} from './config.ts';
+import { CalculatedReports } from './types.ts';
 
 export function chunk<T>(array: T[], size: number): T[][] {
     const chunks: T[][] = [];

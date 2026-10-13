@@ -1,6 +1,6 @@
-import { ALERT_CONFIG, RESOURCE_ALERT_EXCLUSIONS, logger } from './config';
-import { getPreviousDates, getDateDaysBefore } from './data-loader';
-import type { Alert, AlertReport, AlertSeverity, UsageRecord, BaselineStats, MeterBudget, MeterBudgetStatus, MeterBudgetAlert, BudgetThresholdLevel } from './types';
+import { ALERT_CONFIG, RESOURCE_ALERT_EXCLUSIONS, logger } from './config.ts';
+import { getPreviousDates, getDateDaysBefore } from './data-loader.ts';
+import type { Alert, AlertReport, AlertSeverity, UsageRecord, BaselineStats, MeterBudget, MeterBudgetStatus, MeterBudgetAlert, BudgetThresholdLevel } from './types.ts';
 
 // ── Exported Functions ───────────────────────────────────────────────────────
 
