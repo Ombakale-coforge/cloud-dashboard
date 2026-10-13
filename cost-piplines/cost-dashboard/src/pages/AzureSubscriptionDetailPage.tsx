@@ -74,6 +74,7 @@ interface AzureAccountDetailResponse {
     available: boolean;
     services?: Array<{ service: string; cost: number; sharePct: number }>;
     regions?: Array<{ region: string; cost: number; sharePct: number }>;
+    resourceGroups?: Array<{ resourceGroup: string; cost: number; sharePct: number }>;
   };
 }
 
@@ -690,6 +691,60 @@ export function AzureSubscriptionDetailPage() {
             </CardContent>
           </Card>
         </div>
+
+        {/* Section 4: Resource Groups Breakdown (if available) */}
+        {liveAzure?.resourceGroups && liveAzure.resourceGroups.length > 0 && (
+          <Card className="border border-muted/40 shadow-sm bg-card/60 backdrop-blur-md">
+            <CardHeader className="pb-3 border-b border-muted/30">
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="text-lg font-semibold tracking-tight text-foreground flex items-center gap-2">
+                    <Layers className="w-4 h-4 text-sky-500" />
+                    Resource Groups Inside This Subscription
+                  </CardTitle>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Distribution of cost by Azure Resource Group ({financials.currentMonth})
+                  </p>
+                </div>
+                <Badge variant="outline" className="text-xs font-semibold px-2 py-0.5">
+                  {liveAzure.resourceGroups.length} Resource Groups
+                </Badge>
+              </div>
+            </CardHeader>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow className="border-b border-muted/30 bg-muted/20 hover:bg-transparent">
+                    <TableHead className="py-2.5 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                      Resource Group
+                    </TableHead>
+                    <TableHead className="py-2.5 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider text-right w-[140px]">
+                      Cost
+                    </TableHead>
+                    <TableHead className="py-2.5 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider text-right w-[110px]">
+                      Share %
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {liveAzure.resourceGroups.slice(0, 10).map((rg, idx) => (
+                    <TableRow key={idx} className="hover:bg-muted/30">
+                      <TableCell className="py-2.5 px-4 font-mono font-medium text-xs text-foreground">
+                        {rg.resourceGroup}
+                      </TableCell>
+                      <TableCell className="py-2.5 px-4 text-right font-mono font-semibold text-xs text-foreground">
+                        {fmt(rg.cost)}
+                      </TableCell>
+                      <TableCell className="py-2.5 px-4 text-right font-medium text-xs text-sky-600 dark:text-sky-400">
+                        {rg.sharePct}%
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        )}
       </main>
     </div>
   );

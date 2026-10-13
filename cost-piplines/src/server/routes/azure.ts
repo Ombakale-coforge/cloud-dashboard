@@ -898,7 +898,7 @@ router.get('/linked-accounts', async (req: Request, res: Response) => {
       const momChangePercent = previousSpend > 0 ? Number(((diff / previousSpend) * 100).toFixed(1)) : 0;
 
       const b = budgetMap.get(name);
-      const hasBudget = b ? b.status === 'BUDGETED' : true;
+      const hasBudget = b ? b.status === 'BUDGETED' : false;
       const budgetStatus: 'Budgeted' | 'Unbudgeted' = hasBudget ? 'Budgeted' : 'Unbudgeted';
       const subId = b?.subscriptionId || (idx === 0 ? defaultGuid : `sub-${idx + 1}`);
 
@@ -1050,52 +1050,178 @@ router.get('/linked-accounts/:linkedAccountId', async (req: Request, res: Respon
     const variance = costs.length > 0 ? costs.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / costs.length : 0;
     const stdDev = Math.sqrt(variance);
 
-    // Live Azure services and regions
-    let services = [
-      { service: 'Microsoft.RecoveryServices', cost: Number((currentSpend * 0.74).toFixed(2)), sharePct: 74 },
-      { service: 'microsoft.compute', cost: Number((currentSpend * 0.18).toFixed(2)), sharePct: 18 },
-      { service: 'microsoft.network', cost: Number((currentSpend * 0.05).toFixed(2)), sharePct: 5 },
-      { service: 'Microsoft.PowerPlatform', cost: Number((currentSpend * 0.03).toFixed(2)), sharePct: 3 },
-    ];
-    let regions = [
-      { region: 'southindia', cost: Number(currentSpend.toFixed(2)), sharePct: 100 },
-    ];
+    // Multi-tier Resolution for Live Azure Services and Regions
+    let services: Array<{ service: string; cost: number; sharePct: number }> = [];
+    let regions: Array<{ region: string; cost: number; sharePct: number }> = [];
+    let resourceGroups: Array<{ resourceGroup: string; cost: number; sharePct: number }> = [];
 
-    // Try reading more detailed services if available from usage-details.json (scoped strictly to this subscription)
-    try {
-      const usagePath = path.resolve(__dirname, '../../../data/azure/usage-details.json');
-      if (fs.existsSync(usagePath)) {
-        const rawJson = fs.readFileSync(usagePath, 'utf8');
-        const usageData = JSON.parse(rawJson);
-        const monthUsage = usageData.filter((u: any) => {
-          const isMonth = (u.date || u.billingPeriodStartDate || '').startsWith(effectiveMonth);
-          const subMatch = (
-            (u.subscriptionId && u.subscriptionId.toLowerCase() === cleanSubId.toLowerCase()) ||
-            (u.SubscriptionId && u.SubscriptionId.toLowerCase() === cleanSubId.toLowerCase()) ||
-            (u.subscriptionName && u.subscriptionName.toLowerCase() === accountName.toLowerCase()) ||
-            (u.SubscriptionName && u.SubscriptionName.toLowerCase() === accountName.toLowerCase())
-          );
-          return isMonth && subMatch;
+    // Tier 1: Query SQL database (Prisma)
+    if (prisma) {
+      try {
+        // 1a. Services from azureUsageRecord
+        const dbServices = await prisma.azureUsageRecord.groupBy({
+          by: ['service'],
+          where: {
+            usageMonth: effectiveMonth,
+            OR: [
+              { subscriptionId: cleanSubId },
+              { subscriptionName: accountName },
+            ],
+            isDuplicateOfEarlierRow: false,
+            isSupersededByLaterRow: false,
+          },
+          _sum: { effectiveCost: true },
         });
-        if (monthUsage.length > 0) {
-          const svcMap = new Map<string, number>();
-          const rgnMap = new Map<string, number>();
-          for (const item of monthUsage) {
-            const sName = item.consumedService || 'Azure Services';
-            const rName = item.resourceLocation || 'southindia';
-            const cost = Number(item.cost || 0);
-            svcMap.set(sName, (svcMap.get(sName) || 0) + cost);
-            rgnMap.set(rName, (rgnMap.get(rName) || 0) + cost);
-          }
-          const totalSvc = Array.from(svcMap.values()).reduce((a, b) => a + b, 0) || 1;
-          services = Array.from(svcMap.entries())
-            .map(([service, cost]) => ({
-              service,
-              cost: Number(cost.toFixed(2)),
-              sharePct: Math.round((cost / totalSvc) * 100),
-            }))
-            .sort((a, b) => b.cost - a.cost);
 
+        if (dbServices.length > 0) {
+          const totalSvc = dbServices.reduce((sum, s) => sum + Number(s._sum.effectiveCost || 0), 0) || 1;
+          services = dbServices
+            .map((s) => {
+              const cost = Number(Number(s._sum.effectiveCost || 0).toFixed(2));
+              return {
+                service: s.service || 'Azure Services',
+                cost,
+                sharePct: Math.round((cost / totalSvc) * 100),
+              };
+            })
+            .filter((s) => s.cost > 0)
+            .sort((a, b) => b.cost - a.cost);
+        }
+
+        // 1b. Regions from azureUsageRecord
+        const dbRegions = await prisma.azureUsageRecord.groupBy({
+          by: ['region'],
+          where: {
+            usageMonth: effectiveMonth,
+            OR: [
+              { subscriptionId: cleanSubId },
+              { subscriptionName: accountName },
+            ],
+            isDuplicateOfEarlierRow: false,
+            isSupersededByLaterRow: false,
+          },
+          _sum: { effectiveCost: true },
+        });
+
+        if (dbRegions.length > 0) {
+          const totalRgn = dbRegions.reduce((sum, r) => sum + Number(r._sum.effectiveCost || 0), 0) || 1;
+          regions = dbRegions
+            .map((r) => {
+              const cost = Number(Number(r._sum.effectiveCost || 0).toFixed(2));
+              return {
+                region: r.region || 'global',
+                cost,
+                sharePct: Math.round((cost / totalRgn) * 100),
+              };
+            })
+            .filter((r) => r.cost > 0)
+            .sort((a, b) => b.cost - a.cost);
+        }
+
+        // 1c. Resource Groups from pre-aggregated azureReportByResourceGroup
+        if (latestRun) {
+          const dbRGs = await prisma.azureReportByResourceGroup.findMany({
+            where: {
+              reportRunId: latestRun.id,
+              month: effectiveMonth,
+              subscription: accountName,
+            },
+            orderBy: { cost: 'desc' },
+          });
+
+          if (dbRGs.length > 0) {
+            const totalRg = dbRGs.reduce((sum, rg) => sum + Number(rg.cost || 0), 0) || 1;
+            resourceGroups = dbRGs
+              .map((rg) => {
+                const cost = Number(Number(rg.cost || 0).toFixed(2));
+                return {
+                  resourceGroup: rg.resourceGroup,
+                  cost,
+                  sharePct: Math.round((cost / totalRg) * 100),
+                };
+              })
+              .filter((rg) => rg.cost > 0);
+          }
+        }
+      } catch (dbErr) {
+        console.warn('DB query fallback for services/regions:', dbErr);
+      }
+    }
+
+    // Tier 2: Try reading detailed services/regions from usage-details.json (scoped strictly to this subscription)
+    if (services.length === 0 && regions.length === 0) {
+      try {
+        const usagePath = path.resolve(__dirname, '../../../data/azure/usage-details.json');
+        if (fs.existsSync(usagePath)) {
+          const rawJson = fs.readFileSync(usagePath, 'utf8');
+          const usageData = JSON.parse(rawJson);
+          const normAccountName = accountName.replace(/[\u2010-\u2015]/g, '-').toLowerCase().trim();
+          const normCleanId = cleanSubId.replace(/[\u2010-\u2015]/g, '-').toLowerCase().trim();
+
+          const monthUsage = usageData.filter((u: any) => {
+            const isMonth = (u.date || u.billingPeriodStartDate || '').startsWith(effectiveMonth);
+            const uSubId = (u.subscriptionId || u.SubscriptionId || '').toLowerCase().trim();
+            const uSubName = (u.subscriptionName || u.SubscriptionName || '').replace(/[\u2010-\u2015]/g, '-').toLowerCase().trim();
+            const subMatch = (
+              (uSubId && (uSubId === normCleanId || uSubId === normAccountName)) ||
+              (uSubName && (uSubName === normAccountName || uSubName === normCleanId))
+            );
+            return isMonth && subMatch;
+          });
+
+          if (monthUsage.length > 0) {
+            const svcMap = new Map<string, number>();
+            const rgnMap = new Map<string, number>();
+            for (const item of monthUsage) {
+              const sName = item.consumedService || 'Azure Services';
+              const rName = item.resourceLocation || 'global';
+              const cost = Number(item.cost || 0);
+              svcMap.set(sName, (svcMap.get(sName) || 0) + cost);
+              rgnMap.set(rName, (rgnMap.get(rName) || 0) + cost);
+            }
+            const totalSvc = Array.from(svcMap.values()).reduce((a, b) => a + b, 0) || 1;
+            services = Array.from(svcMap.entries())
+              .map(([service, cost]) => ({
+                service,
+                cost: Number(cost.toFixed(2)),
+                sharePct: Math.round((cost / totalSvc) * 100),
+              }))
+              .filter((s) => s.cost > 0)
+              .sort((a, b) => b.cost - a.cost);
+
+            const totalRgn = Array.from(rgnMap.values()).reduce((a, b) => a + b, 0) || 1;
+            regions = Array.from(rgnMap.entries())
+              .map(([region, cost]) => ({
+                region,
+                cost: Number(cost.toFixed(2)),
+                sharePct: Math.round((cost / totalRgn) * 100),
+              }))
+              .filter((r) => r.cost > 0)
+              .sort((a, b) => b.cost - a.cost);
+          }
+        }
+      } catch (e) {
+        // Fallback to CSV
+      }
+    }
+
+    // Tier 3: CSV fallback reports if this subscription is the primary or matches
+    if (regions.length === 0 && (subNames.length <= 1 || accountName.toLowerCase().includes('migration'))) {
+      const rgnCsvPath = path.resolve(__dirname, '../../../AzureUsageReports/latest/azure_usage_by_region.csv');
+      if (fs.existsSync(rgnCsvPath)) {
+        const content = fs.readFileSync(rgnCsvPath, 'utf8');
+        const lines = content.trim().split('\n').slice(1);
+        const rgnMap = new Map<string, number>();
+        for (const line of lines) {
+          const [m, r, c] = line.split(',');
+          if (m && r && c && m.trim() === effectiveMonth) {
+            const cost = parseFloat(c.trim()) || 0;
+            if (cost > 0) {
+              rgnMap.set(r.trim(), cost);
+            }
+          }
+        }
+        if (rgnMap.size > 0) {
           const totalRgn = Array.from(rgnMap.values()).reduce((a, b) => a + b, 0) || 1;
           regions = Array.from(rgnMap.entries())
             .map(([region, cost]) => ({
@@ -1106,15 +1232,45 @@ router.get('/linked-accounts/:linkedAccountId', async (req: Request, res: Respon
             .sort((a, b) => b.cost - a.cost);
         }
       }
-    } catch (e) {
-      // Keep defaults
     }
+
+    if (services.length === 0 && (subNames.length <= 1 || accountName.toLowerCase().includes('migration'))) {
+      const svcCsvPath = path.resolve(__dirname, '../../../AzureUsageReports/latest/azure_usage_by_service.csv');
+      if (fs.existsSync(svcCsvPath)) {
+        const content = fs.readFileSync(svcCsvPath, 'utf8');
+        const lines = content.trim().split('\n').slice(1);
+        const svcMap = new Map<string, number>();
+        for (const line of lines) {
+          const [m, s, c] = line.split(',');
+          if (m && s && c && m.trim() === effectiveMonth) {
+            const cost = parseFloat(c.trim()) || 0;
+            if (cost > 0) {
+              svcMap.set(s.trim(), cost);
+            }
+          }
+        }
+        if (svcMap.size > 0) {
+          const totalSvc = Array.from(svcMap.values()).reduce((a, b) => a + b, 0) || 1;
+          services = Array.from(svcMap.entries())
+            .map(([service, cost]) => ({
+              service,
+              cost: Number(cost.toFixed(2)),
+              sharePct: Math.round((cost / totalSvc) * 100),
+            }))
+            .sort((a, b) => b.cost - a.cost);
+        }
+      }
+    }
+
+    const hasBudget = matchedBudget ? matchedBudget.status === 'BUDGETED' : false;
+    const budgetStatus: 'Budgeted' | 'Unbudgeted' = hasBudget ? 'Budgeted' : 'Unbudgeted';
+    const topCostDriver = services[0]?.service || (currentSpend > 0 ? 'Cloud Infrastructure' : 'None recorded');
 
     return res.json({
       account: {
         linkedAccountId: cleanSubId,
         accountName,
-        status: matchedBudget?.status || 'ACTIVE',
+        status: 'ACTIVE',
         rootAccount: {
           id: 'azure-root',
           name: 'Coforge Limited',
@@ -1138,14 +1294,15 @@ router.get('/linked-accounts/:linkedAccountId', async (req: Request, res: Respon
         volatilityCategory: stdDev / (mean || 1) > 0.5 ? 'Volatile' : 'Moderate',
       },
       governance: {
-        hasBudget: matchedBudget ? matchedBudget.status === 'BUDGETED' : true,
-        status: matchedBudget ? (matchedBudget.status === 'BUDGETED' ? 'Budgeted' : 'Unbudgeted') : 'Budgeted',
-        topCostDriver: services[0]?.service || 'Microsoft.RecoveryServices',
+        hasBudget,
+        status: budgetStatus,
+        topCostDriver,
       },
       liveAzure: {
-        available: true,
+        available: services.length > 0 || regions.length > 0,
         services,
         regions,
+        resourceGroups,
       },
     });
   } catch (err: any) {
