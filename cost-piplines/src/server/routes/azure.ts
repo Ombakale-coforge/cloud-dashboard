@@ -878,6 +878,14 @@ router.get('/linked-accounts', async (req: Request, res: Response) => {
     const subNames = [...new Set(records.map((r) => r.subscription))];
     const budgetMap = new Map(budgets.map((b) => [b.subscriptionName || b.subscriptionId, b]));
 
+    // Include any registered budgeted subscriptions if not present in usage records
+    for (const b of budgets) {
+      const bName = b.subscriptionName || b.subscriptionId;
+      if (bName && !subNames.includes(bName)) {
+        subNames.push(bName);
+      }
+    }
+
     const defaultGuid = '264a9a65-67ad-4a39-b124-c41d21aee101';
     const topService = topMeters[0]?.service || 'Microsoft.RecoveryServices';
 
@@ -938,8 +946,10 @@ router.get('/linked-accounts/:linkedAccountId', async (req: Request, res: Respon
     const targetMonth = (req.query.month && String(req.query.month).match(/^\d{4}-\d{2}$/))
       ? String(req.query.month).trim()
       : '';
+    const queryName = req.query.name ? String(req.query.name).trim() : '';
 
     let records: Array<{ month: string; subscription: string; cost: number }> = [];
+    let budgets: Array<{ subscriptionId: string; subscriptionName?: string | null; status: string; amount?: any }> = [];
     const latestRun = await getLatestAzureReportRun();
     if (latestRun && prisma) {
       try {
@@ -948,6 +958,7 @@ router.get('/linked-accounts/:linkedAccountId', async (req: Request, res: Respon
           orderBy: { month: 'asc' },
         });
         records = subRecords.map((r) => ({ month: r.month, subscription: r.subscription, cost: Number(r.cost) }));
+        budgets = await prisma.azureSubscriptionBudget.findMany();
       } catch (dbErr) {
         console.warn('Fallback from DB in detail route:', dbErr);
       }
@@ -977,24 +988,57 @@ router.get('/linked-accounts/:linkedAccountId', async (req: Request, res: Respon
     const prevDate = new Date(Date.UTC(year, month - 2, 1));
     prevMonthStr = `${prevDate.getUTCFullYear()}-${String(prevDate.getUTCMonth() + 1).padStart(2, '0')}`;
 
-    // Subscription name matching
-    let accountName = 'Coforge Global IT – Migration';
-    const subRecord = records.find((r) => r.subscription === linkedAccountId);
-    if (subRecord) {
-      accountName = subRecord.subscription;
+    // Distinct subscription names available
+    const subNames = [...new Set(records.map((r) => r.subscription))];
+
+    // Multi-tier Subscription Resolution: ID, Name, or synthetic slug (sub-1, sub-2)
+    let resolvedName = queryName;
+    let resolvedId = linkedAccountId;
+
+    // 1. Match from budgets list
+    const matchedBudget = budgets.find((b) =>
+      b.subscriptionId.toLowerCase() === linkedAccountId.toLowerCase() ||
+      b.subscriptionName?.toLowerCase() === linkedAccountId.toLowerCase() ||
+      (queryName && b.subscriptionName?.toLowerCase() === queryName.toLowerCase())
+    );
+    if (matchedBudget) {
+      if (!resolvedName && matchedBudget.subscriptionName) resolvedName = matchedBudget.subscriptionName;
+      if (matchedBudget.subscriptionId) resolvedId = matchedBudget.subscriptionId;
     }
 
-    // Historical spend
+    // 2. Match synthetic index slug (sub-1, sub-2)
+    const slugMatch = linkedAccountId.match(/^sub-(\d+)$/i);
+    if (slugMatch) {
+      const subIndex = parseInt(slugMatch[1], 10) - 1;
+      if (subNames[subIndex]) {
+        resolvedName = resolvedName || subNames[subIndex];
+      }
+    }
+
+    // 3. Match from records
+    const subRecord = records.find((r) =>
+      r.subscription.toLowerCase() === linkedAccountId.toLowerCase() ||
+      (resolvedName && r.subscription.toLowerCase() === resolvedName.toLowerCase())
+    );
+    if (subRecord) {
+      resolvedName = subRecord.subscription;
+    }
+
+    // Final resolution: never force a hardcoded default migration subscription
+    const accountName = resolvedName || decodeURIComponent(linkedAccountId);
+    const cleanSubId = resolvedId || linkedAccountId;
+
+    // Historical spend strictly filtered by resolved subscription
     const historicalMonthlySpend = records
-      .filter((r) => r.subscription === accountName || records.length <= 7)
+      .filter((r) => r.subscription.toLowerCase() === accountName.toLowerCase())
       .slice(-6)
       .map((r) => ({
         month: r.month,
         cost: Number(r.cost.toFixed(2)),
       }));
 
-    const currRec = records.find((r) => r.subscription === accountName && r.month === effectiveMonth);
-    const prevRec = records.find((r) => r.subscription === accountName && r.month === prevMonthStr);
+    const currRec = records.find((r) => r.subscription.toLowerCase() === accountName.toLowerCase() && r.month === effectiveMonth);
+    const prevRec = records.find((r) => r.subscription.toLowerCase() === accountName.toLowerCase() && r.month === prevMonthStr);
     const currentSpend = currRec ? currRec.cost : (historicalMonthlySpend[historicalMonthlySpend.length - 1]?.cost || 0);
     const previousSpend = prevRec ? prevRec.cost : (historicalMonthlySpend[historicalMonthlySpend.length - 2]?.cost || 0);
     const diff = currentSpend - previousSpend;
@@ -1017,13 +1061,22 @@ router.get('/linked-accounts/:linkedAccountId', async (req: Request, res: Respon
       { region: 'southindia', cost: Number(currentSpend.toFixed(2)), sharePct: 100 },
     ];
 
-    // Try reading more detailed services if available from usage-details.json
+    // Try reading more detailed services if available from usage-details.json (scoped strictly to this subscription)
     try {
       const usagePath = path.resolve(__dirname, '../../../data/azure/usage-details.json');
       if (fs.existsSync(usagePath)) {
         const rawJson = fs.readFileSync(usagePath, 'utf8');
         const usageData = JSON.parse(rawJson);
-        const monthUsage = usageData.filter((u: any) => (u.date || u.billingPeriodStartDate || '').startsWith(effectiveMonth));
+        const monthUsage = usageData.filter((u: any) => {
+          const isMonth = (u.date || u.billingPeriodStartDate || '').startsWith(effectiveMonth);
+          const subMatch = (
+            (u.subscriptionId && u.subscriptionId.toLowerCase() === cleanSubId.toLowerCase()) ||
+            (u.SubscriptionId && u.SubscriptionId.toLowerCase() === cleanSubId.toLowerCase()) ||
+            (u.subscriptionName && u.subscriptionName.toLowerCase() === accountName.toLowerCase()) ||
+            (u.SubscriptionName && u.SubscriptionName.toLowerCase() === accountName.toLowerCase())
+          );
+          return isMonth && subMatch;
+        });
         if (monthUsage.length > 0) {
           const svcMap = new Map<string, number>();
           const rgnMap = new Map<string, number>();
@@ -1059,9 +1112,9 @@ router.get('/linked-accounts/:linkedAccountId', async (req: Request, res: Respon
 
     return res.json({
       account: {
-        linkedAccountId,
+        linkedAccountId: cleanSubId,
         accountName,
-        status: 'ACTIVE',
+        status: matchedBudget?.status || 'ACTIVE',
         rootAccount: {
           id: 'azure-root',
           name: 'Coforge Limited',
@@ -1085,8 +1138,8 @@ router.get('/linked-accounts/:linkedAccountId', async (req: Request, res: Respon
         volatilityCategory: stdDev / (mean || 1) > 0.5 ? 'Volatile' : 'Moderate',
       },
       governance: {
-        hasBudget: true,
-        status: 'Budgeted',
+        hasBudget: matchedBudget ? matchedBudget.status === 'BUDGETED' : true,
+        status: matchedBudget ? (matchedBudget.status === 'BUDGETED' ? 'Budgeted' : 'Unbudgeted') : 'Budgeted',
         topCostDriver: services[0]?.service || 'Microsoft.RecoveryServices',
       },
       liveAzure: {

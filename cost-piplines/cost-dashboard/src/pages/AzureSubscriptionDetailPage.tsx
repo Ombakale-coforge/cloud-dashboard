@@ -103,6 +103,7 @@ export function AzureSubscriptionDetailPage() {
   const { subscriptionId } = useParams<{ subscriptionId: string }>();
   const [searchParams] = useSearchParams();
   const monthParam = searchParams.get("month") || "";
+  const nameParam = searchParams.get("name") || "";
 
   const [data, setData] = useState<AzureAccountDetailResponse | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -114,8 +115,12 @@ export function AzureSubscriptionDetailPage() {
     setLoading(true);
     setError(null);
 
-    const monthQuery = monthParam ? `?month=${encodeURIComponent(monthParam)}` : "";
-    fetch(`/api/azure/linked-accounts/${encodeURIComponent(subscriptionId)}${monthQuery}`)
+    const queryParts: string[] = [];
+    if (monthParam) queryParts.push(`month=${encodeURIComponent(monthParam)}`);
+    if (nameParam) queryParts.push(`name=${encodeURIComponent(nameParam)}`);
+    const queryString = queryParts.length > 0 ? `?${queryParts.join("&")}` : "";
+
+    fetch(`/api/azure/linked-accounts/${encodeURIComponent(subscriptionId)}${queryString}`)
       .then(async (res) => {
         if (!res.ok) {
           const errData = await res.json().catch(() => ({}));
@@ -135,7 +140,7 @@ export function AzureSubscriptionDetailPage() {
 
   useEffect(() => {
     fetchDetails();
-  }, [subscriptionId, monthParam]);
+  }, [subscriptionId, monthParam, nameParam]);
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);

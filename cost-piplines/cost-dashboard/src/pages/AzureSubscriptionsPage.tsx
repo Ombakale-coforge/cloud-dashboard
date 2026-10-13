@@ -609,7 +609,7 @@ export function AzureSubscriptionsPage() {
                         {/* Action: Open in Current Tab */}
                         <TableCell className="py-3 px-4 text-center">
                           <Link
-                            to={`/azure/subscriptions/${encodeURIComponent((acc.linkedAccountId || "").replace(/^\/?subscriptions\//i, ""))}${selectedMonth ? `?month=${encodeURIComponent(selectedMonth)}` : ""}`}
+                            to={`/azure/subscriptions/${encodeURIComponent((acc.linkedAccountId || "").replace(/^\/?subscriptions\//i, ""))}${selectedMonth ? `?month=${encodeURIComponent(selectedMonth)}` : ""}${acc.accountName ? `${selectedMonth ? "&" : "?"}name=${encodeURIComponent(acc.accountName)}` : ""}`}
                             className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md border border-input bg-background hover:bg-muted text-foreground transition-colors cursor-pointer"
                           >
                             <span>Open</span>
