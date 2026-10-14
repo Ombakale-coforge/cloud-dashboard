@@ -20,7 +20,30 @@ function getAdminPassword(): string {
   return process.env.ADMIN_PASSWORD || process.env.ADMIN_PASS || '8iie9gb';
 }
 
-// Login Endpoint (Strictly queries SQL Server dbo.users)
+function getAzureConfig(req?: Request) {
+  const tenantId = (process.env.AZURE_AD_TENANT_ID || process.env.AZURE_TENANT_ID || '').trim();
+  const clientId = (process.env.AZURE_AD_CLIENT_ID || process.env.AZURE_CLIENT_ID || '').trim();
+  const clientSecret = (process.env.AZURE_AD_CLIENT_SECRET || process.env.AZURE_CLIENT_SECRET || '').trim();
+
+  let redirectUri = process.env.AZURE_AD_REDIRECT_URI?.trim();
+  if (!redirectUri && req) {
+    const proto = req.headers['x-forwarded-proto'] || (req.secure ? 'https' : req.protocol);
+    const host = req.headers['x-forwarded-host'] || req.get('host');
+    redirectUri = `${proto}://${host}/api/auth/azure/callback`;
+  }
+
+  return {
+    tenantId,
+    clientId,
+    clientSecret,
+    redirectUri: redirectUri || 'https://172.18.51.176/api/auth/azure/callback',
+    isConfigured: !!(tenantId && clientId && clientSecret),
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 1. Standard Login Endpoint (Strictly queries SQL Server dbo.users)
+// ─────────────────────────────────────────────────────────────────────────────
 router.post('/login', async (req: Request, res: Response) => {
   try {
     if (!prisma) {
@@ -170,7 +193,9 @@ router.post('/login', async (req: Request, res: Response) => {
   }
 });
 
-// Signup Endpoint (Strictly writes to SQL Server dbo.users)
+// ─────────────────────────────────────────────────────────────────────────────
+// 2. Signup Endpoint (Strictly writes to SQL Server dbo.users)
+// ─────────────────────────────────────────────────────────────────────────────
 router.post('/signup', async (req: Request, res: Response) => {
   try {
     if (!prisma) {
@@ -211,6 +236,7 @@ router.post('/signup', async (req: Request, res: Response) => {
         passwordAlgo: 'plain',
         department: department?.trim() || 'Digital Engineering',
         role: 'basic',
+        provider: 'credentials',
       },
     });
 
@@ -229,6 +255,212 @@ router.post('/signup', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('Signup error:', err.message);
     res.status(500).json({ error: 'DB_ERROR', message: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 3. Azure Active Directory / Microsoft Entra SSO Endpoints
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Status check: returns whether Azure AD credentials are set
+router.get('/azure/status', (req: Request, res: Response) => {
+  const { isConfigured, redirectUri } = getAzureConfig(req);
+  res.json({
+    configured: isConfigured,
+    redirectUri,
+  });
+});
+
+// Initiate Azure SSO redirect
+router.get('/azure', (req: Request, res: Response) => {
+  const { tenantId, clientId, redirectUri, isConfigured } = getAzureConfig(req);
+
+  if (!isConfigured) {
+    return res.status(503).json({
+      error: 'AZURE_SSO_NOT_CONFIGURED',
+      message: 'Azure AD SSO credentials (AZURE_AD_TENANT_ID, AZURE_AD_CLIENT_ID, AZURE_AD_CLIENT_SECRET) are missing in environment variables.',
+    });
+  }
+
+  const returnTo = typeof req.query.return_to === 'string' ? req.query.return_to : '/login';
+  const statePayload = Buffer.from(JSON.stringify({ returnTo, ts: Date.now() })).toString('base64url');
+
+  const authUrl = new URL(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/authorize`);
+  authUrl.searchParams.set('client_id', clientId);
+  authUrl.searchParams.set('response_type', 'code');
+  authUrl.searchParams.set('redirect_uri', redirectUri);
+  authUrl.searchParams.set('response_mode', 'query');
+  authUrl.searchParams.set('scope', 'openid profile email User.Read');
+  authUrl.searchParams.set('state', statePayload);
+  authUrl.searchParams.set('prompt', 'select_account');
+
+  return res.redirect(authUrl.toString());
+});
+
+// Azure OAuth2 Callback handler
+router.get('/azure/callback', async (req: Request, res: Response) => {
+  let returnUrl = '/login';
+
+  try {
+    const { code, state, error, error_description } = req.query;
+
+    // Decode state to retrieve return URL
+    if (typeof state === 'string') {
+      try {
+        const decodedState = JSON.parse(Buffer.from(state, 'base64url').toString('utf8'));
+        if (decodedState.returnTo && typeof decodedState.returnTo === 'string') {
+          returnUrl = decodedState.returnTo;
+        }
+      } catch {}
+    }
+
+    const proto = req.headers['x-forwarded-proto'] || (req.secure ? 'https' : req.protocol);
+    const host = req.headers['x-forwarded-host'] || req.get('host');
+    const baseUrl = `${proto}://${host}`;
+
+    if (error) {
+      console.error('Azure AD SSO Error from Microsoft:', error, error_description);
+      const targetUrl = new URL(returnUrl, baseUrl);
+      targetUrl.searchParams.set('sso_error', String(error_description || error));
+      return res.redirect(targetUrl.toString());
+    }
+
+    if (!code || typeof code !== 'string') {
+      const targetUrl = new URL(returnUrl, baseUrl);
+      targetUrl.searchParams.set('sso_error', 'No authorization code returned from Microsoft.');
+      return res.redirect(targetUrl.toString());
+    }
+
+    const { tenantId, clientId, clientSecret, redirectUri, isConfigured } = getAzureConfig(req);
+    if (!isConfigured) {
+      const targetUrl = new URL(returnUrl, baseUrl);
+      targetUrl.searchParams.set('sso_error', 'Azure SSO credentials are not configured on the server.');
+      return res.redirect(targetUrl.toString());
+    }
+
+    // 1. Exchange code for OAuth2 tokens
+    const tokenUrl = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`;
+    const params = new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      code,
+      redirect_uri: redirectUri,
+      grant_type: 'authorization_code',
+    });
+
+    const tokenRes = await fetch(tokenUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: params.toString(),
+    });
+
+    const tokenData = await tokenRes.json();
+    if (!tokenRes.ok || !tokenData.access_token) {
+      console.error('Azure token exchange failed:', tokenData);
+      const errMsg = tokenData.error_description || tokenData.error || 'Failed to exchange token with Microsoft.';
+      const targetUrl = new URL(returnUrl, baseUrl);
+      targetUrl.searchParams.set('sso_error', errMsg);
+      return res.redirect(targetUrl.toString());
+    }
+
+    // 2. Fetch User Profile from Microsoft Graph
+    let graphUser: any = {};
+    try {
+      const graphRes = await fetch('https://graph.microsoft.com/v1.0/me', {
+        headers: { Authorization: `Bearer ${tokenData.access_token}` },
+      });
+      if (graphRes.ok) {
+        graphUser = await graphRes.json();
+      }
+    } catch (gErr: any) {
+      console.warn('MS Graph fetch failed, falling back to ID token:', gErr.message);
+    }
+
+    // Resolve email (Graph mail -> userPrincipalName -> ID token fallback)
+    let email = graphUser.mail || graphUser.userPrincipalName;
+    if (!email && tokenData.id_token) {
+      try {
+        const payloadBase64 = tokenData.id_token.split('.')[1];
+        const decoded = JSON.parse(Buffer.from(payloadBase64, 'base64').toString('utf8'));
+        email = decoded.email || decoded.preferred_username || decoded.upn;
+      } catch {}
+    }
+
+    if (!email) {
+      const targetUrl = new URL(returnUrl, baseUrl);
+      targetUrl.searchParams.set('sso_error', 'Could not retrieve email address from your Microsoft profile.');
+      return res.redirect(targetUrl.toString());
+    }
+
+    const normalizedEmail = String(email).trim().toLowerCase();
+    const displayName = graphUser.displayName || normalizedEmail.split('@')[0].replace(/[._-]/g, ' ');
+    const department = graphUser.department || graphUser.jobTitle || 'Digital Engineering';
+    const adminEmail = getAdminEmail();
+    const isSystemAdmin = normalizedEmail === adminEmail;
+
+    // 3. Upsert user in SQL Server dbo.users
+    let userRecord: any = null;
+    if (prisma) {
+      userRecord = await prisma.user.findUnique({
+        where: { email: normalizedEmail },
+      });
+
+      if (userRecord) {
+        userRecord = await prisma.user.update({
+          where: { id: userRecord.id },
+          data: {
+            lastLoginAt: new Date(),
+            provider: 'azure-ad',
+            ...(isSystemAdmin ? { role: 'admin' } : {}),
+          },
+        }).catch(() => userRecord);
+      } else {
+        userRecord = await prisma.user.create({
+          data: {
+            name: displayName,
+            email: normalizedEmail,
+            passwordHash: 'SSO_MANAGED_AZURE_AD',
+            passwordAlgo: 'sso',
+            department,
+            role: isSystemAdmin ? 'admin' : 'basic',
+            provider: 'azure-ad',
+            lastLoginAt: new Date(),
+          },
+        }).catch((err: any) => {
+          console.error('Failed to create SSO user in SQL Server:', err);
+          return null;
+        });
+      }
+
+      // Log successful login audit
+      await prisma.userLoginEvent.create({
+        data: {
+          userId: userRecord?.id || null,
+          emailAttempted: normalizedEmail,
+          outcome: 'success',
+          userAgent: req.headers['user-agent']?.slice(0, 500) || 'Azure AD SSO',
+        },
+      }).catch(() => {});
+    }
+
+    const authPayload = {
+      id: userRecord?.id || `sso-${Date.now()}`,
+      name: userRecord?.name || displayName,
+      email: normalizedEmail,
+      role: isSystemAdmin ? 'admin' : (userRecord?.role || 'basic'),
+      department: userRecord?.department || department,
+      provider: 'azure-ad',
+      loginTime: new Date().toISOString(),
+    };
+
+    const targetUrl = new URL(returnUrl, baseUrl);
+    targetUrl.searchParams.set('sso_user', JSON.stringify(authPayload));
+    return res.redirect(targetUrl.toString());
+  } catch (err: any) {
+    console.error('Azure SSO callback exception:', err);
+    const targetUrl = new URL(returnUrl, 'http://localhost');
+    targetUrl.searchParams.set('sso_error', err.message || 'SSO authentication error');
+    return res.redirect(targetUrl.toString());
   }
 });
 

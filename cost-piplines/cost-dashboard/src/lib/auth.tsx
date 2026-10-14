@@ -9,7 +9,7 @@ export interface User {
   role: UserRole;
   department?: string;
   avatar?: string;
-  provider: "credentials";
+  provider: "credentials" | "azure-ad";
   loginTime: string;
 }
 
@@ -28,6 +28,8 @@ interface AuthContextType {
   loginAdmin: (password: string, email?: string) => Promise<AuthResult>;
   loginBasic: (email: string, password: string) => Promise<AuthResult>;
   signupBasic: (name: string, email: string, password: string, department?: string) => Promise<AuthResult>;
+  loginWithAzure: () => void;
+  setAuthenticatedUser: (user: User) => void;
   logout: () => void;
 }
 
@@ -160,6 +162,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const loginWithAzure = () => {
+    const returnTo = `${window.location.origin}/login`;
+    window.location.href = `/api/auth/azure?return_to=${encodeURIComponent(returnTo)}`;
+  };
+
+  const setAuthenticatedUser = (newUser: User) => {
+    setUser(newUser);
+    try {
+      localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(newUser));
+      sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(newUser));
+    } catch {}
+  };
+
   const logout = () => {
     setUser(null);
     try {
@@ -178,6 +193,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         loginAdmin,
         loginBasic,
         signupBasic,
+        loginWithAzure,
+        setAuthenticatedUser,
         logout,
       }}
     >

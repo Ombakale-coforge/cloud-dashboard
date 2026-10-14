@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 
 export function LoginPage() {
-  const { user, isAuthenticated, loginAdmin, loginBasic, signupBasic } = useAuth();
+  const { user, isAuthenticated, loginAdmin, loginBasic, signupBasic, loginWithAzure, setAuthenticatedUser } = useAuth();
   const navigate = useNavigate();
 
   // If already logged in, redirect directly to dashboard
@@ -26,6 +26,29 @@ export function LoginPage() {
       navigate(user.role === "basic" ? "/newrequest" : "/", { replace: true });
     }
   }, [isAuthenticated, user, navigate]);
+
+  // Check for Azure SSO callback query parameters (?sso_user=... or ?sso_error=...)
+  React.useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const ssoUserParam = params.get("sso_user");
+    const ssoErrorParam = params.get("sso_error");
+
+    if (ssoErrorParam) {
+      const decodedError = decodeURIComponent(ssoErrorParam);
+      setBasicError(`Microsoft SSO Error: ${decodedError}`);
+      window.history.replaceState({}, document.title, window.location.pathname);
+    } else if (ssoUserParam) {
+      try {
+        const ssoUser = JSON.parse(decodeURIComponent(ssoUserParam));
+        setAuthenticatedUser(ssoUser);
+        window.history.replaceState({}, document.title, window.location.pathname);
+        navigate(ssoUser.role === "admin" ? "/" : "/newrequest", { replace: true });
+      } catch (err) {
+        console.error("Failed to parse SSO user payload:", err);
+        setBasicError("Failed to complete Single Sign-On session.");
+      }
+    }
+  }, [setAuthenticatedUser, navigate]);
 
   // Mobile view panel switcher
   const [activePanel, setActivePanel] = useState<"admin" | "basic">("admin");
@@ -163,6 +186,56 @@ export function LoginPage() {
               <User className="w-4 h-4" />
               Requester Portal
             </button>
+          </div>
+        </div>
+
+        {/* Enterprise Azure SSO Quick Sign-In */}
+        <div className="mb-8 max-w-2xl mx-auto w-full">
+          <div className="rounded-2xl border border-indigo-500/30 bg-slate-900/90 p-4 sm:p-5 shadow-2xl shadow-indigo-950/40 backdrop-blur-xl flex flex-col sm:flex-row items-center justify-between gap-4 ring-1 ring-indigo-500/20">
+            <div className="flex items-center gap-3.5 text-left w-full sm:w-auto">
+              <div className="w-11 h-11 rounded-xl bg-slate-800/90 border border-slate-700/80 flex items-center justify-center shrink-0 shadow-inner">
+                <svg className="w-5 h-5" viewBox="0 0 21 21">
+                  <rect x="1" y="1" width="9" height="9" fill="#f25022" />
+                  <rect x="11" y="1" width="9" height="9" fill="#7fba00" />
+                  <rect x="1" y="11" width="9" height="9" fill="#00a4ef" />
+                  <rect x="11" y="11" width="9" height="9" fill="#ffb900" />
+                </svg>
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-bold text-white">Coforge Single Sign-On</h3>
+                  <span className="text-[10px] font-semibold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 rounded-md px-1.5 py-0.5">
+                    Recommended
+                  </span>
+                </div>
+                <p className="text-xs text-slate-400">
+                  Sign in instantly using your official Microsoft work account
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={loginWithAzure}
+              className="w-full sm:w-auto flex items-center justify-center gap-2.5 py-2.5 px-5 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white text-xs font-bold shadow-lg shadow-indigo-600/30 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 cursor-pointer"
+            >
+              <svg className="w-4 h-4" viewBox="0 0 21 21">
+                <rect x="1" y="1" width="9" height="9" fill="#f25022" />
+                <rect x="11" y="1" width="9" height="9" fill="#7fba00" />
+                <rect x="1" y="11" width="9" height="9" fill="#00a4ef" />
+                <rect x="11" y="11" width="9" height="9" fill="#ffb900" />
+              </svg>
+              <span>Sign in with Microsoft</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          <div className="flex items-center my-6 gap-3">
+            <div className="flex-1 h-px bg-slate-800" />
+            <span className="text-[11px] font-medium uppercase tracking-wider text-slate-500">
+              or sign in with credentials
+            </span>
+            <div className="flex-1 h-px bg-slate-800" />
           </div>
         </div>
 
