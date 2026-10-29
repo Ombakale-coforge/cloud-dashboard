@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import './index.css'
 import App from './App.tsx'
+import { MultiCloudOverviewPage } from './pages/MultiCloudOverviewPage.tsx'
 import { LoginPage } from './pages/LoginPage.tsx'
 import { NewRequestPage } from './pages/NewRequestPage.tsx'
 import { LinkedAccountsPage } from './pages/LinkedAccountsPage.tsx'
@@ -31,9 +32,35 @@ createRoot(document.getElementById('root')!).render(
           {/* Public Login Route with Dual Panels */}
           <Route path="/login" element={<LoginPage />} />
 
-          {/* Admin Full Access Dashboard */}
+          {/* Admin Multi-Cloud Landing Overview (AWS + Azure Combined) */}
           <Route
             path="/"
+            element={
+              <ProtectedRoute allowedRoles={['admin']}>
+                <MultiCloudOverviewPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/overview"
+            element={
+              <ProtectedRoute allowedRoles={['admin']}>
+                <MultiCloudOverviewPage />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Admin Full AWS & Azure Analytics Dashboards */}
+          <Route
+            path="/aws"
+            element={
+              <ProtectedRoute allowedRoles={['admin']}>
+                <App />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/dashboard"
             element={
               <ProtectedRoute allowedRoles={['admin']}>
                 <App />

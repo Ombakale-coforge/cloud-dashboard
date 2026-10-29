@@ -1,6 +1,6 @@
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { BarChart3, Layers } from "lucide-react";
+import { BarChart3, Layers, LayoutGrid } from "lucide-react";
 
 export type Provider = "aws" | "azure";
 
@@ -37,21 +37,24 @@ export function Navbar({
     const navigate = useNavigate();
     const isLinkedAccounts = location.pathname.startsWith("/linked-accounts");
     const isSubscriptions = location.pathname.startsWith("/azure/subscriptions") || location.pathname.startsWith("/azure/linked-accounts");
-    const isOverview = location.pathname === "/" || location.pathname === "" || location.pathname === "/azure";
+    const isOverview =
+        location.pathname === "/aws" ||
+        location.pathname === "/dashboard" ||
+        location.pathname === "/azure";
 
     const handleProviderToggle = (v: Provider) => {
         onProviderChange(v);
         if (v === "azure") {
             if (isLinkedAccounts) {
                 navigate("/azure/subscriptions");
-            } else if (isOverview) {
+            } else {
                 navigate("/azure");
             }
         } else if (v === "aws") {
             if (isSubscriptions) {
                 navigate("/linked-accounts");
-            } else if (isOverview) {
-                navigate("/");
+            } else {
+                navigate("/aws");
             }
         }
     };
@@ -62,9 +65,13 @@ export function Navbar({
             <div className="flex items-center gap-8">
                 <div>
                     <div className="flex items-center gap-2.5">
-                        <h1 className="text-lg sm:text-xl font-bold tracking-tight text-slate-900 dark:text-white">
+                        <Link
+                            to="/"
+                            className="text-lg sm:text-xl font-bold tracking-tight text-slate-900 dark:text-white hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
+                            title="Back to Multi-Cloud Overview"
+                        >
                             Cloud Cost Intelligence
-                        </h1>
+                        </Link>
                     </div>
                     <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                         {activeProvider === "aws" ? "Live AWS Cost Analytics" : "Live Azure Cost Analytics"}
@@ -76,6 +83,13 @@ export function Navbar({
                     <nav className="hidden sm:flex items-center gap-1 bg-slate-100 dark:bg-slate-800/60 p-1 rounded-lg border border-slate-200/80 dark:border-slate-700/80">
                         <Link
                             to="/"
+                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 transition-all"
+                        >
+                            <LayoutGrid className="w-3.5 h-3.5" />
+                            Multi-Cloud
+                        </Link>
+                        <Link
+                            to="/aws"
                             className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md transition-all ${
                                 isOverview
                                     ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs"
@@ -99,6 +113,13 @@ export function Navbar({
                     </nav>
                 ) : (
                     <nav className="hidden sm:flex items-center gap-1 bg-slate-100 dark:bg-slate-800/60 p-1 rounded-lg border border-slate-200/80 dark:border-slate-700/80">
+                        <Link
+                            to="/"
+                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 transition-all"
+                        >
+                            <LayoutGrid className="w-3.5 h-3.5" />
+                            Multi-Cloud
+                        </Link>
                         <Link
                             to="/azure"
                             className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md transition-all ${

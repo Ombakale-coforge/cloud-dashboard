@@ -120,7 +120,8 @@ export default function App() {
         setActiveProvider(isAzureRoute ? "azure" : "aws");
     }, [location.pathname, location.search]);
     const [awsAccounts, setAwsAccounts] = useState<AccountOption[]>(DEFAULT_AWS_ACCOUNTS);
-    const [selectedAwsAccount, setSelectedAwsAccount] = useState<string>("account-1");
+    const initialAwsAcc = new URLSearchParams(location.search).get("account") || "account-1";
+    const [selectedAwsAccount, setSelectedAwsAccount] = useState<string>(initialAwsAcc);
     const [azureAccounts, setAzureAccounts] = useState<AccountOption[]>(DEFAULT_AZURE_ACCOUNTS);
     const [selectedAzureAccount, setSelectedAzureAccount] = useState<string>("account-1");
 
