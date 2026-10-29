@@ -12,8 +12,31 @@ dotenv.config({ path: path.resolve(__dirname, '../../../../.env') });
 
 const router = Router();
 
+const DEFAULT_ADMIN_EMAILS = [
+  'dashboard-admin@coforge.com',
+  'omparashuram.b@coforge.com',
+];
+
+function getAdminEmails(): Set<string> {
+  const raw = [
+    ...DEFAULT_ADMIN_EMAILS,
+    ...(process.env.ADMIN_EMAIL || '').split(','),
+    ...(process.env.ADMIN_EMAILS || '').split(','),
+  ];
+  return new Set(
+    raw
+      .map((e) => e.trim().toLowerCase())
+      .filter(Boolean)
+  );
+}
+
 function getAdminEmail(): string {
-  return (process.env.ADMIN_EMAIL || 'dashboard-admin@coforge.com').trim().toLowerCase();
+  return (process.env.ADMIN_EMAIL || 'dashboard-admin@coforge.com').split(',')[0].trim().toLowerCase();
+}
+
+function isAdminEmail(email: string): boolean {
+  if (!email) return false;
+  return getAdminEmails().has(email.trim().toLowerCase());
 }
 
 function getAdminPassword(): string {
@@ -25,18 +48,26 @@ function getAzureConfig(req?: Request) {
   const clientId = (process.env.AZURE_AD_CLIENT_ID || process.env.AZURE_CLIENT_ID || '').trim();
   const clientSecret = (process.env.AZURE_AD_CLIENT_SECRET || process.env.AZURE_CLIENT_SECRET || '').trim();
 
-  let redirectUri = process.env.AZURE_AD_REDIRECT_URI?.trim();
-  if (!redirectUri && req) {
-    const proto = req.headers['x-forwarded-proto'] || (req.secure ? 'https' : req.protocol);
-    const host = req.headers['x-forwarded-host'] || req.get('host');
-    redirectUri = `${proto}://${host}/api/auth/azure/callback`;
+  const envRedirect = process.env.AZURE_AD_REDIRECT_URI?.trim();
+  let redirectUri = envRedirect;
+
+  if (req) {
+    const host = String(req.headers['x-forwarded-host'] || req.get('host') || '');
+    const isLocal = host.includes('localhost') || host.includes('127.0.0.1');
+
+    if (isLocal) {
+      redirectUri = 'http://localhost:3001/api/auth/azure/callback';
+    } else if (!redirectUri || redirectUri.includes('localhost') || redirectUri.includes('127.0.0.1')) {
+      const proto = req.headers['x-forwarded-proto'] || (req.secure ? 'https' : req.protocol);
+      redirectUri = `${proto}://${host}/api/auth/azure/callback`;
+    }
   }
 
   return {
     tenantId,
     clientId,
     clientSecret,
-    redirectUri: redirectUri || 'https://172.18.51.176/api/auth/azure/callback',
+    redirectUri: redirectUri || 'http://localhost:3001/api/auth/azure/callback',
     isConfigured: !!(tenantId && clientId && clientSecret),
   };
 }
@@ -56,11 +87,10 @@ router.post('/login', async (req: Request, res: Response) => {
     }
 
     const normalizedEmail = email.trim().toLowerCase();
-    const adminEmail = getAdminEmail();
     const envAdminPassword = getAdminPassword();
 
     // 1. Admin Verification
-    if (normalizedEmail === adminEmail) {
+    if (isAdminEmail(normalizedEmail)) {
       let isMatch = password === envAdminPassword || password === envAdminPassword.trim();
 
       // Also check fallback to legacy password
@@ -99,7 +129,7 @@ router.post('/login', async (req: Request, res: Response) => {
           user: {
             id: dbUser?.id || 'admin-01',
             name: dbUser?.name || 'Dashboard Administrator',
-            email: adminEmail,
+            email: normalizedEmail,
             role: 'admin',
             department: dbUser?.department || 'Cloud Governance & FinOps',
             provider: 'credentials',
@@ -395,52 +425,55 @@ router.get('/azure/callback', async (req: Request, res: Response) => {
     const normalizedEmail = String(email).trim().toLowerCase();
     const displayName = graphUser.displayName || normalizedEmail.split('@')[0].replace(/[._-]/g, ' ');
     const department = graphUser.department || graphUser.jobTitle || 'Digital Engineering';
-    const adminEmail = getAdminEmail();
-    const isSystemAdmin = normalizedEmail === adminEmail;
+    const isSystemAdmin = isAdminEmail(normalizedEmail);
 
-    // 3. Upsert user in SQL Server dbo.users
+    // 3. Upsert user in SQL Server dbo.users (with resilient fallback if DB is unreachable)
     let userRecord: any = null;
     if (prisma) {
-      userRecord = await prisma.user.findUnique({
-        where: { email: normalizedEmail },
-      });
-
-      if (userRecord) {
-        userRecord = await prisma.user.update({
-          where: { id: userRecord.id },
-          data: {
-            lastLoginAt: new Date(),
-            provider: 'azure-ad',
-            ...(isSystemAdmin ? { role: 'admin' } : {}),
-          },
-        }).catch(() => userRecord);
-      } else {
-        userRecord = await prisma.user.create({
-          data: {
-            name: displayName,
-            email: normalizedEmail,
-            passwordHash: 'SSO_MANAGED_AZURE_AD',
-            passwordAlgo: 'sso',
-            department,
-            role: isSystemAdmin ? 'admin' : 'basic',
-            provider: 'azure-ad',
-            lastLoginAt: new Date(),
-          },
-        }).catch((err: any) => {
-          console.error('Failed to create SSO user in SQL Server:', err);
-          return null;
+      try {
+        userRecord = await prisma.user.findUnique({
+          where: { email: normalizedEmail },
         });
-      }
 
-      // Log successful login audit
-      await prisma.userLoginEvent.create({
-        data: {
-          userId: userRecord?.id || null,
-          emailAttempted: normalizedEmail,
-          outcome: 'success',
-          userAgent: req.headers['user-agent']?.slice(0, 500) || 'Azure AD SSO',
-        },
-      }).catch(() => {});
+        if (userRecord) {
+          userRecord = await prisma.user.update({
+            where: { id: userRecord.id },
+            data: {
+              lastLoginAt: new Date(),
+              provider: 'azure-ad',
+              ...(isSystemAdmin ? { role: 'admin' } : {}),
+            },
+          }).catch(() => userRecord);
+        } else {
+          userRecord = await prisma.user.create({
+            data: {
+              name: displayName,
+              email: normalizedEmail,
+              passwordHash: 'SSO_MANAGED_AZURE_AD',
+              passwordAlgo: 'sso',
+              department,
+              role: isSystemAdmin ? 'admin' : 'basic',
+              provider: 'azure-ad',
+              lastLoginAt: new Date(),
+            },
+          }).catch((err: any) => {
+            console.error('Failed to create SSO user in SQL Server:', err);
+            return null;
+          });
+        }
+
+        // Log successful login audit
+        await prisma.userLoginEvent.create({
+          data: {
+            userId: userRecord?.id || null,
+            emailAttempted: normalizedEmail,
+            outcome: 'success',
+            userAgent: req.headers['user-agent']?.slice(0, 500) || 'Azure AD SSO',
+          },
+        }).catch(() => {});
+      } catch (dbErr: any) {
+        console.warn('⚠️ [SSO] SQL Server is unreachable (VPN may be off). Proceeding with SSO session:', dbErr.message);
+      }
     }
 
     const authPayload = {
