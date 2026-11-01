@@ -30,6 +30,8 @@ import {
   CheckCircle2,
   RefreshCw,
   Lock,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 
 interface AzureGovernanceSummary {
@@ -267,22 +269,48 @@ export function MultiCloudOverviewPage() {
     `${awsBasePath}/budgets_overview.csv`
   );
 
+  const ITEMS_PER_PAGE = 7;
+  const [pageAwsUnbudgeted, setPageAwsUnbudgeted] = useState(1);
+  const [pageAwsBudgets, setPageAwsBudgets] = useState(1);
+  const [pageAzureBudgets, setPageAzureBudgets] = useState(1);
+
+  useEffect(() => {
+    setPageAwsUnbudgeted(1);
+    setPageAwsBudgets(1);
+  }, [selectedAwsAccount]);
+
   const validAwsUnbudgeted = useMemo(
     () => (awsUnbudgeted || []).filter((a) => a && a["Account Name"]),
     [awsUnbudgeted]
   );
-  const topAwsUnbudgeted = useMemo(
-    () => validAwsUnbudgeted.slice(0, 4),
-    [validAwsUnbudgeted]
+  const totalPagesAwsUnbudgeted = Math.max(
+    1,
+    Math.ceil(validAwsUnbudgeted.length / ITEMS_PER_PAGE)
+  );
+  const paginatedAwsUnbudgeted = useMemo(
+    () =>
+      validAwsUnbudgeted.slice(
+        (pageAwsUnbudgeted - 1) * ITEMS_PER_PAGE,
+        pageAwsUnbudgeted * ITEMS_PER_PAGE
+      ),
+    [validAwsUnbudgeted, pageAwsUnbudgeted]
   );
 
   const validAwsBudgets = useMemo(
     () => (awsBudgets || []).filter((b) => b && b["Budget Name"]),
     [awsBudgets]
   );
-  const topAwsBudgets = useMemo(
-    () => validAwsBudgets.slice(0, 4),
-    [validAwsBudgets]
+  const totalPagesAwsBudgets = Math.max(
+    1,
+    Math.ceil(validAwsBudgets.length / ITEMS_PER_PAGE)
+  );
+  const paginatedAwsBudgets = useMemo(
+    () =>
+      validAwsBudgets.slice(
+        (pageAwsBudgets - 1) * ITEMS_PER_PAGE,
+        pageAwsBudgets * ITEMS_PER_PAGE
+      ),
+    [validAwsBudgets, pageAwsBudgets]
   );
 
   // =========================================================================
@@ -339,9 +367,17 @@ export function MultiCloudOverviewPage() {
       ),
     [azureBudgets]
   );
-  const topAzureBudgets = useMemo(
-    () => activeAzureBudgets.slice(0, 4),
-    [activeAzureBudgets]
+  const totalPagesAzureBudgets = Math.max(
+    1,
+    Math.ceil(activeAzureBudgets.length / ITEMS_PER_PAGE)
+  );
+  const paginatedAzureBudgets = useMemo(
+    () =>
+      activeAzureBudgets.slice(
+        (pageAzureBudgets - 1) * ITEMS_PER_PAGE,
+        pageAzureBudgets * ITEMS_PER_PAGE
+      ),
+    [activeAzureBudgets, pageAzureBudgets]
   );
 
   const azureTotalAccounts =
@@ -654,11 +690,11 @@ export function MultiCloudOverviewPage() {
                 </div>
               </div>
 
-              {/* Clean Top Previews (Side-by-Side: Top Unbudgeted Accounts & Top AWS Budgets) */}
+              {/* Paginated Cards (Side-by-Side: Unbudgeted Accounts & AWS Budgets) */}
               <div className="flex-1 min-h-0 grid grid-cols-2 gap-3.5 overflow-hidden">
-                {/* Preview 1: Largest Accounts with No Budget */}
+                {/* Card 1: Largest Accounts with No Budget */}
                 <div className="flex flex-col min-h-0 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-800/20 p-3.5 overflow-hidden">
-                  <div className="shrink-0 flex items-center justify-between mb-2.5">
+                  <div className="shrink-0 flex items-center justify-between mb-2">
                     <div className="flex items-center gap-1.5">
                       <AlertCircle className="h-4 w-4 text-amber-500" />
                       <span className="text-xs font-bold text-slate-900 dark:text-white">
@@ -670,12 +706,14 @@ export function MultiCloudOverviewPage() {
                     </span>
                   </div>
 
-                  <div className="flex-1 min-h-0 flex flex-col justify-between divide-y divide-slate-200/60 dark:divide-slate-800">
-                    {topAwsUnbudgeted.length > 0 ? (
-                      topAwsUnbudgeted.map((acc, i) => (
+                  <div className="flex-1 min-h-0 flex flex-col justify-start divide-y divide-slate-200/60 dark:divide-slate-800 overflow-hidden">
+                    {paginatedAwsUnbudgeted.length > 0 ? (
+                      paginatedAwsUnbudgeted.map((acc, i) => (
                         <div
                           key={i}
-                          className="py-2 flex items-center justify-between gap-2"
+                          className={`${
+                            paginatedAwsUnbudgeted.length === ITEMS_PER_PAGE ? "flex-1" : "py-2"
+                          } min-h-0 flex items-center justify-between gap-2`}
                         >
                           <div className="min-w-0">
                             <div
@@ -705,11 +743,50 @@ export function MultiCloudOverviewPage() {
                       </div>
                     )}
                   </div>
+
+                  {/* Pagination Footer */}
+                  <div className="shrink-0 pt-2 mt-1 border-t border-slate-200/60 dark:border-slate-800 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
+                    <span>
+                      {validAwsUnbudgeted.length > 0
+                        ? `${(pageAwsUnbudgeted - 1) * ITEMS_PER_PAGE + 1}–${Math.min(
+                            pageAwsUnbudgeted * ITEMS_PER_PAGE,
+                            validAwsUnbudgeted.length
+                          )} of ${validAwsUnbudgeted.length}`
+                        : "0 of 0"}
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setPageAwsUnbudgeted((p) => Math.max(1, p - 1))}
+                        disabled={pageAwsUnbudgeted <= 1}
+                        className="p-1 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 transition-colors cursor-pointer disabled:cursor-default"
+                        title="Previous Page"
+                      >
+                        <ChevronLeft className="h-3.5 w-3.5" />
+                      </button>
+                      <span className="font-semibold text-slate-700 dark:text-slate-300 px-1">
+                        {pageAwsUnbudgeted} / {totalPagesAwsUnbudgeted}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setPageAwsUnbudgeted((p) =>
+                            Math.min(totalPagesAwsUnbudgeted, p + 1)
+                          )
+                        }
+                        disabled={pageAwsUnbudgeted >= totalPagesAwsUnbudgeted}
+                        className="p-1 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 transition-colors cursor-pointer disabled:cursor-default"
+                        title="Next Page"
+                      >
+                        <ChevronRight className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </div>
                 </div>
 
-                {/* Preview 2: AWS Budgets Overview */}
+                {/* Card 2: AWS Budgets Overview */}
                 <div className="flex flex-col min-h-0 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-800/20 p-3.5 overflow-hidden">
-                  <div className="shrink-0 flex items-center justify-between mb-2.5">
+                  <div className="shrink-0 flex items-center justify-between mb-2">
                     <div className="flex items-center gap-1.5">
                       <CheckCircle2 className="h-4 w-4 text-emerald-500" />
                       <span className="text-xs font-bold text-slate-900 dark:text-white">
@@ -721,9 +798,9 @@ export function MultiCloudOverviewPage() {
                     </span>
                   </div>
 
-                  <div className="flex-1 min-h-0 flex flex-col justify-between divide-y divide-slate-200/60 dark:divide-slate-800">
-                    {topAwsBudgets.length > 0 ? (
-                      topAwsBudgets.map((b, i) => {
+                  <div className="flex-1 min-h-0 flex flex-col justify-start divide-y divide-slate-200/60 dark:divide-slate-800 overflow-hidden">
+                    {paginatedAwsBudgets.length > 0 ? (
+                      paginatedAwsBudgets.map((b, i) => {
                         const limit = Number(b.Limit ?? b["Budget Limit"] ?? 0);
                         const used = Number(b["Current Used"] ?? b["Current Spend"] ?? 0);
                         const pct = limit > 0 ? Math.round((used / limit) * 100) : 0;
@@ -732,7 +809,12 @@ export function MultiCloudOverviewPage() {
                           pct >= 100;
 
                         return (
-                          <div key={i} className="py-2 space-y-1">
+                          <div
+                            key={i}
+                            className={`${
+                              paginatedAwsBudgets.length === ITEMS_PER_PAGE ? "flex-1" : "py-2"
+                            } min-h-0 flex flex-col justify-center space-y-1`}
+                          >
                             <div className="flex items-center justify-between gap-2">
                               <span
                                 className="text-xs font-semibold text-slate-800 dark:text-slate-100 truncate"
@@ -770,6 +852,43 @@ export function MultiCloudOverviewPage() {
                         No active budgets
                       </div>
                     )}
+                  </div>
+
+                  {/* Pagination Footer */}
+                  <div className="shrink-0 pt-2 mt-1 border-t border-slate-200/60 dark:border-slate-800 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
+                    <span>
+                      {validAwsBudgets.length > 0
+                        ? `${(pageAwsBudgets - 1) * ITEMS_PER_PAGE + 1}–${Math.min(
+                            pageAwsBudgets * ITEMS_PER_PAGE,
+                            validAwsBudgets.length
+                          )} of ${validAwsBudgets.length}`
+                        : "0 of 0"}
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setPageAwsBudgets((p) => Math.max(1, p - 1))}
+                        disabled={pageAwsBudgets <= 1}
+                        className="p-1 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 transition-colors cursor-pointer disabled:cursor-default"
+                        title="Previous Page"
+                      >
+                        <ChevronLeft className="h-3.5 w-3.5" />
+                      </button>
+                      <span className="font-semibold text-slate-700 dark:text-slate-300 px-1">
+                        {pageAwsBudgets} / {totalPagesAwsBudgets}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setPageAwsBudgets((p) => Math.min(totalPagesAwsBudgets, p + 1))
+                        }
+                        disabled={pageAwsBudgets >= totalPagesAwsBudgets}
+                        className="p-1 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 transition-colors cursor-pointer disabled:cursor-default"
+                        title="Next Page"
+                      >
+                        <ChevronRight className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -886,9 +1005,9 @@ export function MultiCloudOverviewPage() {
                 </div>
               </div>
 
-              {/* Clean Top 4 Azure Subscriptions Budget Tracking Preview */}
+              {/* Paginated Azure Subscriptions Budget Tracking Card */}
               <div className="flex-1 min-h-0 flex flex-col rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-800/20 p-3.5 overflow-hidden">
-                <div className="shrink-0 flex items-center justify-between mb-2.5">
+                <div className="shrink-0 flex items-center justify-between mb-2">
                   <div className="flex items-center gap-1.5">
                     <Wallet className="h-4 w-4 text-sky-600" />
                     <span className="text-xs font-bold text-slate-900 dark:text-white">
@@ -896,20 +1015,22 @@ export function MultiCloudOverviewPage() {
                     </span>
                   </div>
                   <span className="text-[11px] font-semibold text-sky-600 dark:text-sky-400">
-                    Top {topAzureBudgets.length} of {activeAzureBudgets.length} budgets
+                    {activeAzureBudgets.length} budgets
                   </span>
                 </div>
 
-                <div className="flex-1 min-h-0 flex flex-col justify-between divide-y divide-slate-200/60 dark:divide-slate-800">
-                  {topAzureBudgets.length > 0 ? (
-                    topAzureBudgets.map((b, idx) => {
+                <div className="flex-1 min-h-0 flex flex-col justify-start divide-y divide-slate-200/60 dark:divide-slate-800 overflow-hidden">
+                  {paginatedAzureBudgets.length > 0 ? (
+                    paginatedAzureBudgets.map((b, idx) => {
                       const isExceeded = b.Status === "Exceeded";
                       const isWarning = b.Status === "Warning";
 
                       return (
                         <div
                           key={idx}
-                          className="py-2 flex items-center justify-between gap-4"
+                          className={`${
+                            paginatedAzureBudgets.length === ITEMS_PER_PAGE ? "flex-1" : "py-2"
+                          } min-h-0 flex items-center justify-between gap-4`}
                         >
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-2">
@@ -980,6 +1101,45 @@ export function MultiCloudOverviewPage() {
                       No Azure budgets found
                     </div>
                   )}
+                </div>
+
+                {/* Pagination Footer */}
+                <div className="shrink-0 pt-2 mt-1 border-t border-slate-200/60 dark:border-slate-800 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
+                  <span>
+                    {activeAzureBudgets.length > 0
+                      ? `Showing ${(pageAzureBudgets - 1) * ITEMS_PER_PAGE + 1}–${Math.min(
+                          pageAzureBudgets * ITEMS_PER_PAGE,
+                          activeAzureBudgets.length
+                        )} of ${activeAzureBudgets.length}`
+                      : "0 of 0"}
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setPageAzureBudgets((p) => Math.max(1, p - 1))}
+                      disabled={pageAzureBudgets <= 1}
+                      className="p-1 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 transition-colors cursor-pointer disabled:cursor-default"
+                      title="Previous Page"
+                    >
+                      <ChevronLeft className="h-3.5 w-3.5" />
+                    </button>
+                    <span className="font-semibold text-slate-700 dark:text-slate-300 px-1">
+                      Page {pageAzureBudgets} of {totalPagesAzureBudgets}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setPageAzureBudgets((p) =>
+                          Math.min(totalPagesAzureBudgets, p + 1)
+                        )
+                      }
+                      disabled={pageAzureBudgets >= totalPagesAzureBudgets}
+                      className="p-1 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 transition-colors cursor-pointer disabled:cursor-default"
+                      title="Next Page"
+                    >
+                      <ChevronRight className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
