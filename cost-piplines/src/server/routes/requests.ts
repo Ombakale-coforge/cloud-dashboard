@@ -122,11 +122,28 @@ router.post('/', async (req: Request, res: Response) => {
     }
 
     let submittedByUserId: number | null = null;
+    const submitterDisplayName = (body.submitterName || submitterEmail.split('@')[0].replace(/[._-]/g, ' ')).trim();
     const existingUser = await prisma.user.findUnique({
       where: { email: submitterEmail },
     });
     if (existingUser) {
       submittedByUserId = existingUser.id;
+    } else {
+      const createdSsoUser = await prisma.user.create({
+        data: {
+          name: submitterDisplayName,
+          email: submitterEmail,
+          passwordHash: 'SSO_MANAGED_AZURE_AD',
+          passwordAlgo: 'sso',
+          department: (body.division || 'Digital Engineering').trim(),
+          role: 'basic',
+          provider: 'azure-ad',
+          lastLoginAt: new Date(),
+        },
+      }).catch(() => null);
+      if (createdSsoUser) {
+        submittedByUserId = createdSsoUser.id;
+      }
     }
 
     // Parse environments

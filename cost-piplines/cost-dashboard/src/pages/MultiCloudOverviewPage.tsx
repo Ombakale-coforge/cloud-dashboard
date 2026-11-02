@@ -265,9 +265,10 @@ export function MultiCloudOverviewPage() {
     ? `${awsBasePath}/unbudgeted_accounts.csv?month=${encodeURIComponent(awsLatestMonth)}`
     : `${awsBasePath}/unbudgeted_accounts.csv`;
   const { data: awsUnbudgeted } = useCsv<UnbudgetedAccountRow>(unbudgetedPath);
-  const { data: awsBudgets } = useCsv<BudgetOverviewRow>(
-    `${awsBasePath}/budgets_overview.csv`
-  );
+  const budgetsPath = awsLatestMonth
+    ? `${awsBasePath}/budgets_overview.csv?month=${encodeURIComponent(awsLatestMonth)}`
+    : `${awsBasePath}/budgets_overview.csv`;
+  const { data: awsBudgets } = useCsv<BudgetOverviewRow>(budgetsPath);
 
   const awsListRef = useRef<HTMLDivElement | null>(null);
   const azureListRef = useRef<HTMLDivElement | null>(null);

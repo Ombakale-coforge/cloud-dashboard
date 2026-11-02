@@ -1,8 +1,8 @@
 import { useMemo } from "react";
 import { Card } from "@/components/ui/card";
 import { useCsv } from "@/lib/useCsv";
-import type { MomChange } from "@/lib/types";
-import { ArrowUpRight, ArrowDownRight, DollarSign, Calendar, TrendingUp } from "lucide-react";
+import type { MomChange, BudgetOverviewRow } from "@/lib/types";
+import { ArrowUpRight, ArrowDownRight, DollarSign, Calendar, TrendingUp, Wallet } from "lucide-react";
 
 const fmt = (n: number) =>
     `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -14,12 +14,21 @@ interface KpiCardsProps {
 
 export function KpiCards({ selectedMonth, basePath = "/data" }: KpiCardsProps) {
   const { data: mom } = useCsv<MomChange>(`${basePath}/mom_change.csv`);
+  const { data: budgets } = useCsv<BudgetOverviewRow>(`${basePath}/budgets_overview.csv`);
 
     const activeRow = useMemo(() => {
         if (!mom || mom.length === 0) return null;
         if (!selectedMonth) return mom[mom.length - 1];
         return mom.find((x) => x && x.Month === selectedMonth) || mom[mom.length - 1];
     }, [mom, selectedMonth]);
+
+    const totalBudget = useMemo(() => {
+        if (!budgets || budgets.length === 0) return 0;
+        return budgets.reduce(
+            (sum, b) => sum + Number(b?.Limit ?? b?.["Budget Limit"] ?? 0),
+            0
+        );
+    }, [budgets]);
 
     const currentTotal = Number(activeRow?.["Total Cost"]) || 0;
     const prevTotal = Number(activeRow?.["Previous Month Cost"]) || 0;
@@ -38,7 +47,7 @@ export function KpiCards({ selectedMonth, basePath = "/data" }: KpiCardsProps) {
     };
 
     return (
-        <div className="grid grid-cols-1 gap-5 md:grid-cols-3">
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
             {/* Current Month Cost */}
             <Card className="border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 rounded-xl shadow-xs transition-all hover:border-slate-300">
                 <div className="flex items-center justify-between">
@@ -51,6 +60,26 @@ export function KpiCards({ selectedMonth, basePath = "/data" }: KpiCardsProps) {
                     </div>
                     <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 dark:bg-indigo-950/50 dark:text-indigo-400">
                         <DollarSign className="h-5 w-5" />
+                    </div>
+                </div>
+            </Card>
+
+            {/* Total Budget */}
+            <Card className="border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 rounded-xl shadow-xs transition-all hover:border-slate-300">
+                <div className="flex items-center justify-between">
+                    <div className="space-y-1">
+                        <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                            TOTAL BUDGET
+                        </p>
+                        <h3 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight">
+                            {fmt(totalBudget)}
+                        </h3>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">
+                            {budgets && budgets.length > 0 ? `Across ${budgets.length} active budgets` : "Configured monthly limit"}
+                        </p>
+                    </div>
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-violet-50 text-violet-600 dark:bg-violet-950/50 dark:text-violet-400">
+                        <Wallet className="h-5 w-5" />
                     </div>
                 </div>
             </Card>

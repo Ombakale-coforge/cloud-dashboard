@@ -1,26 +1,22 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useAuth, ADMIN_CREDENTIALS } from "@/lib/auth";
+import { useAuth } from "@/lib/auth";
 import {
-  Shield,
-  KeyRound,
-  User,
+  ShieldCheck,
   ArrowRight,
   Cloud,
-  Lock,
-  Mail,
-  UserPlus,
   AlertCircle,
-  Building,
-  LogIn,
-  CheckCircle2,
+  Lock,
+  Building2,
 } from "lucide-react";
 
 export function LoginPage() {
-  const { user, isAuthenticated, loginAdmin, loginBasic, signupBasic, loginWithAzure, setAuthenticatedUser } = useAuth();
+  const { user, isAuthenticated, loginWithAzure, setAuthenticatedUser } = useAuth();
   const navigate = useNavigate();
+  const [ssoError, setSsoError] = useState<string | null>(null);
+  const [redirecting, setRedirecting] = useState(false);
 
-  // If already logged in, redirect directly to dashboard
+  // If already logged in, redirect directly to appropriate portal
   React.useEffect(() => {
     if (isAuthenticated && user) {
       navigate(user.role === "basic" ? "/newrequest" : "/", { replace: true });
@@ -35,7 +31,7 @@ export function LoginPage() {
 
     if (ssoErrorParam) {
       const decodedError = decodeURIComponent(ssoErrorParam);
-      setBasicError(`Microsoft SSO Error: ${decodedError}`);
+      setSsoError(`Microsoft SSO Error: ${decodedError}`);
       window.history.replaceState({}, document.title, window.location.pathname);
     } else if (ssoUserParam) {
       try {
@@ -45,98 +41,15 @@ export function LoginPage() {
         navigate(ssoUser.role === "admin" ? "/" : "/newrequest", { replace: true });
       } catch (err) {
         console.error("Failed to parse SSO user payload:", err);
-        setBasicError("Failed to complete Single Sign-On session.");
+        setSsoError("Failed to complete Single Sign-On session.");
       }
     }
   }, [setAuthenticatedUser, navigate]);
 
-  // Mobile view panel switcher
-  const [activePanel, setActivePanel] = useState<"admin" | "basic">("admin");
-
-  // Admin form state
-  const [adminEmail, setAdminEmail] = useState(ADMIN_CREDENTIALS.email);
-  const [adminPassword, setAdminPassword] = useState("");
-  const [adminError, setAdminError] = useState<string | null>(null);
-
-  // Basic user mode: "signin" vs "signup"
-  const [basicMode, setBasicMode] = useState<"signin" | "signup">("signin");
-  const [basicEmail, setBasicEmail] = useState("");
-  const [basicPassword, setBasicPassword] = useState("");
-  const [basicName, setBasicName] = useState("");
-  const [basicDepartment, setBasicDepartment] = useState("Digital Engineering");
-  const [basicError, setBasicError] = useState<string | null>(null);
-  const [basicSuccessMsg, setBasicSuccessMsg] = useState<string | null>(null);
-
-  // Loading state
-  const [loading, setLoading] = useState<string | null>(null);
-
-  // 1. Handle Admin Login
-  const handleAdminSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setAdminError(null);
-    setLoading("admin");
-
-    try {
-      const res = await loginAdmin(adminPassword, adminEmail);
-      if (res.success) {
-        navigate("/");
-      } else {
-        setAdminError(res.error || "Authentication failed.");
-      }
-    } finally {
-      setLoading(null);
-    }
-  };
-
-  // 2. Handle Basic Login (Existing User)
-  const handleBasicSignIn = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setBasicError(null);
-    setBasicSuccessMsg(null);
-    setLoading("basic-signin");
-
-    try {
-      const res = await loginBasic(basicEmail, basicPassword);
-      if (res.success) {
-        if (res.user?.role === "admin") {
-          navigate("/");
-        } else {
-          navigate("/newrequest");
-        }
-      } else {
-        if (res.isNewUser) {
-          setBasicMode("signup");
-          setBasicSuccessMsg("No account found for this email. Switched to Sign Up so you can register!");
-        } else {
-          setBasicError(res.error || "Invalid login credentials.");
-        }
-      }
-    } catch (err: any) {
-      setBasicError(err.message || "An unexpected error occurred.");
-    } finally {
-      setLoading(null);
-    }
-  };
-
-  // 3. Handle Basic Sign Up (1st-Time User)
-  const handleBasicSignUp = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setBasicError(null);
-    setBasicSuccessMsg(null);
-    setLoading("basic-signup");
-
-    try {
-      const res = await signupBasic(basicName, basicEmail, basicPassword, basicDepartment);
-      if (res.success) {
-        navigate("/newrequest");
-      } else {
-        setBasicError(res.error || "Sign up failed. Please try again.");
-      }
-    } catch (err: any) {
-      setBasicError(err.message || "An unexpected error occurred.");
-    } finally {
-      setLoading(null);
-    }
+  const handleSsoSignIn = () => {
+    setSsoError(null);
+    setRedirecting(true);
+    loginWithAzure();
   };
 
   return (
@@ -147,385 +60,92 @@ export function LoginPage() {
       <div className="absolute -bottom-40 left-1/3 w-96 h-96 bg-blue-600/15 rounded-full blur-3xl pointer-events-none" />
 
       {/* Main Container */}
-      <div className="relative z-10 w-full max-w-5xl mx-auto py-6">
-        {/* Header */}
-        <div className="flex items-center justify-center gap-3 mb-8 text-center">
-          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-tr from-indigo-600 to-violet-500 border border-indigo-400/30 shadow-lg shadow-indigo-500/20">
-            <Cloud className="h-6 w-6 text-white" />
+      <div className="relative z-10 w-full max-w-md mx-auto py-8">
+        {/* Brand Header */}
+        <div className="flex flex-col items-center text-center mb-8">
+          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-tr from-indigo-600 to-violet-500 border border-indigo-400/30 shadow-lg shadow-indigo-500/25 mb-4">
+            <Cloud className="h-7 w-7 text-white" />
           </div>
-          <div className="text-left">
-            <h1 className="text-2xl font-bold tracking-tight text-white">Cloud Cost Intelligence</h1>
-            <p className="text-xs text-slate-400">Enterprise Multi-Cloud Portal</p>
-          </div>
+          <h1 className="text-2xl font-bold tracking-tight text-white">
+            Cloud Cost Intelligence
+          </h1>
+          <p className="text-xs text-slate-400 mt-1">
+            Enterprise Multi-Cloud Governance &amp; FinOps Portal
+          </p>
         </div>
 
-        {/* Mobile Panel Switcher */}
-        <div className="lg:hidden flex items-center justify-center mb-6">
-          <div className="inline-flex rounded-xl bg-slate-800/90 p-1 border border-slate-700">
-            <button
-              type="button"
-              onClick={() => setActivePanel("admin")}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
-                activePanel === "admin"
-                  ? "bg-indigo-600 text-white shadow-md"
-                  : "text-slate-400 hover:text-white"
-              }`}
-            >
-              <Shield className="w-4 h-4" />
-              Admin Portal
-            </button>
-            <button
-              type="button"
-              onClick={() => setActivePanel("basic")}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
-                activePanel === "basic"
-                  ? "bg-indigo-600 text-white shadow-md"
-                  : "text-slate-400 hover:text-white"
-              }`}
-            >
-              <User className="w-4 h-4" />
-              Requester Portal
-            </button>
-          </div>
-        </div>
-
-        {/* Enterprise Azure SSO Quick Sign-In */}
-        <div className="mb-8 max-w-2xl mx-auto w-full">
-          <div className="rounded-2xl border border-indigo-500/30 bg-slate-900/90 p-4 sm:p-5 shadow-2xl shadow-indigo-950/40 backdrop-blur-xl flex flex-col sm:flex-row items-center justify-between gap-4 ring-1 ring-indigo-500/20">
-            <div className="flex items-center gap-3.5 text-left w-full sm:w-auto">
-              <div className="w-11 h-11 rounded-xl bg-slate-800/90 border border-slate-700/80 flex items-center justify-center shrink-0 shadow-inner">
-                <svg className="w-5 h-5" viewBox="0 0 21 21">
-                  <rect x="1" y="1" width="9" height="9" fill="#f25022" />
-                  <rect x="11" y="1" width="9" height="9" fill="#7fba00" />
-                  <rect x="1" y="11" width="9" height="9" fill="#00a4ef" />
-                  <rect x="11" y="11" width="9" height="9" fill="#ffb900" />
-                </svg>
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <h3 className="text-sm font-bold text-white">Coforge Single Sign-On</h3>
-                  <span className="text-[10px] font-semibold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 rounded-md px-1.5 py-0.5">
-                    Recommended
-                  </span>
-                </div>
-                <p className="text-xs text-slate-400">
-                  Sign in instantly using your official Microsoft work account
-                </p>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={loginWithAzure}
-              className="w-full sm:w-auto flex items-center justify-center gap-2.5 py-2.5 px-5 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white text-xs font-bold shadow-lg shadow-indigo-600/30 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0 cursor-pointer"
-            >
-              <svg className="w-4 h-4" viewBox="0 0 21 21">
+        {/* SSO Login Card */}
+        <div className="rounded-3xl border border-indigo-500/30 bg-slate-900/85 p-7 sm:p-8 shadow-2xl shadow-indigo-950/50 backdrop-blur-xl ring-1 ring-indigo-500/20">
+          <div className="flex items-center gap-3.5 mb-6">
+            <div className="w-12 h-12 rounded-2xl bg-slate-800/90 border border-slate-700/80 flex items-center justify-center shrink-0 shadow-inner">
+              <svg className="w-6 h-6" viewBox="0 0 21 21">
                 <rect x="1" y="1" width="9" height="9" fill="#f25022" />
                 <rect x="11" y="1" width="9" height="9" fill="#7fba00" />
                 <rect x="1" y="11" width="9" height="9" fill="#00a4ef" />
                 <rect x="11" y="11" width="9" height="9" fill="#ffb900" />
               </svg>
-              <span>Sign in with Microsoft</span>
-              <ArrowRight className="w-3.5 h-3.5" />
-            </button>
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-lg font-bold text-white">Coforge Single Sign-On</h2>
+              </div>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Authenticate with your Microsoft Entra ID account
+              </p>
+            </div>
           </div>
 
-          <div className="flex items-center my-6 gap-3">
-            <div className="flex-1 h-px bg-slate-800" />
-            <span className="text-[11px] font-medium uppercase tracking-wider text-slate-500">
-              or sign in with credentials
-            </span>
-            <div className="flex-1 h-px bg-slate-800" />
+          {/* SSO Error Alert */}
+          {ssoError && (
+            <div className="mb-5 p-3.5 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs flex items-start gap-2.5">
+              <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+              <span>{ssoError}</span>
+            </div>
+          )}
+
+          {/* Primary SSO Button */}
+          <button
+            type="button"
+            onClick={handleSsoSignIn}
+            disabled={redirecting}
+            className="w-full flex items-center justify-center gap-3 py-3.5 px-5 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white text-sm font-bold shadow-lg shadow-indigo-600/30 transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-60 cursor-pointer"
+          >
+            <svg className="w-4 h-4 shrink-0" viewBox="0 0 21 21">
+              <rect x="1" y="1" width="9" height="9" fill="#f25022" />
+              <rect x="11" y="1" width="9" height="9" fill="#7fba00" />
+              <rect x="1" y="11" width="9" height="9" fill="#00a4ef" />
+              <rect x="11" y="11" width="9" height="9" fill="#ffb900" />
+            </svg>
+            <span>{redirecting ? "Redirecting to Microsoft..." : "Sign in with Microsoft"}</span>
+            <ArrowRight className="w-4 h-4" />
+          </button>
+
+          {/* Role Routing Info */}
+          <div className="mt-6 pt-5 border-t border-slate-800/80 space-y-2.5 text-xs text-slate-400">
+            <div className="flex items-start gap-2.5">
+              <ShieldCheck className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
+              <span>
+                <strong className="text-slate-200">Automatic Role Detection:</strong>{" "}
+                Authorized administrators are directed to the FinOps Command Center; requesters are directed to the Account Request Portal.
+              </span>
+            </div>
+            <div className="flex items-start gap-2.5">
+              <Building2 className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
+              <span>
+                <strong className="text-slate-200">Verified Identity:</strong>{" "}
+                All account requests and audit trails are automatically linked to your corporate `@coforge.com` profile.
+              </span>
+            </div>
           </div>
         </div>
 
-        {/* Dual Panel Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-stretch w-full">
-          
-          {/* ════════════════════ PANEL 1: ADMIN LOGIN ════════════════════ */}
-          <div
-            className={`rounded-3xl border transition-all duration-300 flex-col justify-between p-7 sm:p-8 backdrop-blur-xl relative ${
-              activePanel === "admin" ? "flex" : "hidden lg:flex"
-            } bg-slate-900/80 border-indigo-500/40 shadow-2xl shadow-indigo-950/50 ring-1 ring-indigo-500/20`}
-          >
-            <div>
-              <div className="flex items-center gap-3 mb-6">
-                <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
-                  <KeyRound className="w-5 h-5" />
-                </div>
-                <div>
-                  <h2 className="text-xl font-bold text-white">Admin Command Center</h2>
-                  <p className="text-xs text-slate-400">Authorized personnel login</p>
-                </div>
-              </div>
-
-              {/* Error Alert */}
-              {adminError && (
-                <div className="mb-5 p-3 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs flex items-start gap-2.5">
-                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-                  <span>{adminError}</span>
-                </div>
-              )}
-
-              {/* Admin Form */}
-              <form onSubmit={handleAdminSubmit} className="space-y-4">
-                <div>
-                  <label className="block text-[11px] font-medium text-slate-300 mb-1.5">
-                    Admin Email
-                  </label>
-                  <div className="relative">
-                    <Mail className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
-                    <input
-                      type="email"
-                      value={adminEmail}
-                      onChange={(e) => setAdminEmail(e.target.value)}
-                      required
-                      placeholder="dashboard-admin@coforge.com"
-                      className="w-full pl-9 pr-3 py-2.5 bg-slate-800/80 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-medium text-slate-300 mb-1.5">
-                    Password
-                  </label>
-                  <div className="relative">
-                    <Lock className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
-                    <input
-                      type="password"
-                      value={adminPassword}
-                      onChange={(e) => setAdminPassword(e.target.value)}
-                      required
-                      placeholder="••••••••"
-                      className="w-full pl-9 pr-3 py-2.5 bg-slate-800/80 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    />
-                  </div>
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={loading !== null}
-                  className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-lg shadow-indigo-700/30 transition-all disabled:opacity-50 mt-4 cursor-pointer"
-                >
-                  <span>{loading === "admin" ? "Logging in..." : "Login"}</span>
-                </button>
-              </form>
-            </div>
-          </div>
-
-          {/* ════════════════════ PANEL 2: REQUESTER / BASIC ACCESS ════════════════════ */}
-          <div
-            className={`rounded-3xl border transition-all duration-300 flex-col justify-between p-7 sm:p-8 backdrop-blur-xl relative ${
-              activePanel === "basic" ? "flex" : "hidden lg:flex"
-            } bg-slate-900/80 border-emerald-500/40 shadow-2xl shadow-emerald-950/40 ring-1 ring-emerald-500/20`}
-          >
-            <div>
-              <div className="flex items-center gap-3 mb-5">
-                <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
-                  <User className="w-5 h-5" />
-                </div>
-                <div>
-                  <h2 className="text-xl font-bold text-white">Requester Workspace</h2>
-                  <p className="text-xs text-slate-400">Submit and track account requests</p>
-                </div>
-              </div>
-
-              {/* Sign In vs Sign Up Tab Header */}
-              <div className="flex rounded-xl bg-slate-800/80 p-1 border border-slate-700/80 mb-5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setBasicMode("signin");
-                    setBasicError(null);
-                    setBasicSuccessMsg(null);
-                  }}
-                  className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
-                    basicMode === "signin"
-                      ? "bg-emerald-600 text-white shadow-sm"
-                      : "text-slate-400 hover:text-white"
-                  }`}
-                >
-                  <LogIn className="w-3.5 h-3.5" />
-                  <span>Sign In</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setBasicMode("signup");
-                    setBasicError(null);
-                    setBasicSuccessMsg(null);
-                  }}
-                  className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
-                    basicMode === "signup"
-                      ? "bg-emerald-600 text-white shadow-sm"
-                      : "text-slate-400 hover:text-white"
-                  }`}
-                >
-                  <UserPlus className="w-3.5 h-3.5" />
-                  <span>1st Time User (Sign Up)</span>
-                </button>
-              </div>
-
-              {/* Alerts */}
-              {basicError && (
-                <div className="mb-4 p-3 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs flex items-start gap-2.5">
-                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-                  <div>
-                    <span>{basicError}</span>
-                    {basicError.includes("sign up") && basicMode === "signin" && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setBasicMode("signup");
-                          setBasicError(null);
-                        }}
-                        className="block mt-1 text-emerald-400 font-semibold underline hover:text-emerald-300 cursor-pointer"
-                      >
-                        Click here to Sign Up with this email
-                      </button>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {basicSuccessMsg && (
-                <div className="mb-4 p-3 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs flex items-start gap-2.5">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                  <span>{basicSuccessMsg}</span>
-                </div>
-              )}
-
-              {/* MODE 1: SIGN IN FORM */}
-              {basicMode === "signin" ? (
-                <form onSubmit={handleBasicSignIn} className="space-y-3.5">
-                  <div>
-                    <label className="block text-[11px] font-medium text-slate-300 mb-1">
-                      Email Address
-                    </label>
-                    <div className="relative">
-                      <Mail className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
-                      <input
-                        type="email"
-                        value={basicEmail}
-                        onChange={(e) => setBasicEmail(e.target.value)}
-                        required
-                        placeholder="yourname@coforge.com"
-                        className="w-full pl-9 pr-3 py-2 bg-slate-800/70 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-medium text-slate-300 mb-1">
-                      Password
-                    </label>
-                    <div className="relative">
-                      <Lock className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
-                      <input
-                        type="password"
-                        value={basicPassword}
-                        onChange={(e) => setBasicPassword(e.target.value)}
-                        required
-                        placeholder="••••••••"
-                        className="w-full pl-9 pr-3 py-2 bg-slate-800/70 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                      />
-                    </div>
-                  </div>
-
-                  <button
-                    type="submit"
-                    disabled={loading !== null}
-                    className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-xs font-semibold text-white shadow-md transition-all disabled:opacity-50 mt-4 cursor-pointer"
-                  >
-                    <span>{loading === "basic-signin" ? "Signing In..." : "Sign In"}</span>
-                  </button>
-                </form>
-              ) : (
-                /* MODE 2: SIGN UP FORM (1ST TIME USER) */
-                <form onSubmit={handleBasicSignUp} className="space-y-3">
-                  <div>
-                    <label className="block text-[11px] font-medium text-slate-300 mb-1">
-                      Full Name
-                    </label>
-                    <div className="relative">
-                      <User className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
-                      <input
-                        type="text"
-                        value={basicName}
-                        onChange={(e) => setBasicName(e.target.value)}
-                        placeholder="e.g. John Doe"
-                        className="w-full pl-9 pr-3 py-2 bg-slate-800/70 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-medium text-slate-300 mb-1">
-                      Work Email <span className="text-rose-400">*</span>
-                    </label>
-                    <div className="relative">
-                      <Mail className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
-                      <input
-                        type="email"
-                        value={basicEmail}
-                        onChange={(e) => setBasicEmail(e.target.value)}
-                        required
-                        placeholder="john.doe@coforge.com"
-                        className="w-full pl-9 pr-3 py-2 bg-slate-800/70 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-medium text-slate-300 mb-1">
-                      Create Password <span className="text-rose-400">*</span>
-                    </label>
-                    <div className="relative">
-                      <Lock className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
-                      <input
-                        type="password"
-                        value={basicPassword}
-                        onChange={(e) => setBasicPassword(e.target.value)}
-                        required
-                        placeholder="••••••••"
-                        className="w-full pl-9 pr-3 py-2 bg-slate-800/70 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-medium text-slate-300 mb-1">
-                      Department / Practice
-                    </label>
-                    <div className="relative">
-                      <Building className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
-                      <input
-                        type="text"
-                        value={basicDepartment}
-                        onChange={(e) => setBasicDepartment(e.target.value)}
-                        placeholder="e.g. Cloud & Digital Engineering"
-                        className="w-full pl-9 pr-3 py-2 bg-slate-800/70 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                      />
-                    </div>
-                  </div>
-
-                  <button
-                    type="submit"
-                    disabled={loading !== null}
-                    className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-md transition-all disabled:opacity-50 mt-2 cursor-pointer"
-                  >
-                    <ArrowRight className="w-4 h-4" />
-                    <span>{loading === "basic-signup" ? "Creating Account..." : "Sign Up"}</span>
-                  </button>
-                </form>
-              )}
-            </div>
-          </div>
-
+        {/* Footer Security Badge */}
+        <div className="mt-6 flex items-center justify-center gap-1.5 text-[11px] text-slate-500">
+          <Lock className="w-3.5 h-3.5 text-slate-500" />
+          <span>Protected by Microsoft Entra ID (Azure AD) OAuth 2.0</span>
         </div>
       </div>
     </div>
   );
 }
+

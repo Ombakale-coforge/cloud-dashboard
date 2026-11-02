@@ -135,16 +135,51 @@ export function LinkedAccountsPage() {
     setLoading(true);
     setError(null);
     const monthQuery = selectedMonth ? `&month=${encodeURIComponent(selectedMonth)}` : "";
-    fetch(`/api/aws/linked-accounts?account=${encodeURIComponent(selectedAwsAccount)}${monthQuery}`)
-      .then(async (res) => {
-        if (!res.ok) {
-          const errData = await res.json().catch(() => ({}));
-          throw new Error(errData.message || `Failed to fetch accounts (HTTP ${res.status})`);
+    Promise.all([
+      fetch(`/api/aws/linked-accounts?account=${encodeURIComponent(selectedAwsAccount)}${monthQuery}`).then(
+        async (res) => {
+          if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            throw new Error(errData.message || `Failed to fetch accounts (HTTP ${res.status})`);
+          }
+          return res.json();
         }
-        return res.json();
-      })
-      .then((json: ApiResponse) => {
-        setData(json);
+      ),
+      fetch(`/api/aws/dataset/budgets_overview?account=${encodeURIComponent(selectedAwsAccount)}`)
+        .then((r) => (r.ok ? r.json() : []))
+        .catch(() => []),
+      fetch(`/api/aws/dataset/governance_summary?account=${encodeURIComponent(selectedAwsAccount)}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null),
+    ])
+      .then(([json, budgetsList, govSummary]: [ApiResponse, any[], any]) => {
+        const govItem = Array.isArray(govSummary) ? govSummary[0] : govSummary;
+        const hasAnyOrgBudgets =
+          Array.isArray(budgetsList) &&
+          budgetsList.length > 0 &&
+          (govItem ? Number(govItem.accountsWithBudget ?? 1) > 0 : true);
+
+        const normalizedAccounts = (json.accounts || []).map((acc) => {
+          const isActive = acc.status?.toUpperCase() === "ACTIVE";
+          const hasBudget = isActive && hasAnyOrgBudgets && acc.hasBudget;
+          return {
+            ...acc,
+            hasBudget,
+            budgetStatus: !isActive ? "Closed" : hasBudget ? "Budgeted" : "Unbudgeted",
+          };
+        });
+
+        const activeList = normalizedAccounts.filter((a) => a.status?.toUpperCase() === "ACTIVE");
+        const budgetedCount = activeList.filter((a) => a.hasBudget).length;
+        const unbudgetedCount = activeList.filter((a) => !a.hasBudget).length;
+
+        setData({
+          ...json,
+          accounts: normalizedAccounts,
+          activeAccountsCount: activeList.length,
+          budgetedCount,
+          unbudgetedCount,
+        });
         setLoading(false);
       })
       .catch((err: any) => {
@@ -183,9 +218,9 @@ export function LinkedAccountsPage() {
     }
 
     if (budgetFilter === "BUDGETED") {
-      list = list.filter((a) => a.hasBudget);
+      list = list.filter((a) => a.hasBudget && a.status.toUpperCase() === "ACTIVE");
     } else if (budgetFilter === "UNBUDGETED") {
-      list = list.filter((a) => !a.hasBudget);
+      list = list.filter((a) => !a.hasBudget && (statusFilter !== "ALL" || a.status.toUpperCase() === "ACTIVE"));
     }
 
     return list;
@@ -339,7 +374,7 @@ export function LinkedAccountsPage() {
                   </p>
                   <h3 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight">
                     {data.activeAccountsCount > 0
-                      ? `${((data.budgetedCount / data.activeAccountsCount) * 100).toFixed(1)}%`
+                      ? `${Math.min(100, (data.budgetedCount / data.activeAccountsCount) * 100).toFixed(1)}%`
                       : "0%"}
                   </h3>
                   <div className="flex items-center gap-2 text-xs text-muted-foreground pt-0.5">
@@ -627,7 +662,14 @@ export function LinkedAccountsPage() {
 
                         {/* Budget Status */}
                         <TableCell className="py-3 px-4">
-                          {acc.hasBudget ? (
+                          {acc.status.toUpperCase() !== "ACTIVE" ? (
+                            <Badge
+                              variant="outline"
+                              className="bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 border-slate-300 dark:border-slate-700 text-[10px] font-semibold"
+                            >
+                              Closed
+                            </Badge>
+                          ) : acc.hasBudget ? (
                             <Badge
                               variant="outline"
                               className="bg-sky-50 text-sky-700 dark:bg-sky-950/50 dark:text-sky-300 border-sky-300 dark:border-sky-800 text-[10px] font-semibold"

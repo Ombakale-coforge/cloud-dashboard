@@ -434,17 +434,155 @@ router.get('/dataset/:filename', async (req: Request, res: Response) => {
           where: { reportRunId },
           orderBy: { id: 'asc' },
         });
-        const mapped = records.map((r) => ({
-          'Budget Name': r.budgetName,
-          'Budget Limit': Number(r.limitAmount),
-          'Limit': Number(r.limitAmount),
-          'Current Spend': Number(r.currentUsed),
-          'Current Used': Number(r.currentUsed),
-          'Forecasted Spend': r.forecastedSpend !== null ? Number(r.forecastedSpend) : '',
-          'Current vs Budget %': Number(r.currentVsBudgetPercent),
-          'Threshold Status': r.thresholdStatus,
-          'Health Status': r.healthStatus,
-        }));
+
+        const latestMonth = run.currentMonth || '';
+        if (targetMonth && targetMonth.match(/^\d{4}-\d{2}$/) && targetMonth !== latestMonth) {
+          const [linkedAccounts, targetMonthCosts, latestMonthCosts, monthlyTotals] = await Promise.all([
+            prisma.awsLinkedAccount.findMany({
+              where: { accountId: accountContext.account.id },
+            }),
+            prisma.awsCostByLinkedAccount.findMany({
+              where: { reportRunId, month: targetMonth },
+            }),
+            latestMonth
+              ? prisma.awsCostByLinkedAccount.findMany({
+                  where: { reportRunId, month: latestMonth },
+                })
+              : Promise.resolve([]),
+            prisma.awsMonthlyTotal.findMany({
+              where: { reportRunId },
+            }),
+          ]);
+
+          const targetCostByAccount = new Map<string, number>();
+          for (const c of targetMonthCosts) {
+            targetCostByAccount.set(c.linkedAccount, Number(c.cost));
+          }
+
+          const latestCostByAccount = new Map<string, number>();
+          for (const c of latestMonthCosts) {
+            latestCostByAccount.set(c.linkedAccount, Number(c.cost));
+          }
+
+          const targetTotalRec = monthlyTotals.find((m) => m.month === targetMonth);
+          const latestTotalRec = monthlyTotals.find((m) => m.month === latestMonth);
+          const targetTotal = targetTotalRec ? Number(targetTotalRec.totalCost) : 0;
+          const latestTotal = latestTotalRec ? Number(latestTotalRec.totalCost) : 0;
+          const orgMonthRatio = latestTotal > 0 ? targetTotal / latestTotal : 1;
+
+          const metaTokens = new Set([
+            'csa', 'dap', 'gbl', 'ind', 'us', 'uk', 'eu', 'apac', 'bfs', 'ins', 'tvl', 'oth',
+            'prod', 'prd', 'dev', 'uat', 'poc', 'np', 'nonprod', 'test', 'qa', 'stg', 'dr', 'aws',
+          ]);
+          const normalize = (s: string) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+          const getTokens = (s: string) =>
+            String(s || '').toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length > 0);
+          const getCore = (s: string) => {
+            const tokens = getTokens(s);
+            const core = tokens.filter((t) => !metaTokens.has(t));
+            return (core.length > 0 ? core : tokens).join('');
+          };
+
+          const mappedForMonth = records.map((r) => {
+            const bNameNorm = normalize(r.budgetName);
+            const bTokens = getTokens(r.budgetName);
+            const bSorted = [...bTokens].sort().join('|');
+            const bCore = getCore(r.budgetName);
+            const latestBudgetUsed = Number(r.currentUsed);
+            const limit = Number(r.limitAmount);
+
+            // 1. Direct normalized or ID match, or exact sorted tokens match (e.g. CSA-Backup-PROD <-> Backup-PROD-CSA)
+            let matchedAcc = linkedAccounts.find((la) => {
+              const accNorm = normalize(la.name || '');
+              const accTokens = getTokens(la.name || '');
+              return (
+                (accNorm.length > 0 &&
+                  (accNorm === bNameNorm ||
+                    accNorm.includes(bNameNorm) ||
+                    bNameNorm.includes(accNorm) ||
+                    bNameNorm.includes(la.linkedAccountId))) ||
+                (accTokens.length > 0 && [...accTokens].sort().join('|') === bSorted)
+              );
+            });
+
+            // 2. Core workload match (e.g. CSA - MobileKotlin1-PoC <-> MobileKotlin1-PoC-CSA)
+            if (!matchedAcc && bCore.length >= 3) {
+              const candidates = linkedAccounts.filter((la) => {
+                const aCore = getCore(la.name || '');
+                return (
+                  aCore.length >= 3 &&
+                  (aCore === bCore ||
+                    (aCore.length >= 4 && bCore.length >= 4 && (aCore.includes(bCore) || bCore.includes(aCore))))
+                );
+              });
+              if (candidates.length > 0) {
+                matchedAcc = candidates.sort((a, b) => {
+                  const aShared = bTokens.filter((t) => getTokens(a.name || '').includes(t)).length;
+                  const bShared = bTokens.filter((t) => getTokens(b.name || '').includes(t)).length;
+                  return bShared - aShared;
+                })[0];
+              }
+            }
+
+            // 3. Fallback: match by exact latest-month spend if > 0
+            if (!matchedAcc && latestBudgetUsed > 0) {
+              for (const [accId, latestAccCost] of latestCostByAccount.entries()) {
+                if (Math.abs(latestAccCost - latestBudgetUsed) < 0.05) {
+                  matchedAcc =
+                    linkedAccounts.find((la) => la.linkedAccountId === accId) ||
+                    ({ linkedAccountId: accId, name: accId } as any);
+                  break;
+                }
+              }
+            }
+
+            let used = 0;
+            if (matchedAcc) {
+              used =
+                targetCostByAccount.get(matchedAcc.linkedAccountId) ??
+                targetCostByAccount.get(matchedAcc.name) ??
+                0;
+            } else {
+              // Fallback for shared/group budgets: scale by the month's org spend ratio
+              used = Number((latestBudgetUsed * orgMonthRatio).toFixed(2));
+            }
+
+            used = Number(used.toFixed(2));
+            const pct = limit > 0 ? Number(((used / limit) * 100).toFixed(1)) : 0;
+            const isExceeded = pct >= 100;
+            const thresholdStatus = isExceeded ? 'Exceeded (1)' : pct >= 80 ? 'Warning' : 'OK';
+            const healthStatus = isExceeded ? 'Alert' : 'Healthy';
+
+            return {
+              'Budget Name': r.budgetName,
+              'Budget Limit': limit,
+              'Limit': limit,
+              'Current Spend': used,
+              'Current Used': used,
+              'Forecasted Spend': Number(used.toFixed(2)),
+              'Current vs Budget %': pct,
+              'Threshold Status': thresholdStatus,
+              'Health Status': healthStatus,
+            };
+          });
+
+          mappedForMonth.sort((a, b) => b['Current Used'] - a['Current Used'] || b.Limit - a.Limit);
+          return res.json(mappedForMonth);
+        }
+
+        const mapped = records
+          .map((r) => ({
+            'Budget Name': r.budgetName,
+            'Budget Limit': Number(r.limitAmount),
+            'Limit': Number(r.limitAmount),
+            'Current Spend': Number(r.currentUsed),
+            'Current Used': Number(r.currentUsed),
+            'Forecasted Spend': r.forecastedSpend !== null ? Number(r.forecastedSpend) : '',
+            'Current vs Budget %': Number(r.currentVsBudgetPercent),
+            'Threshold Status': r.thresholdStatus,
+            'Health Status': r.healthStatus,
+          }))
+          .sort((a, b) => b['Current Used'] - a['Current Used'] || b.Limit - a.Limit);
         return res.json(mapped);
       }
 
@@ -645,11 +783,15 @@ router.get('/linked-accounts', async (req: Request, res: Response) => {
       }
     });
 
-    // 3. Fetch unbudgeted accounts
-    const unbudgetedList = await prisma.awsUnbudgetedAccount.findMany({
-      where: { reportRunId },
-    });
+    // 3. Fetch unbudgeted accounts, budgets overview, and governance summary
+    const [unbudgetedList, budgetsList, govSummary] = await Promise.all([
+      prisma.awsUnbudgetedAccount.findMany({ where: { reportRunId } }),
+      prisma.awsBudgetOverview.findMany({ where: { reportRunId } }),
+      prisma.awsGovernanceSummary.findFirst({ where: { reportRunId } }),
+    ]);
     const unbudgetedMap = new Map(unbudgetedList.map((u) => [u.awsAccountId, u]));
+    const hasAnyOrgBudgets = budgetsList.length > 0 && (govSummary ? govSummary.accountsWithBudget > 0 : true);
+    const normalizeStr = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 
     // 4. Fetch variances
     const variances = await prisma.awsAccountCostVariance.findMany({
@@ -674,7 +816,22 @@ router.get('/linked-accounts', async (req: Request, res: Response) => {
       const diff = currentSpend - previousSpend;
       const momChange = previousSpend > 0 ? Number(((diff / previousSpend) * 100).toFixed(1)) : 0;
 
-      const isUnbudgeted = unbudgetedMap.has(cleanId);
+      const accNorm = normalizeStr(name);
+      const matchesBudgetName = budgetsList.some((b) => {
+        const bNorm = normalizeStr(b.budgetName);
+        return (
+          bNorm.includes(cleanId) ||
+          (accNorm.length > 0 && (bNorm === accNorm || bNorm.includes(accNorm) || accNorm.includes(bNorm)))
+        );
+      });
+
+      const isActive = status === 'ACTIVE';
+      const hasBudget =
+        isActive &&
+        hasAnyOrgBudgets &&
+        !unbudgetedMap.has(cleanId) &&
+        (currentSpend > 0 || previousSpend > 0 || matchesBudgetName);
+
       const topCostDriver = unbudgetedMap.get(cleanId)?.topCostDriver || 'Cloud Infrastructure';
       const v = varianceMap.get(cleanId) || varianceMap.get(name);
 
@@ -686,8 +843,8 @@ router.get('/linked-accounts', async (req: Request, res: Response) => {
         currentSpend: Number(currentSpend.toFixed(2)),
         previousSpend: Number(previousSpend.toFixed(2)),
         momChangePercent: momChange,
-        hasBudget: !isUnbudgeted,
-        budgetStatus: isUnbudgeted ? 'Unbudgeted' : 'Budgeted',
+        hasBudget,
+        budgetStatus: !isActive ? 'Closed' : hasBudget ? 'Budgeted' : 'Unbudgeted',
         topCostDriver,
         variance: v ? {
           mean: Number(v.meanMonthlyCost),
@@ -701,6 +858,8 @@ router.get('/linked-accounts', async (req: Request, res: Response) => {
 
     result.sort((a, b) => b.currentSpend - a.currentSpend);
 
+    const activeResults = result.filter((r) => r.status === 'ACTIVE');
+
     return res.json({
       rootAccount: {
         id: account.configId,
@@ -709,10 +868,10 @@ router.get('/linked-accounts', async (req: Request, res: Response) => {
       },
       selectedMonth: targetMonth,
       totalLinkedAccounts: result.length,
-      activeAccountsCount: result.filter((r) => r.status === 'ACTIVE').length,
+      activeAccountsCount: activeResults.length,
       suspendedAccountsCount: result.filter((r) => r.status === 'SUSPENDED').length,
-      budgetedCount: result.filter((r) => r.hasBudget).length,
-      unbudgetedCount: result.filter((r) => !r.hasBudget).length,
+      budgetedCount: activeResults.filter((r) => r.hasBudget).length,
+      unbudgetedCount: activeResults.filter((r) => !r.hasBudget).length,
       totalSpend: Number(result.reduce((sum, r) => sum + r.currentSpend, 0).toFixed(2)),
       accounts: result,
     });
@@ -793,25 +952,45 @@ router.get('/linked-accounts/:linkedAccountId', async (req: Request, res: Respon
     const momChange = previousSpend > 0 ? Number(((diff / previousSpend) * 100).toFixed(1)) : 0;
 
     // 3. Variance & Governance from DB
-    const varianceRec = await prisma.awsAccountCostVariance.findFirst({
-      where: {
-        reportRunId,
-        OR: [
-          { linkedAccount: cleanAccountId },
-          { linkedAccount: accountName },
-        ],
-      },
-    });
+    const [varianceRec, unbudgetedRec, budgetsList, govSummary] = await Promise.all([
+      prisma.awsAccountCostVariance.findFirst({
+        where: {
+          reportRunId,
+          OR: [
+            { linkedAccount: cleanAccountId },
+            { linkedAccount: accountName },
+          ],
+        },
+      }),
+      prisma.awsUnbudgetedAccount.findFirst({
+        where: {
+          reportRunId,
+          OR: [
+            { awsAccountId: cleanAccountId },
+            { accountName },
+          ],
+        },
+      }),
+      prisma.awsBudgetOverview.findMany({ where: { reportRunId } }),
+      prisma.awsGovernanceSummary.findFirst({ where: { reportRunId } }),
+    ]);
 
-    const unbudgetedRec = await prisma.awsUnbudgetedAccount.findFirst({
-      where: {
-        reportRunId,
-        OR: [
-          { awsAccountId: cleanAccountId },
-          { accountName },
-        ],
-      },
+    const normalizeStr = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const accNorm = normalizeStr(accountName);
+    const matchesBudgetName = budgetsList.some((b) => {
+      const bNorm = normalizeStr(b.budgetName);
+      return (
+        bNorm.includes(cleanAccountId) ||
+        (accNorm.length > 0 && (bNorm === accNorm || bNorm.includes(accNorm) || accNorm.includes(bNorm)))
+      );
     });
+    const hasAnyOrgBudgets = budgetsList.length > 0 && (govSummary ? govSummary.accountsWithBudget > 0 : true);
+    const isActiveAcc = status === 'ACTIVE';
+    const accHasBudget =
+      isActiveAcc &&
+      hasAnyOrgBudgets &&
+      !unbudgetedRec &&
+      (currentSpend > 0 || previousSpend > 0 || matchesBudgetName);
 
     // 4. Live AWS Data (with try/catch fallback)
     let liveAwsData: any = {
@@ -961,8 +1140,8 @@ router.get('/linked-accounts/:linkedAccountId', async (req: Request, res: Respon
         volatilityCategory: varianceRec.varianceCategory,
       } : null,
       governance: {
-        hasBudget: !unbudgetedRec,
-        status: unbudgetedRec ? 'Unbudgeted' : 'Budgeted',
+        hasBudget: accHasBudget,
+        status: !isActiveAcc ? 'Closed' : accHasBudget ? 'Budgeted' : 'Unbudgeted',
         topCostDriver: unbudgetedRec?.topCostDriver || (liveAwsData?.services?.[0]?.service) || 'Cloud Infrastructure',
       },
       liveAws: liveAwsData,
