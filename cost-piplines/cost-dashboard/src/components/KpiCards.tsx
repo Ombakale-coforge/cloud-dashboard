@@ -35,17 +35,6 @@ export function KpiCards({ selectedMonth, basePath = "/data" }: KpiCardsProps) {
     const pctChange = Number(activeRow?.["MoM % Change"]) || 0;
     const isUp = pctChange >= 0;
 
-    // Format month name for display
-    const formatMonthName = (mStr: string) => {
-        if (!mStr || typeof mStr !== "string") return "";
-        const parts = mStr.split("-");
-        if (parts.length < 2) return mStr;
-        const [year, month] = parts;
-        const date = new Date(Number(year), Number(month) - 1, 1);
-        if (isNaN(date.getTime())) return mStr;
-        return date.toLocaleString("default", { month: "long" });
-    };
-
     return (
         <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
             {/* Current Month Cost */}
@@ -53,7 +42,7 @@ export function KpiCards({ selectedMonth, basePath = "/data" }: KpiCardsProps) {
                 <div className="flex items-center justify-between">
                     <div className="space-y-1">
                         <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                            ALLOCATION FOR PERIOD ({activeRow && activeRow.Month ? formatMonthName(activeRow.Month) : "Current Month"})
+                            CURRENT MONTH SPEND
                         </p>
                         <h3 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight">{fmt(currentTotal)}</h3>
                         <p className="text-xs text-slate-500 dark:text-slate-400">Total AWS spend, pro-rated</p>
