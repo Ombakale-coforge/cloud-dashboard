@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import nodemailer from 'nodemailer';
+import { ClientSecretCredential } from '@azure/identity';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -20,15 +21,62 @@ function parseCliArgs() {
     awsOnly: args.includes('--aws'),
     azureOnly: args.includes('--azure'),
     dryRun: args.includes('--dry-run') || args.includes('--preview'),
+    smtp: args.includes('--smtp'),
     recipient: '',
   };
 
+  // Deliberately no --from flag: the Graph sender is always SENDER_EMAIL from .env.
   const toArg = args.find((a) => a.startsWith('--to='));
   if (toArg) {
-    flags.recipient = toArg.split('=')[1].trim();
+    flags.recipient = toArg.slice('--to='.length).trim();
   }
 
   return flags;
+}
+
+// ponytail: sendMail with inline attachments is limited to ~3 MB per file; larger PDFs need a Graph upload session.
+async function sendViaGraph(
+  sender: string,
+  recipients: string[],
+  subject: string,
+  html: string,
+  attachments: AttachmentOption[]
+): Promise<void> {
+  const credential = new ClientSecretCredential(
+    process.env.AZURE_TENANT_ID as string,
+    process.env.AZURE_CLIENT_ID as string,
+    process.env.AZURE_CLIENT_SECRET as string
+  );
+  const { token } = await credential.getToken('https://graph.microsoft.com/.default');
+
+  const res = await fetch(
+    `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(sender)}/sendMail`,
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: {
+          subject,
+          body: { contentType: 'HTML', content: html },
+          toRecipients: recipients.map((address) => ({ emailAddress: { address } })),
+          attachments: attachments.map((a) => ({
+            '@odata.type': '#microsoft.graph.fileAttachment',
+            name: a.filename,
+            contentType: 'application/pdf',
+            contentBytes: fs.readFileSync(a.path).toString('base64'),
+          })),
+        },
+        saveToSentItems: true,
+      }),
+    }
+  );
+
+  if (res.status !== 202) {
+    throw new Error(
+      `Graph sendMail failed (${res.status}): ${await res.text()}\n` +
+        '   403 / ErrorAccessDenied usually means Mail.Send is missing or admin consent has not been granted.'
+    );
+  }
 }
 
 async function main() {
@@ -61,20 +109,31 @@ async function main() {
     process.exit(1);
   }
 
+  const recipients = (flags.recipient || process.env.ALERT_EMAIL_TO || process.env.EMAIL_TO || '')
+    .split(',')
+    .map((e) => e.trim())
+    .filter(Boolean);
+
+  const senderEmail = process.env.SENDER_EMAIL?.trim();
+  const useGraph =
+    !flags.smtp &&
+    !!senderEmail &&
+    !!process.env.AZURE_TENANT_ID &&
+    !!process.env.AZURE_CLIENT_ID &&
+    !!process.env.AZURE_CLIENT_SECRET;
+
   const smtpHost = process.env.SMTP_HOST;
   const smtpPort = Number(process.env.SMTP_PORT || '587');
   const smtpSecure = String(process.env.SMTP_SECURE || 'false').toLowerCase() === 'true';
   const smtpUser = process.env.SMTP_USER;
   const rawPass = process.env.SMTP_PASSWORD || process.env.SMTP_PASS || '';
   const smtpPass = rawPass.trim().replace(/\s+/g, '');
-
-  const fromEmail = process.env.ALERT_EMAIL_FROM || process.env.EMAIL_FROM || smtpUser || 'finops@coforge.com';
-  const toEmail = flags.recipient || process.env.ALERT_EMAIL_TO || process.env.EMAIL_TO || process.env.ADMIN_EMAIL;
+  const smtpFrom = process.env.ALERT_EMAIL_FROM || process.env.EMAIL_FROM || smtpUser || 'finops@coforge.com';
 
   console.log(`📦 Found ${attachments.length} report(s) to send:`);
   attachments.forEach((a) => console.log(`   - ${a.filename} (${(fs.statSync(a.path).size / 1024).toFixed(1)} KB)`));
 
-  if (!toEmail) {
+  if (recipients.length === 0) {
     console.error('❌ Recipient email not specified. Set ALERT_EMAIL_TO in .env or pass --to="email@domain.com"');
     process.exit(1);
   }
@@ -98,17 +157,31 @@ async function main() {
     </div>
   `;
 
-  if (flags.dryRun || !smtpHost || !smtpUser) {
-    console.log('\n⚠️ DRY RUN / Missing SMTP credentials in .env');
-    console.log(`   From: ${fromEmail}`);
-    console.log(`   To:   ${toEmail}`);
+  const smtpReady = !!smtpHost && !!smtpUser;
+  const transport = useGraph ? 'Microsoft Graph' : 'SMTP';
+
+  if (flags.dryRun || (!useGraph && !smtpReady)) {
+    console.log(`\n⚠️ ${flags.dryRun ? 'DRY RUN' : 'No email transport configured'} (transport: ${transport})`);
+    console.log(`   From: ${useGraph ? senderEmail : smtpFrom}`);
+    console.log(`   To:   ${recipients.join(', ')}`);
     console.log(`   Subject: ${subject}`);
     console.log(`   Attachments: ${attachments.map((a) => a.filename).join(', ')}`);
-    console.log('💡 To send for real, ensure SMTP_HOST, SMTP_PORT, SMTP_USER, and SMTP_PASSWORD are set in .env.');
+    if (!flags.dryRun) {
+      console.log(
+        '💡 Set SENDER_EMAIL + AZURE_TENANT_ID/CLIENT_ID/CLIENT_SECRET for Microsoft Graph, or SMTP_HOST/SMTP_USER/SMTP_PASSWORD for SMTP.'
+      );
+    }
     process.exit(0);
   }
 
-  console.log(`📧 Sending email via ${smtpHost}:${smtpPort} to ${toEmail}...`);
+  if (useGraph) {
+    console.log(`📧 Sending as ${senderEmail} via Microsoft Graph to ${recipients.join(', ')}...`);
+    await sendViaGraph(senderEmail as string, recipients, subject, htmlBody, attachments);
+    console.log('✅ Email accepted by Microsoft Graph (202). It will appear in the sender\'s Sent Items.');
+    return;
+  }
+
+  console.log(`📧 Sending email via ${smtpHost}:${smtpPort} to ${recipients.join(', ')}...`);
 
   const transporter = nodemailer.createTransport({
     host: smtpHost,
@@ -121,8 +194,8 @@ async function main() {
   });
 
   const info = await transporter.sendMail({
-    from: fromEmail,
-    to: toEmail,
+    from: smtpFrom,
+    to: recipients,
     subject,
     text: textBody,
     html: htmlBody,
