@@ -16,6 +16,7 @@
     "report:azure": "tsx src/azure_cost_report/index.ts",
     "report:azure:pdf": "tsx src/generate_azure_manager_report_pdf.ts",
     "send:report": "tsx src/send_manager_report_email.ts",
+    "report:email:scheduled": "tsx src/cron_manager_report.ts",
     "test:report": "tsx src/azure_cost_report/self-check.ts",
     "alert:azure": "tsx src/alerts/index.ts",
     "test:alerts": "tsx src/alerts/self-check.ts",

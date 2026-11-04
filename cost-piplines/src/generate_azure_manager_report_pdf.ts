@@ -946,6 +946,7 @@ async function main() {
   console.log(`🖨️ Rendering PDF via ${path.basename(browserExe)}...`);
   execFileSync(browserExe, [
     '--headless',
+    '--no-sandbox',
     '--disable-gpu',
     '--no-pdf-header-footer',
     `--print-to-pdf=${outputTarget}`,
