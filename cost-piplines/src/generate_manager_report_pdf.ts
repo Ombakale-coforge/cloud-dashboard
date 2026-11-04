@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { execFileSync } from 'child_process';
+import { execFileSync, execSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import {
@@ -27,6 +27,11 @@ const fmtCurrency = (n: number) =>
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
+
+interface MonthlySpendPoint {
+  month: string;
+  spend: number;
+}
 
 interface OverBudgetRow {
   rank: number;
@@ -62,6 +67,7 @@ interface ReportData {
   activeBudgetCount: number;
   overBudgetCount: number;
   totalOverSpend: number;
+  last6MonthsSpend: MonthlySpendPoint[];
   top5OverBudget: OverBudgetRow[];
   top5MostSpend: TopSpendRow[];
 }
@@ -86,6 +92,14 @@ function getCore(s: string): string {
   const tokens = getTokens(s);
   const core = tokens.filter((t) => !META_TOKENS.has(t));
   return (core.length > 0 ? core : tokens).join('');
+}
+
+function getDisplayAccountName(rawName?: string): string {
+  const name = (rawName || process.env.AWS_ACCOUNT_NAME || '').trim();
+  if (!name || /aws account 1/i.test(name) || /account-1/i.test(name) || /^account 1/i.test(name)) {
+    return 'Coforge Limited (EnterpriseMaster-PROD-GBL)';
+  }
+  return name;
 }
 
 function matchBudgetToAccount(
@@ -150,10 +164,11 @@ async function fetchReportDataFromAwsSdk(): Promise<ReportData> {
   const accessKeyId = process.env.AWS_ACCESS_KEY_ID || '';
   const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY || '';
   const region = process.env.AWS_REGION || 'us-east-1';
-  const payerAccountName =
+  const rawPayerName =
     process.env.AWS_ACCOUNT_NAME ||
     process.env.AWS_ACCOUNT_1_NAME ||
-    'AWS Account 1 (5076-7238-5186)';
+    '507672385186';
+  const payerAccountName = getDisplayAccountName(rawPayerName);
 
   if (!accessKeyId || !secretAccessKey) {
     throw new Error('AWS credentials (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY) not found in .env');
@@ -164,13 +179,15 @@ async function fetchReportDataFromAwsSdk(): Promise<ReportData> {
   const orgClient = new OrganizationsClient({ region, credentials });
   const budgetsClient = new BudgetsClient({ region, credentials });
 
-  const matchId = payerAccountName.match(/\(([^)]+)\)/);
-  const payerAccountId = matchId
-    ? matchId[1].replace(/[^0-9]/g, '')
-    : '507672385186';
+  const matchId = rawPayerName.match(/\(([^)]+)\)/);
+  const parsedDigits = matchId ? matchId[1].replace(/[^0-9]/g, '') : rawPayerName.replace(/[^0-9]/g, '');
+  const payerAccountId =
+    parsedDigits.length === 12
+      ? parsedDigits
+      : (process.env.AWS_PAYER_ACCOUNT_ID || '507672385186');
 
   const today = new Date();
-  const startStr = firstOfMonthStr(today, -2);
+  const startStr = firstOfMonthStr(today, -5);
   const endStr = firstOfMonthStr(today, 1);
 
   console.log('☁️ Fetching live data directly from AWS Cost Explorer, Organizations & Budgets APIs...');
@@ -334,6 +351,11 @@ async function fetchReportDataFromAwsSdk(): Promise<ReportData> {
         : 0,
   }));
 
+  const last6MonthsSpend: MonthlySpendPoint[] = months.slice(-6).map((m) => ({
+    month: m,
+    spend: monthTotals.get(m) || 0,
+  }));
+
   return {
     payerAccountName,
     reportMonth,
@@ -351,6 +373,7 @@ async function fetchReportDataFromAwsSdk(): Promise<ReportData> {
     activeBudgetCount: rawBudgets.length,
     overBudgetCount: strictlyOver.length,
     totalOverSpend,
+    last6MonthsSpend,
     top5OverBudget,
     top5MostSpend,
   };
@@ -382,7 +405,7 @@ async function fetchReportDataFromDb(): Promise<ReportData> {
   const reportRunId = latestRun.id;
   const reportMonth = latestRun.currentMonth || new Date().toISOString().slice(0, 7);
 
-  const [momRows, budgetRows, activeAccounts, linkedAccounts, monthCosts] = await Promise.all([
+  const [momRows, budgetRows, monthlyTotals, linkedAccounts, monthCosts] = await Promise.all([
     prisma.awsMomChange.findMany({
       where: { reportRunId },
       orderBy: { id: 'asc' },
@@ -391,9 +414,9 @@ async function fetchReportDataFromDb(): Promise<ReportData> {
       where: { reportRunId },
       orderBy: { id: 'asc' },
     }),
-    prisma.awsActiveAccount.findMany({
+    prisma.awsMonthlyTotal.findMany({
       where: { reportRunId },
-      orderBy: { currentMonthCost: 'desc' },
+      orderBy: { month: 'asc' },
     }),
     prisma.awsLinkedAccount.findMany({
       where: { accountId: account.id },
@@ -408,10 +431,16 @@ async function fetchReportDataFromDb(): Promise<ReportData> {
     momRows.find((r) => r.month === reportMonth) || momRows[momRows.length - 1];
 
   const currentMonthSpend = Number(
-    currentMomRow?.totalCost ?? latestRun.currentMonthTotal ?? 0
+    currentMomRow?.totalCost ?? 0
   );
   const previousMonthSpend = Number(currentMomRow?.previousMonthCost ?? 0);
   const momPercentChange = Number(currentMomRow?.momPercentChange ?? 0);
+
+  const last6MonthsSpend: MonthlySpendPoint[] = (
+    monthlyTotals.length > 0
+      ? monthlyTotals.map((m) => ({ month: m.month, spend: Number(m.totalCost || 0) }))
+      : momRows.map((m) => ({ month: m.month, spend: Number(m.totalCost || 0) }))
+  ).slice(-6);
 
   const totalBudget = budgetRows.reduce((sum, b) => sum + Number(b.limitAmount || 0), 0);
   const remainingBudget = Math.max(0, totalBudget - currentMonthSpend);
@@ -465,28 +494,17 @@ async function fetchReportDataFromDb(): Promise<ReportData> {
     rank: idx + 1,
   }));
 
-  let topSpendCandidates: { accountName: string; accountId: string; status: string; spend: number }[] = [];
-
-  if (activeAccounts.length > 0) {
-    topSpendCandidates = activeAccounts.map((a) => ({
-      accountName: a.accountName || a.accountId,
-      accountId: a.accountId,
-      status: a.accountStatus || 'ACTIVE',
-      spend: Number(a.currentMonthCost || 0),
-    }));
-  } else if (monthCosts.length > 0) {
-    topSpendCandidates = monthCosts.map((c) => {
-      const found = linkedAccounts.find(
-        (la) => la.linkedAccountId === c.linkedAccount || la.name === c.linkedAccount
-      );
-      return {
-        accountName: found?.name || c.linkedAccount,
-        accountId: found?.linkedAccountId || c.linkedAccount,
-        status: found?.status || 'ACTIVE',
-        spend: Number(c.cost || 0),
-      };
-    });
-  }
+  const topSpendCandidates = monthCosts.map((c) => {
+    const found = linkedAccounts.find(
+      (la) => la.linkedAccountId === c.linkedAccount || la.name === c.linkedAccount
+    );
+    return {
+      accountName: found?.name || c.linkedAccount,
+      accountId: found?.linkedAccountId || c.linkedAccount,
+      status: found?.status || 'ACTIVE',
+      spend: Number(c.cost || 0),
+    };
+  });
 
   topSpendCandidates.sort((a, b) => b.spend - a.spend);
 
@@ -503,7 +521,7 @@ async function fetchReportDataFromDb(): Promise<ReportData> {
   }));
 
   return {
-    payerAccountName: account.name,
+    payerAccountName: getDisplayAccountName(account?.name),
     reportMonth,
     generatedAt: new Date().toLocaleString('en-US', {
       dateStyle: 'long',
@@ -519,6 +537,7 @@ async function fetchReportDataFromDb(): Promise<ReportData> {
     activeBudgetCount: budgetRows.length,
     overBudgetCount: strictlyOver.length,
     totalOverSpend,
+    last6MonthsSpend,
     top5OverBudget,
     top5MostSpend,
   };
@@ -533,9 +552,103 @@ async function fetchReportData(): Promise<ReportData> {
   }
 }
 
+function renderRechartsSpendChart(
+  points: MonthlySpendPoint[],
+  currencySymbol: string = '$',
+  brandColor: string = '#4f46e5',
+  accentColor: string = '#c7d2fe'
+): string {
+  if (!points || points.length === 0) {
+    return `<div style="text-align: center; color: #64748b; padding: 12px;">No historical monthly data available.</div>`;
+  }
+
+  const svgWidth = 640;
+  const svgHeight = 135;
+  const padLeft = 60;
+  const padRight = 20;
+  const padTop = 22;
+  const padBottom = 26;
+
+  const chartW = svgWidth - padLeft - padRight;
+  const chartH = svgHeight - padTop - padBottom;
+
+  const maxVal = Math.max(...points.map((p) => p.spend), 1);
+  const yMax = Math.ceil((maxVal * 1.15) / 100) * 100;
+
+  const avgVal = points.reduce((sum, p) => sum + p.spend, 0) / points.length;
+  const avgY = padTop + chartH - (avgVal / yMax) * chartH;
+
+  const yTicks = [0, yMax * 0.5, yMax];
+
+  const formatShortCurrency = (val: number) => {
+    if (val >= 1000000) return `${currencySymbol}${(val / 1000000).toFixed(1)}M`;
+    if (val >= 1000) return `${currencySymbol}${(val / 1000).toFixed(1)}k`;
+    return `${currencySymbol}${Math.round(val)}`;
+  };
+
+  const formatMonthName = (mStr: string) => {
+    const [y, m] = mStr.split('-');
+    if (!y || !m) return mStr;
+    const d = new Date(Number(y), Number(m) - 1, 1);
+    return d.toLocaleString('en-US', { month: 'short', year: '2-digit' });
+  };
+
+  const slotW = chartW / points.length;
+  const barW = Math.min(42, Math.max(24, slotW * 0.55));
+
+  const gridLines = yTicks
+    .map((tick) => {
+      const y = padTop + chartH - (tick / yMax) * chartH;
+      return `
+        <line x1="${padLeft}" y1="${y}" x2="${padLeft + chartW}" y2="${y}" stroke="#e2e8f0" stroke-dasharray="3 3" stroke-width="1" />
+        <text x="${padLeft - 8}" y="${y + 3.5}" text-anchor="end" font-size="9" fill="#94a3b8" font-family="'Segoe UI', sans-serif">${formatShortCurrency(tick)}</text>
+      `;
+    })
+    .join('');
+
+  const bars = points
+    .map((p, idx) => {
+      const isLatest = idx === points.length - 1;
+      const bH = Math.max(2, (p.spend / yMax) * chartH);
+      const bX = padLeft + idx * slotW + (slotW - barW) / 2;
+      const bY = padTop + chartH - bH;
+      const fillColor = isLatest ? brandColor : accentColor;
+
+      return `
+        <g class="recharts-bar-group">
+          <text x="${bX + barW / 2}" y="${bY - 6}" text-anchor="middle" font-size="9" font-weight="700" fill="${isLatest ? brandColor : '#475569'}" font-family="'Segoe UI', sans-serif">
+            ${formatShortCurrency(p.spend)}
+          </text>
+          <rect x="${bX}" y="${bY}" width="${barW}" height="${bH}" rx="4" ry="4" fill="${fillColor}" />
+          <text x="${bX + barW / 2}" y="${padTop + chartH + 16}" text-anchor="middle" font-size="9.5" font-weight="${isLatest ? '700' : '500'}" fill="${isLatest ? '#0f172a' : '#64748b'}" font-family="'Segoe UI', sans-serif">
+            ${formatMonthName(p.month)}
+          </text>
+        </g>
+      `;
+    })
+    .join('');
+
+  const avgLine = `
+    <line x1="${padLeft}" y1="${avgY}" x2="${padLeft + chartW}" y2="${avgY}" stroke="#f59e0b" stroke-dasharray="4 3" stroke-width="1.2" />
+  `;
+
+  return `
+    <svg viewBox="0 0 ${svgWidth} ${svgHeight}" width="100%" height="${svgHeight}" style="overflow: visible; display: block;">
+      ${gridLines}
+      ${avgLine}
+      <line x1="${padLeft}" y1="${padTop + chartH}" x2="${padLeft + chartW}" y2="${padTop + chartH}" stroke="#cbd5e1" stroke-width="1" />
+      ${bars}
+    </svg>
+  `;
+}
+
 function buildReportHtml(data: ReportData): string {
   const isNetOver = data.netVariance < 0;
   const utilizationBarWidth = Math.min(100, Math.max(0, data.overallUtilizationPct));
+  const avg6MonthSpend =
+    data.last6MonthsSpend && data.last6MonthsSpend.length > 0
+      ? data.last6MonthsSpend.reduce((sum, p) => sum + p.spend, 0) / data.last6MonthsSpend.length
+      : data.currentMonthSpend;
 
   const formatMonthLabel = (m: string) => {
     const [y, mo] = m.split('-');
@@ -782,6 +895,16 @@ function buildReportHtml(data: ReportData): string {
       background: #eef2ff;
       color: #4338ca;
     }
+    .badge-avg {
+      display: inline-block;
+      padding: 3px 8px;
+      border-radius: 6px;
+      font-size: 9.5px;
+      font-weight: 700;
+      background: #fef3c7;
+      color: #b45309;
+      border: 1px solid #fde68a;
+    }
     .footer {
       margin-top: 6px;
       text-align: center;
@@ -795,7 +918,7 @@ function buildReportHtml(data: ReportData): string {
   <div class="header">
     <div>
       <div class="header-title">Cloud Cost Intelligence — Executive Budget &amp; Spend Report</div>
-      <div class="header-subtitle">Account: ${data.payerAccountName}</div>
+      <div class="header-subtitle">Account: ${getDisplayAccountName(data.payerAccountName)}</div>
     </div>
     <div class="header-meta">
       <div class="badge-period">Billing Period: ${formatMonthLabel(data.reportMonth)}</div>
@@ -855,11 +978,27 @@ function buildReportHtml(data: ReportData): string {
     </div>
   </div>
 
-  <!-- Section 2: Top 5 Accounts Over Budget -->
+  <!-- Section 2: 6-Month Spending Trend (Recharts-Style) -->
   <div class="section">
     <div class="section-header">
       <div>
-        <div class="section-title">2. Top 5 Accounts That Are Over Budget</div>
+        <div class="section-title">2. 6-Month Spending Trend</div>
+        <div class="section-subtitle">Monthly spend progression with 6-month historical average</div>
+      </div>
+      <div>
+        <span class="badge-avg">6-Month Avg: ${fmtCurrency(avg6MonthSpend)}/mo</span>
+      </div>
+    </div>
+    <div style="width: 100%; display: flex; justify-content: center; padding: 2px 0;">
+      ${renderRechartsSpendChart(data.last6MonthsSpend, '$', '#4f46e5', '#c7d2fe')}
+    </div>
+  </div>
+
+  <!-- Section 3: Top 5 Accounts Over Budget -->
+  <div class="section">
+    <div class="section-header">
+      <div>
+        <div class="section-title">3. Top 5 Accounts That Are Over Budget</div>
         <div class="section-subtitle">Accounts ranked by dollar spend above their assigned monthly budget limit</div>
       </div>
     </div>
@@ -899,11 +1038,11 @@ function buildReportHtml(data: ReportData): string {
     </table>
   </div>
 
-  <!-- Section 3: Top 5 Accounts with Most Spend -->
+  <!-- Section 4: Top 5 Accounts with Most Spend -->
   <div class="section">
     <div class="section-header">
       <div>
-        <div class="section-title">3. Top 5 Accounts with Most Spend</div>
+        <div class="section-title">4. Top 5 Accounts with Most Spend</div>
         <div class="section-subtitle">Highest-spending linked member accounts in ${formatMonthLabel(data.reportMonth)}</div>
       </div>
     </div>
@@ -944,12 +1083,54 @@ function buildReportHtml(data: ReportData): string {
 </html>`;
 }
 
+function toWindowsPath(filePath: string): string {
+  if (/^[A-Za-z]:[\\/]/.test(filePath) || filePath.startsWith('\\\\')) {
+    return filePath;
+  }
+
+  try {
+    const converted = execSync(`wslpath -w "${filePath.replace(/"/g, '\\"')}"`, {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'ignore'],
+    }).trim();
+    if (converted) return converted;
+  } catch {}
+
+  const mntMatch = filePath.match(/^\/mnt\/([a-zA-Z])\/(.*)$/);
+  if (mntMatch) {
+    const drive = mntMatch[1].toUpperCase();
+    const rest = mntMatch[2].replace(/\//g, '\\');
+    return `${drive}:\\${rest}`;
+  }
+
+  const distro = process.env.WSL_DISTRO_NAME || 'Ubuntu';
+  const winLinuxPath = filePath.replace(/\//g, '\\');
+  return `\\\\wsl.localhost\\${distro}${winLinuxPath}`;
+}
+
 function findEdgeExecutable(): string | null {
+  if (process.env.BROWSER_PATH && fs.existsSync(process.env.BROWSER_PATH)) {
+    return process.env.BROWSER_PATH;
+  }
+  if (process.env.CHROME_BIN && fs.existsSync(process.env.CHROME_BIN)) {
+    return process.env.CHROME_BIN;
+  }
+
   const candidates = [
     'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
     'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
     'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
     'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+    '/usr/bin/google-chrome',
+    '/usr/bin/google-chrome-stable',
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser',
+    '/usr/bin/msedge',
+    '/snap/bin/chromium',
+    '/mnt/c/Program Files/Microsoft/Edge/Application/msedge.exe',
+    '/mnt/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
+    '/mnt/c/Program Files/Google/Chrome/Application/chrome.exe',
+    '/mnt/c/Program Files (x86)/Google/Chrome/Application/chrome.exe',
   ];
   for (const c of candidates) {
     if (fs.existsSync(c)) return c;
@@ -962,6 +1143,10 @@ async function main() {
   const data = await fetchReportData();
 
   const outputDir = path.resolve(__dirname, '../cost-dashboard');
+  if (!fs.existsSync(outputDir)) {
+    fs.mkdirSync(outputDir, { recursive: true });
+  }
+
   const htmlPath = path.join(outputDir, 'AWS_Manager_Cost_Budget_Report.html');
   const pdfPath = path.join(outputDir, 'AWS_Manager_Cost_Budget_Report.pdf');
 
@@ -970,16 +1155,28 @@ async function main() {
 
   const browserExe = findEdgeExecutable();
   if (!browserExe) {
-    throw new Error('Could not find Microsoft Edge or Chrome to render PDF.');
+    console.warn(
+      `⚠️ Could not find Microsoft Edge or Google Chrome to render PDF automatically.\n   Executive HTML report has been preserved at:\n   ${htmlPath}`
+    );
+    console.log('💡 When running in an environment with Chrome or Edge, the PDF will be generated automatically.');
+    process.exit(0);
   }
+
+  const isWindowsExe =
+    browserExe.toLowerCase().endsWith('.exe') ||
+    browserExe.startsWith('/mnt/') ||
+    process.platform === 'win32';
+
+  const inputTarget = isWindowsExe ? toWindowsPath(htmlPath) : htmlPath;
+  const outputTarget = isWindowsExe ? toWindowsPath(pdfPath) : pdfPath;
 
   console.log(`🖨️ Rendering PDF via ${path.basename(browserExe)}...`);
   execFileSync(browserExe, [
     '--headless',
     '--disable-gpu',
     '--no-pdf-header-footer',
-    `--print-to-pdf=${pdfPath}`,
-    htmlPath,
+    `--print-to-pdf=${outputTarget}`,
+    inputTarget,
   ]);
 
   try {
