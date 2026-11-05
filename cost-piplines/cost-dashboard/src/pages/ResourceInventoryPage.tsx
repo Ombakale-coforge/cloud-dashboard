@@ -16,8 +16,10 @@ import {
   LayoutGrid,
   BarChart3,
   ExternalLink,
-  DollarSign,
   Boxes,
+  Terminal,
+  Activity,
+  Globe,
 } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -35,6 +37,12 @@ interface InventoryItem {
   cost: number;
   status: string;
   category: string;
+  privateIp?: string | null;
+  publicIp?: string | null;
+  sizeOrType?: string | null;
+  powerState?: string | null;
+  os?: string | null;
+  vpcOrVnet?: string | null;
 }
 
 interface InventoryResponse {
@@ -42,6 +50,7 @@ interface InventoryResponse {
   count: number;
   summary: {
     totalAssets: number;
+    vmsWithIpCount?: number;
     totalMonthlyCost: number;
     distinctResourceGroupsCount: number;
     awsAssetsCount: number;
@@ -93,7 +102,6 @@ export function ResourceInventoryPage() {
     fetchInventory();
   }, [cloudFilter]);
 
-  // Handle client-side search debounce or direct filter
   const items = useMemo(() => {
     if (!data?.data) return [];
     let list = [...data.data];
@@ -109,7 +117,10 @@ export function ResourceInventoryPage() {
           i.name.toLowerCase().includes(q) ||
           i.service.toLowerCase().includes(q) ||
           i.resourceGroupOrRegion.toLowerCase().includes(q) ||
-          i.accountOrSubscription.toLowerCase().includes(q)
+          i.accountOrSubscription.toLowerCase().includes(q) ||
+          (i.privateIp && i.privateIp.toLowerCase().includes(q)) ||
+          (i.publicIp && i.publicIp.toLowerCase().includes(q)) ||
+          (i.sizeOrType && i.sizeOrType.toLowerCase().includes(q))
       );
     }
 
@@ -158,7 +169,7 @@ export function ResourceInventoryPage() {
                   Asset &amp; Resource Inventory
                 </h1>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Consolidated multi-cloud resource tracking across AWS Organizations and Azure Subscriptions
+                  Consolidated multi-cloud resource tracking with live IP addresses, VM sizes, and power states
                 </p>
               </div>
             </div>
@@ -171,13 +182,13 @@ export function ResourceInventoryPage() {
               className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/80 transition-colors cursor-pointer"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-              <span>Refresh Inventory</span>
+              <span>Refresh Live Data</span>
             </button>
           </div>
         </div>
 
         {/* Top Summary KPI Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
           <Card className="p-5 border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 rounded-xl shadow-xs">
             <div className="flex items-center justify-between">
               <div>
@@ -201,49 +212,32 @@ export function ResourceInventoryPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                  Compute with IP Details
+                </p>
+                <h3 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight mt-1">
+                  {data?.summary?.vmsWithIpCount || 0}
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Enriched VM network configs</p>
+              </div>
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-violet-50 text-violet-600 dark:bg-violet-950/50 dark:text-violet-400">
+                <Network className="h-6 w-6" />
+              </div>
+            </div>
+          </Card>
+
+          <Card className="p-5 border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 rounded-xl shadow-xs">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
                   Resource Groups &amp; Scopes
                 </p>
                 <h3 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight mt-1">
                   {data?.summary?.distinctResourceGroupsCount || 0}
                 </h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Distinct logical deployments</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Deployment boundaries</p>
               </div>
-              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-violet-50 text-violet-600 dark:bg-violet-950/50 dark:text-violet-400">
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-amber-50 text-amber-600 dark:bg-amber-950/50 dark:text-amber-400">
                 <Layers className="h-6 w-6" />
-              </div>
-            </div>
-          </Card>
-
-          <Card className="p-5 border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 rounded-xl shadow-xs">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                  Combined Monthly Spend
-                </p>
-                <h3 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight mt-1">
-                  {fmtCurrency(data?.summary?.totalMonthlyCost || 0)}
-                </h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Attributed to active assets</p>
-              </div>
-              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-950/50 dark:text-emerald-400">
-                <DollarSign className="h-6 w-6" />
-              </div>
-            </div>
-          </Card>
-
-          <Card className="p-5 border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 rounded-xl shadow-xs">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                  Governance Status
-                </p>
-                <h3 className="text-2xl sm:text-3xl font-extrabold text-emerald-600 dark:text-emerald-400 tracking-tight mt-1">
-                  Healthy
-                </h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">All active assets audited</p>
-              </div>
-              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-950/50 dark:text-emerald-400">
-                <ShieldCheck className="h-6 w-6" />
               </div>
             </div>
           </Card>
@@ -291,7 +285,7 @@ export function ResourceInventoryPage() {
               <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
               <input
                 type="text"
-                placeholder="Search by resource name, service, resource group, or account..."
+                placeholder="Search by resource, IP address (e.g. 10.0.x), size, service..."
                 value={searchTerm}
                 onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
                 className="w-full pl-9 pr-4 py-2 text-xs rounded-lg bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -326,6 +320,8 @@ export function ResourceInventoryPage() {
                     </div>
                   </th>
                   <th className="py-3.5 px-4">Cloud</th>
+                  <th className="py-3.5 px-4">IP Address (Private / Public)</th>
+                  <th className="py-3.5 px-4">Size &amp; OS</th>
                   <th className="py-3.5 px-4 cursor-pointer" onClick={() => toggleSort('service')}>
                     <div className="flex items-center gap-1.5">
                       <span>Service &amp; Category</span>
@@ -333,79 +329,129 @@ export function ResourceInventoryPage() {
                     </div>
                   </th>
                   <th className="py-3.5 px-4">Resource Group / Region</th>
-                  <th className="py-3.5 px-4">Account / Subscription</th>
                   <th className="py-3.5 px-4 text-right cursor-pointer" onClick={() => toggleSort('cost')}>
                     <div className="flex items-center justify-end gap-1.5">
                       <span>Monthly Spend</span>
                       <ArrowUpDown className="w-3.5 h-3.5" />
                     </div>
                   </th>
-                  <th className="py-3.5 px-4 text-center">Status</th>
+                  <th className="py-3.5 px-4 text-center">Power State</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800/70">
                 {loading ? (
                   <tr>
-                    <td colSpan={7} className="text-center py-12 text-slate-500">
+                    <td colSpan={8} className="text-center py-12 text-slate-500">
                       <div className="flex flex-col items-center justify-center gap-2">
                         <RefreshCw className="w-6 h-6 animate-spin text-indigo-500" />
-                        <span>Loading asset inventory from database...</span>
+                        <span>Querying live resources, IPs, and compute sizes...</span>
                       </div>
                     </td>
                   </tr>
                 ) : paginatedItems.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="text-center py-12 text-slate-500">
+                    <td colSpan={8} className="text-center py-12 text-slate-500">
                       No assets found matching your search and filter criteria.
                     </td>
                   </tr>
                 ) : (
-                  paginatedItems.map((item) => (
-                    <tr
-                      key={item.id}
-                      className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors"
-                    >
-                      <td className="py-3.5 px-4 font-semibold text-slate-900 dark:text-white max-w-xs truncate">
-                        {item.name}
-                      </td>
+                  paginatedItems.map((item) => {
+                    const isRunning =
+                      item.powerState?.toLowerCase().includes('running') ||
+                      item.status?.toLowerCase().includes('running') ||
+                      item.status === 'ACTIVE';
 
-                      <td className="py-3.5 px-4">
-                        {item.cloud === 'aws' ? (
-                          <Badge className="bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/30 text-[10px] font-bold">
-                            AWS
+                    return (
+                      <tr
+                        key={item.id}
+                        className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors"
+                      >
+                        <td className="py-3.5 px-4 font-semibold text-slate-900 dark:text-white max-w-xs truncate">
+                          <div>{item.name}</div>
+                          {item.vpcOrVnet && (
+                            <div className="text-[10px] text-slate-400 font-mono flex items-center gap-1 mt-0.5">
+                              <Network className="w-3 h-3 text-slate-400" />
+                              <span>{item.vpcOrVnet}</span>
+                            </div>
+                          )}
+                        </td>
+
+                        <td className="py-3.5 px-4">
+                          {item.cloud === 'aws' ? (
+                            <Badge className="bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/30 text-[10px] font-bold">
+                              AWS
+                            </Badge>
+                          ) : (
+                            <Badge className="bg-sky-500/10 text-sky-700 dark:text-sky-400 border border-sky-500/30 text-[10px] font-bold">
+                              Azure
+                            </Badge>
+                          )}
+                        </td>
+
+                        {/* IP Address Details */}
+                        <td className="py-3.5 px-4 font-mono text-xs">
+                          {item.privateIp ? (
+                            <div>
+                              <div className="flex items-center gap-1.5 text-slate-800 dark:text-slate-200">
+                                <span className="text-[10px] uppercase font-bold text-slate-400">Priv:</span>
+                                <span>{item.privateIp}</span>
+                              </div>
+                              {item.publicIp && (
+                                <div className="flex items-center gap-1.5 text-indigo-600 dark:text-indigo-400 text-[11px] mt-0.5">
+                                  <Globe className="w-3 h-3" />
+                                  <span>{item.publicIp}</span>
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-slate-400 text-[11px]">—</span>
+                          )}
+                        </td>
+
+                        {/* Size & OS */}
+                        <td className="py-3.5 px-4">
+                          {item.sizeOrType ? (
+                            <div>
+                              <div className="font-semibold text-slate-800 dark:text-slate-200 font-mono text-[11px]">
+                                {item.sizeOrType}
+                              </div>
+                              {item.os && (
+                                <div className="text-[10px] text-slate-400 truncate max-w-[120px]">{item.os}</div>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-slate-400 text-[11px]">—</span>
+                          )}
+                        </td>
+
+                        <td className="py-3.5 px-4">
+                          <div className="font-medium text-slate-800 dark:text-slate-200">{item.service}</div>
+                          <div className="text-[10px] text-slate-400 dark:text-slate-500">{item.category}</div>
+                        </td>
+
+                        <td className="py-3.5 px-4 font-mono text-slate-600 dark:text-slate-400 max-w-xs truncate text-[11px]">
+                          {item.resourceGroupOrRegion}
+                        </td>
+
+                        <td className="py-3.5 px-4 text-right font-mono font-bold text-slate-900 dark:text-white">
+                          {item.cost > 0 ? fmtCurrency(item.cost) : 'Included'}
+                        </td>
+
+                        <td className="py-3.5 px-4 text-center">
+                          <Badge
+                            className={`text-[10px] ${
+                              isRunning
+                                ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30'
+                                : 'bg-rose-500/10 text-rose-700 dark:text-rose-400 border border-rose-500/30'
+                            }`}
+                          >
+                            <span className={`inline-block w-1.5 h-1.5 rounded-full mr-1.5 ${isRunning ? 'bg-emerald-500' : 'bg-rose-500'}`}></span>
+                            {item.powerState || item.status}
                           </Badge>
-                        ) : (
-                          <Badge className="bg-sky-500/10 text-sky-700 dark:text-sky-400 border border-sky-500/30 text-[10px] font-bold">
-                            Azure
-                          </Badge>
-                        )}
-                      </td>
-
-                      <td className="py-3.5 px-4">
-                        <div className="font-medium text-slate-800 dark:text-slate-200">{item.service}</div>
-                        <div className="text-[10px] text-slate-400 dark:text-slate-500">{item.category}</div>
-                      </td>
-
-                      <td className="py-3.5 px-4 font-mono text-slate-600 dark:text-slate-400 max-w-xs truncate text-[11px]">
-                        {item.resourceGroupOrRegion}
-                      </td>
-
-                      <td className="py-3.5 px-4 text-slate-700 dark:text-slate-300 max-w-xs truncate">
-                        <div>{item.accountOrSubscription}</div>
-                        <div className="text-[10px] font-mono text-slate-400">{item.accountOrSubscriptionId}</div>
-                      </td>
-
-                      <td className="py-3.5 px-4 text-right font-mono font-bold text-slate-900 dark:text-white">
-                        {fmtCurrency(item.cost)}
-                      </td>
-
-                      <td className="py-3.5 px-4 text-center">
-                        <Badge className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 text-[10px]">
-                          {item.status}
-                        </Badge>
-                      </td>
-                    </tr>
-                  ))
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>

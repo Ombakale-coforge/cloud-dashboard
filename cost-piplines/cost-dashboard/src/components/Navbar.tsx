@@ -37,6 +37,7 @@ export function Navbar({
     const navigate = useNavigate();
     const isLinkedAccounts = location.pathname.startsWith("/linked-accounts");
     const isSubscriptions = location.pathname.startsWith("/azure/subscriptions") || location.pathname.startsWith("/azure/linked-accounts");
+    const isInventory = location.pathname.startsWith("/inventory") || location.pathname.startsWith("/resources");
     const isOverview =
         location.pathname === "/aws" ||
         location.pathname === "/dashboard" ||
@@ -74,7 +75,11 @@ export function Navbar({
                         </Link>
                     </div>
                     <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                        {activeProvider === "aws" ? "Live AWS Cost Analytics" : "Live Azure Cost Analytics"}
+                        {isInventory
+                            ? "Multi-Cloud Resource Inventory"
+                            : activeProvider === "aws"
+                            ? "Live AWS Cost Analytics"
+                            : "Live Azure Cost Analytics"}
                     </p>
                 </div>
 
@@ -113,7 +118,7 @@ export function Navbar({
                         <Link
                             to="/inventory"
                             className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md transition-all ${
-                                location.pathname === "/inventory"
+                                isInventory
                                     ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs"
                                     : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200"
                             }`}
@@ -156,7 +161,7 @@ export function Navbar({
                         <Link
                             to="/inventory"
                             className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md transition-all ${
-                                location.pathname === "/inventory"
+                                isInventory
                                     ? "bg-white dark:bg-slate-900 text-sky-600 dark:text-sky-400 shadow-xs"
                                     : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200"
                             }`}
@@ -168,30 +173,32 @@ export function Navbar({
                 )}
             </div>
 
-            {/* Right Controls: AWS/Azure Toggle + User & Logout */}
-            <div className="flex items-center gap-4">
-                <Tabs
-                    value={activeProvider}
-                    onValueChange={(v) => handleProviderToggle(v as Provider)}
-                    className="w-auto"
-                >
-                    <TabsList className="bg-slate-100 dark:bg-slate-800 p-1 rounded-lg border border-slate-200 dark:border-slate-700">
-                        <TabsTrigger
-                            value="aws"
-                            className="px-4 py-1.5 text-xs font-semibold data-[state=active]:bg-white data-[state=active]:text-indigo-600 data-[state=active]:shadow-xs dark:data-[state=active]:bg-slate-900 dark:data-[state=active]:text-indigo-400 rounded-md transition-all cursor-pointer"
-                        >
-                            AWS
-                        </TabsTrigger>
+            {/* Right Controls: AWS/Azure Toggle (hidden on Inventory since Inventory has its own 3-way toggle) */}
+            {!isInventory && (
+                <div className="flex items-center gap-4">
+                    <Tabs
+                        value={activeProvider}
+                        onValueChange={(v) => handleProviderToggle(v as Provider)}
+                        className="w-auto"
+                    >
+                        <TabsList className="bg-slate-100 dark:bg-slate-800 p-1 rounded-lg border border-slate-200 dark:border-slate-700">
+                            <TabsTrigger
+                                value="aws"
+                                className="px-4 py-1.5 text-xs font-semibold data-[state=active]:bg-white data-[state=active]:text-indigo-600 data-[state=active]:shadow-xs dark:data-[state=active]:bg-slate-900 dark:data-[state=active]:text-indigo-400 rounded-md transition-all cursor-pointer"
+                            >
+                                AWS
+                            </TabsTrigger>
 
-                        <TabsTrigger
-                            value="azure"
-                            className="px-4 py-1.5 text-xs font-semibold data-[state=active]:bg-white data-[state=active]:text-sky-600 data-[state=active]:shadow-xs dark:data-[state=active]:bg-slate-900 dark:data-[state=active]:text-sky-400 rounded-md transition-all cursor-pointer"
-                        >
-                            Azure
-                        </TabsTrigger>
-                    </TabsList>
-                </Tabs>
-            </div>
+                            <TabsTrigger
+                                value="azure"
+                                className="px-4 py-1.5 text-xs font-semibold data-[state=active]:bg-white data-[state=active]:text-sky-600 data-[state=active]:shadow-xs dark:data-[state=active]:bg-slate-900 dark:data-[state=active]:text-sky-400 rounded-md transition-all cursor-pointer"
+                            >
+                                Azure
+                            </TabsTrigger>
+                        </TabsList>
+                    </Tabs>
+                </div>
+            )}
         </header>
     );
 }
