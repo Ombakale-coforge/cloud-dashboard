@@ -1,6 +1,6 @@
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { BarChart3, Layers, LayoutGrid } from "lucide-react";
+import { BarChart3, Layers, LayoutGrid, Boxes } from "lucide-react";
 
 export type Provider = "aws" | "azure";
 
@@ -110,6 +110,17 @@ export function Navbar({
                             <Layers className="w-3.5 h-3.5" />
                             Linked Accounts
                         </Link>
+                        <Link
+                            to="/inventory"
+                            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md transition-all ${
+                                location.pathname === "/inventory"
+                                    ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs"
+                                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200"
+                            }`}
+                        >
+                            <Boxes className="w-3.5 h-3.5" />
+                            Inventory
+                        </Link>
                     </nav>
                 ) : (
                     <nav className="hidden sm:flex items-center gap-1 bg-slate-100 dark:bg-slate-800/60 p-1 rounded-lg border border-slate-200/80 dark:border-slate-700/80">
@@ -141,6 +152,17 @@ export function Navbar({
                         >
                             <Layers className="w-3.5 h-3.5" />
                             Subscriptions
+                        </Link>
+                        <Link
+                            to="/inventory"
+                            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md transition-all ${
+                                location.pathname === "/inventory"
+                                    ? "bg-white dark:bg-slate-900 text-sky-600 dark:text-sky-400 shadow-xs"
+                                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200"
+                            }`}
+                        >
+                            <Boxes className="w-3.5 h-3.5" />
+                            Inventory
                         </Link>
                     </nav>
                 )}

@@ -10,6 +10,7 @@ import { LinkedAccountsPage } from './pages/LinkedAccountsPage.tsx'
 import { LinkedAccountDetailPage } from './pages/LinkedAccountDetailPage.tsx'
 import { AzureSubscriptionsPage } from './pages/AzureSubscriptionsPage.tsx'
 import { AzureSubscriptionDetailPage } from './pages/AzureSubscriptionDetailPage.tsx'
+import { ResourceInventoryPage } from './pages/ResourceInventoryPage.tsx'
 import { AuthProvider } from './lib/auth.tsx'
 import { ProtectedRoute } from './components/ProtectedRoute.tsx'
 
@@ -118,6 +119,24 @@ createRoot(document.getElementById('root')!).render(
             element={
               <ProtectedRoute allowedRoles={['admin']}>
                 <AzureSubscriptionsPage />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Asset & Resource Inventory Directory */}
+          <Route
+            path="/inventory"
+            element={
+              <ProtectedRoute allowedRoles={['admin']}>
+                <ResourceInventoryPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/resources"
+            element={
+              <ProtectedRoute allowedRoles={['admin']}>
+                <ResourceInventoryPage />
               </ProtectedRoute>
             }
           />
