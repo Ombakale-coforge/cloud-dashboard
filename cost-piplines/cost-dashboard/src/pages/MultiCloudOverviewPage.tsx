@@ -646,37 +646,40 @@ export function MultiCloudOverviewPage() {
               {/* Visual Gauges & Key KPIs Strip */}
               <div className="shrink-0 grid grid-cols-12 gap-3">
                 {/* Gauge Card: Budget Coverage + Org Accounts */}
-                <div className="col-span-5 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 p-3 flex items-center gap-3">
+                <div className="col-span-5 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 p-2.5 flex items-center gap-2.5 min-w-0">
                   <CoverageGauge
                     percentage={awsSummary?.budgetCoveragePct || 0}
                     colorClass="text-emerald-500"
-                    size={56}
+                    size={50}
                   />
-                  <div className="min-w-0 flex-1 space-y-0.5">
+                  <div className="min-w-0 flex-1 space-y-1">
                     <div className="flex items-center justify-between gap-1">
                       <span className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate">
                         Coverage
                       </span>
-                      <span className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400 whitespace-nowrap">
-                        {awsSummary ? awsSummary.totalAccounts : "--"} Org Accs
+                      <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 shrink-0">
+                        {awsSummary ? awsSummary.totalAccounts : "--"} Accs
                       </span>
                     </div>
-                    <div className="flex items-center gap-1.5 text-[11px] whitespace-nowrap">
-                      <span className="text-emerald-600 dark:text-emerald-400 font-semibold">
-                        {awsSummary ? `${awsSummary.accountsWithBudget} budgeted` : "--"}
+
+                    {/* Budgeted vs Unbudgeted */}
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] font-semibold leading-tight">
+                      <span className="text-emerald-600 dark:text-emerald-400 whitespace-nowrap">
+                        {awsSummary ? awsSummary.accountsWithBudget : "--"} budgeted
+                      </span>
+                      <span className="text-amber-600 dark:text-amber-500 whitespace-nowrap">
+                        {awsSummary ? awsSummary.accountsWithNoBudget : "--"} unbudgeted
+                      </span>
+                    </div>
+
+                    {/* Active vs Closed */}
+                    <div className="flex items-center gap-1.5 text-[10px] text-slate-500 dark:text-slate-400 font-medium leading-tight">
+                      <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
+                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 shrink-0" />
+                        {awsSummary ? awsSummary.activeAccounts : "--"} active
                       </span>
                       <span className="text-slate-300 dark:text-slate-700">•</span>
-                      <span className="text-amber-600 dark:text-amber-400 font-semibold">
-                        {awsSummary ? `${awsSummary.accountsWithNoBudget} unbudgeted` : "--"}
-                      </span>
-                    </div>
-                    <div className="text-[11px] text-slate-500 flex items-center gap-1.5 whitespace-nowrap">
-                      <span className="inline-flex items-center gap-1 text-emerald-600 font-medium">
-                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                        {awsSummary ? `${awsSummary.activeAccounts} active` : "--"}
-                      </span>
-                      <span>•</span>
-                      <span>{awsSummary ? `${awsSummary.suspendedAccounts} closed` : "--"}</span>
+                      <span>{awsSummary ? awsSummary.suspendedAccounts : "--"} closed</span>
                     </div>
                   </div>
                 </div>
