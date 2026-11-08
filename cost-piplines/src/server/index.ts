@@ -40,8 +40,16 @@ app.get('/api/health', (req, res) => {
 });
 
 // Serve frontend static build if dist exists (Production VM deployment)
-const distPath = path.resolve(__dirname, '../../cost-dashboard/dist');
-if (fs.existsSync(distPath)) {
+const distCandidates = [
+  path.resolve(__dirname, '../../cost-dashboard/dist'),
+  path.resolve(process.cwd(), 'cost-dashboard/dist'),
+  path.resolve(__dirname, '../cost-dashboard/dist'),
+  path.resolve(__dirname, '../../dist'),
+];
+const distPath = distCandidates.find((p) => fs.existsSync(p));
+
+if (distPath) {
+  console.log('📦 [Static Frontend] Serving production UI build from:', distPath);
   app.use(express.static(distPath));
   // Client-side SPA routing fallback for non-API GET requests (Express 5 compatible)
   app.use((req, res, next) => {
@@ -50,6 +58,8 @@ if (fs.existsSync(distPath)) {
     }
     next();
   });
+} else {
+  console.warn('⚠️ [Static Frontend] No production dist/ build found. Run `npm run build` in cost-dashboard.');
 }
 
 // Helper to resolve certificate path safely
