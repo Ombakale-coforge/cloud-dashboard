@@ -491,7 +491,7 @@ export function MultiCloudOverviewPage() {
 
   return (
     <TooltipProvider>
-      <div className="min-h-screen lg:h-screen w-full overflow-x-hidden lg:overflow-hidden bg-slate-100/80 dark:bg-slate-950 text-slate-900 dark:text-slate-100 font-sans antialiased flex flex-col">
+      <div className="min-h-screen w-full overflow-x-hidden bg-slate-100/80 dark:bg-slate-950 text-slate-900 dark:text-slate-100 font-sans antialiased flex flex-col">
         {/* ================================================================= */}
         {/* CLEAN TOP BAR                                                     */}
         {/* ================================================================= */}
@@ -510,7 +510,7 @@ export function MultiCloudOverviewPage() {
                 </span>
               </div>
               <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
-                Multi-Cloud Governance & Budgets Command Center
+                Multi-Cloud Governance &amp; Budgets Command Center
               </p>
             </div>
           </div>
@@ -562,21 +562,22 @@ export function MultiCloudOverviewPage() {
         {/* ================================================================= */}
         {/* MULTI-CLOUD EXECUTIVE COMMAND CENTER (AWS | AZURE | GCP)          */}
         {/* ================================================================= */}
-        <main className="flex-1 min-h-0 grid grid-cols-1 xl:grid-cols-3 gap-4 p-4 overflow-y-auto">
+        <main className="flex-1 p-4 sm:p-5 grid grid-cols-1 xl:grid-cols-3 gap-5">
           {/* =============================================================== */}
           {/* LEFT PORTAL CARD: AWS ORGANIZATION & BUDGET GOVERNANCE          */}
           {/* =============================================================== */}
-          <div className="flex flex-col min-h-[540px] lg:min-h-0 rounded-2xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-hidden">
-            {/* Portal Top Banner */}
-            <div className="shrink-0 px-4 py-3 border-b border-slate-100 dark:border-slate-800 bg-gradient-to-r from-indigo-50/60 via-white to-amber-50/40 dark:from-indigo-950/30 dark:via-slate-900 dark:to-slate-900 flex flex-wrap xl:flex-nowrap items-center justify-between gap-2">
-              <div className="flex items-center gap-2.5 min-w-0">
-                <div className="h-9 w-9 shrink-0 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-600 dark:text-amber-400 font-extrabold text-xs shadow-2xs">
-                  AWS
-                </div>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
+          <div className="flex flex-col min-h-[560px] rounded-2xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-hidden">
+            {/* Portal Top Banner: 2-Row Non-Colliding Layout */}
+            <div className="shrink-0 px-4 py-3 border-b border-slate-100 dark:border-slate-800 bg-gradient-to-r from-indigo-50/60 via-white to-amber-50/40 dark:from-indigo-950/30 dark:via-slate-900 dark:to-slate-900 flex flex-col gap-2.5">
+              {/* Row 1: Brand & Primary Action */}
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="h-9 w-9 shrink-0 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-600 dark:text-amber-400 font-extrabold text-xs shadow-2xs">
+                    AWS
+                  </div>
+                  <div className="flex items-center gap-2 min-w-0">
                     <h2 className="text-sm font-bold text-slate-900 dark:text-white truncate">
-                      AWS Governance & Budgets
+                      AWS Governance
                     </h2>
                     <Badge
                       variant="outline"
@@ -585,54 +586,58 @@ export function MultiCloudOverviewPage() {
                       {awsMonthLabel}
                     </Badge>
                   </div>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
-                    Organization inventory, budget coverage & unbudgeted exposure
-                  </p>
                 </div>
-              </div>
-
-              <div className="flex items-center gap-1.5 shrink-0">
-                {/* Account 1 / Account 2 Pill Switcher */}
-                {awsAccounts.length > 1 && (
-                  <div className="inline-flex items-center rounded-xl bg-slate-100 dark:bg-slate-800 p-0.5 border border-slate-200/80 dark:border-slate-700">
-                    {awsAccounts.map((acc, idx) => {
-                      const active = acc.id === selectedAwsAccount;
-                      return (
-                        <button
-                          key={acc.id}
-                          type="button"
-                          onClick={() => setSelectedAwsAccount(acc.id)}
-                          className={`px-2 py-1 text-[11px] font-semibold rounded-lg transition-all cursor-pointer whitespace-nowrap ${
-                            active
-                              ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs"
-                              : "text-slate-500 hover:text-slate-900 dark:hover:text-slate-200"
-                          }`}
-                          title={acc.name}
-                        >
-                          Account {idx + 1}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-
-                <button
-                  onClick={() => navigate("/linked-accounts")}
-                  className="inline-flex items-center gap-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 transition-colors cursor-pointer whitespace-nowrap"
-                >
-                  <Layers className="w-3.5 h-3.5 text-indigo-500" />
-                  <span>Accounts</span>
-                </button>
 
                 <button
                   onClick={() =>
                     navigate(`/aws?account=${encodeURIComponent(selectedAwsAccount)}`)
                   }
-                  className="inline-flex items-center gap-1 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 text-[11px] font-semibold shadow-xs transition-all cursor-pointer whitespace-nowrap"
+                  className="inline-flex items-center gap-1 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 text-[11px] font-semibold shadow-xs transition-all cursor-pointer whitespace-nowrap shrink-0"
                 >
                   <span>Enter AWS</span>
                   <ArrowRight className="w-3.5 h-3.5" />
                 </button>
+              </div>
+
+              {/* Row 2: Subtitle & Account Controls */}
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate max-w-[200px] sm:max-w-none">
+                  Organization inventory &amp; budgets
+                </p>
+
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {/* Account 1 / Account 2 Pill Switcher */}
+                  {awsAccounts.length > 1 && (
+                    <div className="inline-flex items-center rounded-lg bg-slate-100 dark:bg-slate-800 p-0.5 border border-slate-200/80 dark:border-slate-700">
+                      {awsAccounts.map((acc, idx) => {
+                        const active = acc.id === selectedAwsAccount;
+                        return (
+                          <button
+                            key={acc.id}
+                            type="button"
+                            onClick={() => setSelectedAwsAccount(acc.id)}
+                            className={`px-2 py-0.5 text-[10px] font-semibold rounded-md transition-all cursor-pointer whitespace-nowrap ${
+                              active
+                                ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs"
+                                : "text-slate-500 hover:text-slate-900 dark:hover:text-slate-200"
+                            }`}
+                            title={acc.name}
+                          >
+                            Account {idx + 1}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  <button
+                    onClick={() => navigate("/linked-accounts")}
+                    className="inline-flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1 text-[11px] font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 transition-colors cursor-pointer whitespace-nowrap"
+                  >
+                    <Layers className="w-3 h-3 text-indigo-500" />
+                    <span>Accounts</span>
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -678,7 +683,7 @@ export function MultiCloudOverviewPage() {
 
                 {/* Spend & Limits Visual Card */}
                 <div className="col-span-7 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 p-3 flex flex-col justify-between">
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-2 gap-2">
                     <div className="min-w-0">
                       <div className="text-[11px] font-medium text-slate-500 flex items-center gap-1 truncate">
                         <TrendingUp className="w-3 h-3 text-blue-500 shrink-0" />
@@ -708,28 +713,20 @@ export function MultiCloudOverviewPage() {
                           : "--"}
                       </div>
                     </div>
+                  </div>
 
-                    <div className="min-w-0">
-                      <div className="text-[11px] font-medium text-slate-500 flex items-center gap-1 truncate">
-                        <AlertTriangle className="w-3 h-3 text-amber-500 shrink-0" />
-                        <span className="truncate">Suspended Leak</span>
-                      </div>
-                      <div className="flex items-baseline gap-1 mt-0.5 truncate">
-                        <span className="text-base xl:text-lg font-extrabold text-amber-600 dark:text-amber-400">
-                          {awsSummary ? awsSummary.suspendedAccountsChargingCount : 0}
-                        </span>
-                        <span className="text-[11px] font-bold text-rose-600 dark:text-rose-400 truncate">
-                          ($
-                          {awsSummary
-                            ? awsSummary.suspendedAccountsSpendTotal.toLocaleString(
-                                undefined,
-                                { maximumFractionDigits: 0 }
-                              )
-                            : "0"}
-                          )
-                        </span>
-                      </div>
-                    </div>
+                  {/* Suspended Leaks notice */}
+                  <div className="mt-1 flex items-center justify-between text-[11px] bg-amber-500/10 dark:bg-amber-500/15 border border-amber-500/20 px-2 py-0.5 rounded-md">
+                    <span className="text-amber-700 dark:text-amber-400 font-medium flex items-center gap-1 truncate">
+                      <AlertTriangle className="w-3 h-3 shrink-0 text-amber-500" />
+                      <span className="truncate">Suspended Leaks</span>
+                    </span>
+                    <span className="font-bold text-amber-700 dark:text-amber-300 whitespace-nowrap ml-1">
+                      {awsSummary ? awsSummary.suspendedAccountsChargingCount : 0}{" "}
+                      <span className="text-rose-600 dark:text-rose-400 font-semibold">
+                        (${awsSummary ? awsSummary.suspendedAccountsSpendTotal.toLocaleString(undefined, { maximumFractionDigits: 0 }) : "0"})
+                      </span>
+                    </span>
                   </div>
 
                   {/* Segmented Spend Bar: Under Budget vs Unbudgeted */}
@@ -980,49 +977,54 @@ export function MultiCloudOverviewPage() {
           {/* RIGHT PORTAL CARD: AZURE BUDGETS & GOVERNANCE                   */}
           {/* =============================================================== */}
           <div className="flex flex-col min-h-[540px] lg:min-h-0 rounded-2xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-hidden">
-            {/* Portal Top Banner */}
-            <div className="shrink-0 px-4 py-3 border-b border-slate-100 dark:border-slate-800 bg-gradient-to-r from-sky-50/70 via-white to-blue-50/40 dark:from-sky-950/30 dark:via-slate-900 dark:to-slate-900 flex flex-wrap xl:flex-nowrap items-center justify-between gap-2">
-              <div className="flex items-center gap-2.5 min-w-0">
-                <div className="h-9 w-9 shrink-0 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-600 dark:text-sky-400 font-extrabold text-xs shadow-2xs">
-                  AZ
-                </div>
-                <div className="min-w-0">
+            {/* Portal Top Banner: 2-Row Non-Colliding Layout */}
+            <div className="shrink-0 px-4 py-3 border-b border-slate-100 dark:border-slate-800 bg-gradient-to-r from-sky-50/70 via-white to-blue-50/40 dark:from-sky-950/30 dark:via-slate-900 dark:to-slate-900 flex flex-col gap-2.5">
+              {/* Row 1: Brand & Primary Action */}
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="h-9 w-9 shrink-0 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-600 dark:text-sky-400 font-extrabold text-xs shadow-2xs">
+                    AZ
+                  </div>
                   <h2 className="text-sm font-bold text-slate-900 dark:text-white truncate">
                     Azure Budgets & Governance
                   </h2>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
-                    Management-configured budgets, thresholds & RBAC status
-                  </p>
                 </div>
-              </div>
-
-              <div className="flex items-center gap-1.5 shrink-0">
-                <button
-                  onClick={handleSyncAzureBudgets}
-                  disabled={syncingAzure}
-                  className="inline-flex items-center gap-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
-                >
-                  <RefreshCw
-                    className={`w-3.5 h-3.5 ${syncingAzure ? "animate-spin text-sky-600" : ""}`}
-                  />
-                  <span>{syncingAzure ? "Syncing..." : "Sync"}</span>
-                </button>
-
-                <button
-                  onClick={() => navigate("/azure/subscriptions")}
-                  className="inline-flex items-center gap-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 transition-colors cursor-pointer whitespace-nowrap"
-                >
-                  <Layers className="w-3.5 h-3.5 text-sky-500" />
-                  <span>Subscriptions</span>
-                </button>
 
                 <button
                   onClick={() => navigate("/azure")}
-                  className="inline-flex items-center gap-1 rounded-xl bg-sky-600 hover:bg-sky-700 text-white px-3 py-1.5 text-[11px] font-semibold shadow-xs transition-all cursor-pointer whitespace-nowrap"
+                  className="inline-flex items-center gap-1 rounded-xl bg-sky-600 hover:bg-sky-700 text-white px-3 py-1.5 text-[11px] font-semibold shadow-xs transition-all cursor-pointer whitespace-nowrap shrink-0"
                 >
                   <span>Enter Azure</span>
                   <ArrowRight className="w-3.5 h-3.5" />
                 </button>
+              </div>
+
+              {/* Row 2: Subtitle & Secondary Action Controls */}
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate max-w-[200px] sm:max-w-none">
+                  Management-configured budgets & thresholds
+                </p>
+
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    onClick={handleSyncAzureBudgets}
+                    disabled={syncingAzure}
+                    className="inline-flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1 text-[11px] font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
+                  >
+                    <RefreshCw
+                      className={`w-3 h-3 ${syncingAzure ? "animate-spin text-sky-600" : ""}`}
+                    />
+                    <span>{syncingAzure ? "Syncing..." : "Sync"}</span>
+                  </button>
+
+                  <button
+                    onClick={() => navigate("/azure/subscriptions")}
+                    className="inline-flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1 text-[11px] font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 transition-colors cursor-pointer whitespace-nowrap"
+                  >
+                    <Layers className="w-3 h-3 text-sky-500" />
+                    <span>Subscriptions</span>
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -1233,16 +1235,17 @@ export function MultiCloudOverviewPage() {
           {/* RIGHT PORTAL CARD: GCP BUDGETS & BIGQUERY INTELLIGENCE          */}
           {/* =============================================================== */}
           <div className="flex flex-col min-h-[540px] xl:min-h-0 rounded-2xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-hidden">
-            {/* Portal Top Banner */}
-            <div className="shrink-0 px-4 py-3 border-b border-slate-100 dark:border-slate-800 bg-gradient-to-r from-blue-50/70 via-white to-indigo-50/40 dark:from-blue-950/30 dark:via-slate-900 dark:to-slate-900 flex flex-wrap xl:flex-nowrap items-center justify-between gap-2">
-              <div className="flex items-center gap-2.5 min-w-0">
-                <div className="h-9 w-9 shrink-0 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-600 dark:text-blue-400 font-extrabold text-xs shadow-2xs">
-                  GCP
-                </div>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
+            {/* Portal Top Banner: 2-Row Non-Colliding Layout */}
+            <div className="shrink-0 px-4 py-3 border-b border-slate-100 dark:border-slate-800 bg-gradient-to-r from-blue-50/70 via-white to-indigo-50/40 dark:from-blue-950/30 dark:via-slate-900 dark:to-slate-900 flex flex-col gap-2.5">
+              {/* Row 1: Brand, Badge & Primary Action */}
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="h-9 w-9 shrink-0 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-600 dark:text-blue-400 font-extrabold text-xs shadow-2xs">
+                    GCP
+                  </div>
+                  <div className="flex items-center gap-2 min-w-0">
                     <h2 className="text-sm font-bold text-slate-900 dark:text-white truncate">
-                      GCP Projects &amp; Governance
+                      GCP Governance
                     </h2>
                     <Badge
                       variant="outline"
@@ -1251,28 +1254,32 @@ export function MultiCloudOverviewPage() {
                       BigQuery
                     </Badge>
                   </div>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
-                    Multi-project cost intelligence &amp; budget utilization
-                  </p>
                 </div>
-              </div>
-
-              <div className="flex items-center gap-1.5 shrink-0">
-                <button
-                  onClick={() => navigate("/gcp/projects")}
-                  className="inline-flex items-center gap-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 transition-colors cursor-pointer whitespace-nowrap"
-                >
-                  <Layers className="w-3.5 h-3.5 text-blue-500" />
-                  <span>Projects</span>
-                </button>
 
                 <button
                   onClick={() => navigate("/gcp")}
-                  className="inline-flex items-center gap-1 rounded-xl bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 text-[11px] font-semibold shadow-xs transition-all cursor-pointer whitespace-nowrap"
+                  className="inline-flex items-center gap-1 rounded-xl bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 text-[11px] font-semibold shadow-xs transition-all cursor-pointer whitespace-nowrap shrink-0"
                 >
                   <span>Enter GCP</span>
                   <ArrowRight className="w-3.5 h-3.5" />
                 </button>
+              </div>
+
+              {/* Row 2: Subtitle & Secondary Action Controls */}
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate max-w-[200px] sm:max-w-none">
+                  Multi-project cost intelligence &amp; budgets
+                </p>
+
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    onClick={() => navigate("/gcp/projects")}
+                    className="inline-flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1 text-[11px] font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 transition-colors cursor-pointer whitespace-nowrap"
+                  >
+                    <Layers className="w-3 h-3 text-blue-500" />
+                    <span>Projects</span>
+                  </button>
+                </div>
               </div>
             </div>
 
