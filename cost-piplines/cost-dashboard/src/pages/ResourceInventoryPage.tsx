@@ -28,7 +28,7 @@ import { Navbar } from '@/components/Navbar';
 interface InventoryItem {
   id: string;
   name: string;
-  cloud: 'aws' | 'azure';
+  cloud: 'aws' | 'azure' | 'gcp';
   service: string;
   resourceGroupOrRegion: string;
   accountOrSubscription: string;
@@ -55,6 +55,7 @@ interface InventoryResponse {
     distinctResourceGroupsCount: number;
     awsAssetsCount: number;
     azureAssetsCount: number;
+    gcpAssetsCount?: number;
     categoryCounts: Record<string, number>;
   };
   data: InventoryItem[];
@@ -72,7 +73,7 @@ export function ResourceInventoryPage() {
   const [error, setError] = useState<string | null>(null);
 
   // Filters
-  const [cloudFilter, setCloudFilter] = useState<'all' | 'aws' | 'azure'>('all');
+  const [cloudFilter, setCloudFilter] = useState<'all' | 'aws' | 'azure' | 'gcp'>('all');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [sortField, setSortField] = useState<'cost' | 'name' | 'service'>('cost');
@@ -198,8 +199,12 @@ export function ResourceInventoryPage() {
                 <h3 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight mt-1">
                   {data?.summary?.totalAssets || 0}
                 </h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                  AWS: {data?.summary?.awsAssetsCount || 0} · Azure: {data?.summary?.azureAssetsCount || 0}
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 flex flex-wrap items-center gap-1.5 font-medium">
+                  <span className="text-amber-600 dark:text-amber-400">AWS: {data?.summary?.awsAssetsCount || 0}</span>
+                  <span>·</span>
+                  <span className="text-blue-600 dark:text-blue-400">Azure: {data?.summary?.azureAssetsCount || 0}</span>
+                  <span>·</span>
+                  <span className="text-emerald-600 dark:text-emerald-400">GCP: {data?.summary?.gcpAssetsCount || 0}</span>
                 </p>
               </div>
               <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 dark:bg-indigo-950/50 dark:text-indigo-400">
@@ -276,6 +281,16 @@ export function ResourceInventoryPage() {
               }`}
             >
               Azure Only
+            </button>
+            <button
+              onClick={() => { setCloudFilter('gcp'); setCurrentPage(1); }}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-all cursor-pointer ${
+                cloudFilter === 'gcp'
+                  ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-xs'
+                  : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              GCP Only
             </button>
           </div>
 
@@ -381,9 +396,13 @@ export function ResourceInventoryPage() {
                             <Badge className="bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/30 text-[10px] font-bold">
                               AWS
                             </Badge>
-                          ) : (
+                          ) : item.cloud === 'azure' ? (
                             <Badge className="bg-sky-500/10 text-sky-700 dark:text-sky-400 border border-sky-500/30 text-[10px] font-bold">
                               Azure
+                            </Badge>
+                          ) : (
+                            <Badge className="bg-blue-500/10 text-blue-700 dark:text-blue-400 border border-blue-500/30 text-[10px] font-bold">
+                              GCP
                             </Badge>
                           )}
                         </td>

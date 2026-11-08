@@ -113,11 +113,13 @@ const formatAwsAccount = (acc: AccountOption): AccountOption => {
 export default function App() {
     const location = useLocation();
     const isAzure = location.pathname.startsWith("/azure") || new URLSearchParams(location.search).get("provider") === "azure";
-    const [activeProvider, setActiveProvider] = useState<Provider>(isAzure ? "azure" : "aws");
+    const isGcp = location.pathname.startsWith("/gcp") || new URLSearchParams(location.search).get("provider") === "gcp";
+    const [activeProvider, setActiveProvider] = useState<Provider>(isGcp ? "gcp" : isAzure ? "azure" : "aws");
 
     useEffect(() => {
         const isAzureRoute = location.pathname.startsWith("/azure") || new URLSearchParams(location.search).get("provider") === "azure";
-        setActiveProvider(isAzureRoute ? "azure" : "aws");
+        const isGcpRoute = location.pathname.startsWith("/gcp") || new URLSearchParams(location.search).get("provider") === "gcp";
+        setActiveProvider(isGcpRoute ? "gcp" : isAzureRoute ? "azure" : "aws");
     }, [location.pathname, location.search]);
     const [awsAccounts, setAwsAccounts] = useState<AccountOption[]>(DEFAULT_AWS_ACCOUNTS);
     const initialAwsAcc = new URLSearchParams(location.search).get("account") || "account-1";

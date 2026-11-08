@@ -10,6 +10,7 @@ import authRoutes from './routes/auth.ts';
 import requestRoutes from './routes/requests.ts';
 import awsRoutes from './routes/aws.ts';
 import azureRoutes from './routes/azure.ts';
+import gcpRoutes from './routes/gcp.ts';
 import inventoryRoutes from './routes/inventory.ts';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -30,6 +31,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/requests', requestRoutes);
 app.use('/api/aws', awsRoutes);
 app.use('/api/azure', azureRoutes);
+app.use('/api/gcp', gcpRoutes);
 app.use('/api/inventory', inventoryRoutes);
 
 // Health check

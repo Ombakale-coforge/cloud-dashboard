@@ -11,6 +11,7 @@ import { LinkedAccountDetailPage } from './pages/LinkedAccountDetailPage.tsx'
 import { AzureSubscriptionsPage } from './pages/AzureSubscriptionsPage.tsx'
 import { AzureSubscriptionDetailPage } from './pages/AzureSubscriptionDetailPage.tsx'
 import { ResourceInventoryPage } from './pages/ResourceInventoryPage.tsx'
+import { GcpDashboardPage } from './pages/GcpDashboardPage.tsx'
 import { AuthProvider } from './lib/auth.tsx'
 import { ProtectedRoute } from './components/ProtectedRoute.tsx'
 
@@ -73,6 +74,24 @@ createRoot(document.getElementById('root')!).render(
             element={
               <ProtectedRoute allowedRoles={['admin']}>
                 <App />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Admin GCP Intelligence Dashboard & Projects */}
+          <Route
+            path="/gcp"
+            element={
+              <ProtectedRoute allowedRoles={['admin']}>
+                <GcpDashboardPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/gcp/projects"
+            element={
+              <ProtectedRoute allowedRoles={['admin']}>
+                <GcpDashboardPage />
               </ProtectedRoute>
             }
           />
