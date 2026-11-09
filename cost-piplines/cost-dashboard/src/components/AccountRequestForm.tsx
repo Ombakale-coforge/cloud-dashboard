@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   CheckCircle2,
   ChevronRight,
@@ -16,6 +16,7 @@ import {
   User,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
+import { useAuth } from "@/lib/auth";
 import type { AccountRequest } from "@/lib/useAccountRequests";
 
 /* ─────────────── helpers ─────────────── */
@@ -290,10 +291,10 @@ async function tryFormspree(data: FormData): Promise<boolean> {
 
 function buildEmailContent(data: FormData) {
   const sender = data.submitterEmail.trim();
-  const recipient = "Ankit.A@coforge.com";
+  const recipient = "ankit.a@coforge.com";
   const subject = `AWS Account Request: ${data.projectName} (${data.division})`;
 
-  const formattedBody = `Dear Om,
+  const formattedBody = `Dear Ankit,
 
 Please find the AWS Account Provisioning Request details submitted by ${sender}:
 
@@ -354,8 +355,17 @@ interface AccountRequestFormProps {
 }
 
 export function AccountRequestForm({ onSubmit }: AccountRequestFormProps) {
+  const { user } = useAuth();
   const [step, setStep] = useState(0);
-  const [form, setForm] = useState<FormData>(emptyForm());
+  const [form, setForm] = useState<FormData>(() => {
+    const empty = emptyForm();
+    if (user?.email) {
+      empty.submitterEmail = user.email;
+      empty.pointOfContact = user.email;
+      empty.adminEmails = [user.email];
+    }
+    return empty;
+  });
   const [errors, setErrors] = useState<Errors>({});
   const [submitting, setSubmitting] = useState(false);
   const [sentSuccessDetails, setSentSuccessDetails] = useState<{
@@ -364,6 +374,17 @@ export function AccountRequestForm({ onSubmit }: AccountRequestFormProps) {
     subject: string;
     body: string;
   } | null>(null);
+
+  useEffect(() => {
+    if (user?.email && !form.submitterEmail) {
+      setForm((prev) => ({
+        ...prev,
+        submitterEmail: prev.submitterEmail || user.email,
+        pointOfContact: prev.pointOfContact || user.email,
+        adminEmails: prev.adminEmails.length > 0 ? prev.adminEmails : [user.email],
+      }));
+    }
+  }, [user]);
 
   const set = <K extends keyof FormData>(key: K, value: FormData[K]) =>
     setForm((prev) => ({ ...prev, [key]: value }));
