@@ -14,7 +14,6 @@ const router = Router();
 
 const DEFAULT_ADMIN_EMAILS = [
   'dashboard-admin@coforge.com',
-  'omparashuram.b@coforge.com',
   'jayant.goyal@coforge.com',
   'ankit.a@coforge.com',
   'Rajiv.Khanayat@coforge.com',
