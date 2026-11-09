@@ -446,7 +446,7 @@ export function AccountRequestForm({ onSubmit }: AccountRequestFormProps) {
               Request Submitted Successfully!
             </h3>
             <p className="text-sm text-muted-foreground">
-              Your account provisioning request has been saved and automatically routed to <span className="font-semibold text-foreground">ankit.a@coforge.com</span>.
+              Your account provisioning request has been saved and automatically routed to <span className="font-semibold text-foreground">ankit.a@coforge.com</span> &amp; <span className="font-semibold text-foreground">omparashuram.b@coforge.com</span>.
             </p>
           </div>
 
@@ -457,8 +457,8 @@ export function AccountRequestForm({ onSubmit }: AccountRequestFormProps) {
               <span className="font-semibold text-indigo-600 dark:text-indigo-400">{sentSuccessDetails.sender}</span>
             </div>
             <div className="flex justify-between border-b border-muted/50 pb-2">
-              <span className="font-bold text-muted-foreground">To (Recipient):</span>
-              <span className="font-semibold text-emerald-600 dark:text-emerald-400">{sentSuccessDetails.recipient}</span>
+              <span className="font-bold text-muted-foreground">To (Recipients):</span>
+              <span className="font-semibold text-emerald-600 dark:text-emerald-400">ankit.a@coforge.com, omparashuram.b@coforge.com</span>
             </div>
             <div className="flex justify-between border-b border-muted/50 pb-2">
               <span className="font-bold text-muted-foreground">Subject:</span>
@@ -467,7 +467,7 @@ export function AccountRequestForm({ onSubmit }: AccountRequestFormProps) {
             <div className="flex justify-between pt-1">
               <span className="font-bold text-muted-foreground">Delivery:</span>
               <span className="inline-flex items-center gap-1 text-emerald-600 font-bold">
-                <Check size={13} /> Automated email sent to ankit.a@coforge.com
+                <Check size={13} /> Automated email sent to ankit.a@coforge.com &amp; omparashuram.b@coforge.com
               </span>
             </div>
           </div>
@@ -494,7 +494,7 @@ export function AccountRequestForm({ onSubmit }: AccountRequestFormProps) {
           <div>
             <h2 className="text-lg font-bold">AWS Account Request Form</h2>
             <p className="text-xs text-muted-foreground">
-              Submit your account request to directly notify <span className="font-semibold text-foreground">ankit.a@coforge.com</span>
+              Submit your account request to directly notify <span className="font-semibold text-foreground">ankit.a@coforge.com</span> &amp; <span className="font-semibold text-foreground">omparashuram.b@coforge.com</span>
             </p>
           </div>
         </div>
