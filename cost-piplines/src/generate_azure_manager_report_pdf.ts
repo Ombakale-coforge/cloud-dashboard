@@ -993,6 +993,7 @@ export async function generateAzureReport(options: { htmlOnly?: boolean } = {}):
   console.log(`🖨️ Rendering Azure PDF via ${path.basename(browserExe)}...`);
   execFileSync(browserExe, [
     '--headless',
+    '--no-sandbox',
     '--disable-gpu',
     '--no-pdf-header-footer',
     '--no-first-run',

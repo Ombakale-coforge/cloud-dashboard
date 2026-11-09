@@ -15,7 +15,7 @@ import { useAuth } from "@/lib/auth";
 import { AdminRequestsModal } from "./AdminRequestsModal";
 import { useAccountRequests } from "@/lib/useAccountRequests";
 
-export type Provider = "aws" | "azure";
+export type Provider = "aws" | "azure" | "gcp";
 
 export interface AccountOption {
     id: string;
@@ -124,7 +124,7 @@ export function Sidebar({
                         <div className="flex items-center gap-2">
                             <SlidersHorizontal className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
                             <span className="text-sm font-bold text-slate-900 dark:text-white">
-                                {activeProvider === "aws" ? "AWS Options" : "Azure Options"}
+                                {activeProvider === "aws" ? "AWS Options" : activeProvider === "azure" ? "Azure Options" : "GCP Options"}
                             </span>
                         </div>
                         <button

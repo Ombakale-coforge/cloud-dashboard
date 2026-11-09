@@ -1,8 +1,8 @@
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { BarChart3, Layers, LayoutGrid } from "lucide-react";
+import { BarChart3, Layers, LayoutGrid, Boxes } from "lucide-react";
 
-export type Provider = "aws" | "azure";
+export type Provider = "aws" | "azure" | "gcp";
 
 export interface AccountOption {
     id: string;
@@ -14,6 +14,7 @@ export interface AccountOption {
 
 export type AwsAccountOption = AccountOption;
 export type AzureAccountOption = AccountOption;
+export type GcpProjectOption = AccountOption;
 
 export interface NavbarProps {
     months?: string[];
@@ -37,24 +38,33 @@ export function Navbar({
     const navigate = useNavigate();
     const isLinkedAccounts = location.pathname.startsWith("/linked-accounts");
     const isSubscriptions = location.pathname.startsWith("/azure/subscriptions") || location.pathname.startsWith("/azure/linked-accounts");
+    const isGcpProjects = location.pathname.startsWith("/gcp/projects");
+    const isInventory = location.pathname.startsWith("/inventory") || location.pathname.startsWith("/resources");
     const isOverview =
         location.pathname === "/aws" ||
         location.pathname === "/dashboard" ||
-        location.pathname === "/azure";
+        location.pathname === "/azure" ||
+        location.pathname === "/gcp";
 
     const handleProviderToggle = (v: Provider) => {
         onProviderChange(v);
         if (v === "azure") {
-            if (isLinkedAccounts) {
+            if (isLinkedAccounts || isGcpProjects) {
                 navigate("/azure/subscriptions");
             } else {
                 navigate("/azure");
             }
         } else if (v === "aws") {
-            if (isSubscriptions) {
+            if (isSubscriptions || isGcpProjects) {
                 navigate("/linked-accounts");
             } else {
                 navigate("/aws");
+            }
+        } else if (v === "gcp") {
+            if (isLinkedAccounts || isSubscriptions) {
+                navigate("/gcp/projects");
+            } else {
+                navigate("/gcp");
             }
         }
     };
@@ -74,7 +84,13 @@ export function Navbar({
                         </Link>
                     </div>
                     <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                        {activeProvider === "aws" ? "Live AWS Cost Analytics" : "Live Azure Cost Analytics"}
+                        {isInventory
+                            ? "Multi-Cloud Resource Inventory"
+                            : activeProvider === "aws"
+                            ? "Live AWS Cost Analytics"
+                            : activeProvider === "azure"
+                            ? "Live Azure Cost Analytics"
+                            : "Live GCP Cost & BigQuery Analytics"}
                     </p>
                 </div>
 
@@ -110,8 +126,19 @@ export function Navbar({
                             <Layers className="w-3.5 h-3.5" />
                             Linked Accounts
                         </Link>
+                        <Link
+                            to="/inventory"
+                            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md transition-all ${
+                                isInventory
+                                    ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs"
+                                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200"
+                            }`}
+                        >
+                            <Boxes className="w-3.5 h-3.5" />
+                            Inventory
+                        </Link>
                     </nav>
-                ) : (
+                ) : activeProvider === "azure" ? (
                     <nav className="hidden sm:flex items-center gap-1 bg-slate-100 dark:bg-slate-800/60 p-1 rounded-lg border border-slate-200/80 dark:border-slate-700/80">
                         <Link
                             to="/"
@@ -142,34 +169,97 @@ export function Navbar({
                             <Layers className="w-3.5 h-3.5" />
                             Subscriptions
                         </Link>
+                        <Link
+                            to="/inventory"
+                            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md transition-all ${
+                                isInventory
+                                    ? "bg-white dark:bg-slate-900 text-sky-600 dark:text-sky-400 shadow-xs"
+                                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200"
+                            }`}
+                        >
+                            <Boxes className="w-3.5 h-3.5" />
+                            Inventory
+                        </Link>
+                    </nav>
+                ) : (
+                    <nav className="hidden sm:flex items-center gap-1 bg-slate-100 dark:bg-slate-800/60 p-1 rounded-lg border border-slate-200/80 dark:border-slate-700/80">
+                        <Link
+                            to="/"
+                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 transition-all"
+                        >
+                            <LayoutGrid className="w-3.5 h-3.5" />
+                            Multi-Cloud
+                        </Link>
+                        <Link
+                            to="/gcp"
+                            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md transition-all ${
+                                isOverview
+                                    ? "bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-xs"
+                                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200"
+                            }`}
+                        >
+                            <BarChart3 className="w-3.5 h-3.5" />
+                            Overview
+                        </Link>
+                        <Link
+                            to="/gcp/projects"
+                            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md transition-all ${
+                                isGcpProjects
+                                    ? "bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-xs"
+                                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200"
+                            }`}
+                        >
+                            <Layers className="w-3.5 h-3.5" />
+                            Projects
+                        </Link>
+                        <Link
+                            to="/inventory"
+                            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md transition-all ${
+                                isInventory
+                                    ? "bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-xs"
+                                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200"
+                            }`}
+                        >
+                            <Boxes className="w-3.5 h-3.5" />
+                            Inventory
+                        </Link>
                     </nav>
                 )}
             </div>
 
-            {/* Right Controls: AWS/Azure Toggle + User & Logout */}
-            <div className="flex items-center gap-4">
-                <Tabs
-                    value={activeProvider}
-                    onValueChange={(v) => handleProviderToggle(v as Provider)}
-                    className="w-auto"
-                >
-                    <TabsList className="bg-slate-100 dark:bg-slate-800 p-1 rounded-lg border border-slate-200 dark:border-slate-700">
-                        <TabsTrigger
-                            value="aws"
-                            className="px-4 py-1.5 text-xs font-semibold data-[state=active]:bg-white data-[state=active]:text-indigo-600 data-[state=active]:shadow-xs dark:data-[state=active]:bg-slate-900 dark:data-[state=active]:text-indigo-400 rounded-md transition-all cursor-pointer"
-                        >
-                            AWS
-                        </TabsTrigger>
+            {/* Right Controls: 3-Way Cloud Toggle (AWS | Azure | GCP) */}
+            {!isInventory && (
+                <div className="flex items-center gap-4">
+                    <Tabs
+                        value={activeProvider}
+                        onValueChange={(v) => handleProviderToggle(v as Provider)}
+                        className="w-auto"
+                    >
+                        <TabsList className="bg-slate-100 dark:bg-slate-800 p-1 rounded-lg border border-slate-200 dark:border-slate-700">
+                            <TabsTrigger
+                                value="aws"
+                                className="px-3.5 py-1.5 text-xs font-semibold data-[state=active]:bg-white data-[state=active]:text-indigo-600 data-[state=active]:shadow-xs dark:data-[state=active]:bg-slate-900 dark:data-[state=active]:text-indigo-400 rounded-md transition-all cursor-pointer"
+                            >
+                                AWS
+                            </TabsTrigger>
 
-                        <TabsTrigger
-                            value="azure"
-                            className="px-4 py-1.5 text-xs font-semibold data-[state=active]:bg-white data-[state=active]:text-sky-600 data-[state=active]:shadow-xs dark:data-[state=active]:bg-slate-900 dark:data-[state=active]:text-sky-400 rounded-md transition-all cursor-pointer"
-                        >
-                            Azure
-                        </TabsTrigger>
-                    </TabsList>
-                </Tabs>
-            </div>
+                            <TabsTrigger
+                                value="azure"
+                                className="px-3.5 py-1.5 text-xs font-semibold data-[state=active]:bg-white data-[state=active]:text-sky-600 data-[state=active]:shadow-xs dark:data-[state=active]:bg-slate-900 dark:data-[state=active]:text-sky-400 rounded-md transition-all cursor-pointer"
+                            >
+                                Azure
+                            </TabsTrigger>
+
+                            <TabsTrigger
+                                value="gcp"
+                                className="px-3.5 py-1.5 text-xs font-semibold data-[state=active]:bg-white data-[state=active]:text-blue-600 data-[state=active]:shadow-xs dark:data-[state=active]:bg-slate-900 dark:data-[state=active]:text-blue-400 rounded-md transition-all cursor-pointer"
+                            >
+                                GCP
+                            </TabsTrigger>
+                        </TabsList>
+                    </Tabs>
+                </div>
+            )}
         </header>
     );
 }

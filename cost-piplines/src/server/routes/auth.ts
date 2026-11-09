@@ -17,6 +17,7 @@ const DEFAULT_ADMIN_EMAILS = [
   'omparashuram.b@coforge.com',
   'jayant.goyal@coforge.com',
   'ankit.a@coforge.com',
+  'Rajiv.Khanayat@coforge.com',
 ];
 
 function getAdminEmails(): Set<string> {

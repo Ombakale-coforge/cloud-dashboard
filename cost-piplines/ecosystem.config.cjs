@@ -13,5 +13,18 @@ module.exports = {
         PORT: 3001,
       },
     },
+    {
+      name: 'daily-cost-report-email',
+      script: 'node_modules/tsx/dist/cli.mjs',
+      args: 'src/cron_manager_report.ts',
+      cwd: __dirname,
+      autorestart: false,
+      cron_restart: '0 9 * * *', // Runs every day at 9:00 AM (server local time)
+      watch: false,
+      env: {
+        NODE_ENV: 'production',
+      },
+    },
   ],
 };
+

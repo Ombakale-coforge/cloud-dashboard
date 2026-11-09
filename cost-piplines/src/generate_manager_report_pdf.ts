@@ -1214,6 +1214,7 @@ export async function generateAwsReport(options: { htmlOnly?: boolean } = {}): P
   console.log(`🖨️ Rendering AWS PDF via ${path.basename(browserExe)}...`);
   execFileSync(browserExe, [
     '--headless',
+    '--no-sandbox',
     '--disable-gpu',
     '--no-pdf-header-footer',
     '--no-first-run',
