@@ -18,8 +18,8 @@ async function sendRequestNotificationEmail(reqData: any) {
     const credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
     const { token } = await credential.getToken('https://graph.microsoft.com/.default');
 
-    const sender = 'omparashuram.b@coforge.com';
-    const recipients = ['ankit.a@coforge.com', 'omparashuram.b@coforge.com'];
+    const sender = process.env.SENDER_EMAIL?.trim() || 'omparashuram.b@coforge.com';
+    const recipients = ['ankit.a@coforge.com'];
     const subject = `AWS Account Provisioning Request: ${reqData.projectName} (${reqData.division})`;
 
     const htmlContent = `
@@ -30,7 +30,7 @@ async function sendRequestNotificationEmail(reqData: any) {
         </div>
         
         <div style="padding: 24px;">
-          <p style="margin-top: 0; font-size: 15px; font-weight: bold;">Dear Ankit &amp; Om,</p>
+          <p style="margin-top: 0; font-size: 15px; font-weight: bold;">Dear Ankit,</p>
           <p style="font-size: 14px; line-height: 1.5; color: #475569;">
             A new AWS Account Request has been submitted by <strong>${reqData.submitterName || reqData.submitterEmail}</strong> (<code>${reqData.submitterEmail}</code>).
           </p>

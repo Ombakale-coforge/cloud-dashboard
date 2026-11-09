@@ -252,22 +252,9 @@ function validateStep(step: number, data: FormData): Errors {
 
 async function sendEmailDirectly(data: FormData) {
   const { recipient, sender, subject, body } = buildEmailContent(data);
-
-  // Primary: open the user's email client (mailto:) with everything
-  // pre-filled, so the mail is actually delivered from their own account.
-  sendViaMailto(data);
-  // Bonus: also fire the Formspree web dispatch (best-effort).
+  // Web-based delivery fallback (no mailto redirect popup)
   await tryFormspree(data);
-
   return { recipient, sender, subject, body };
-}
-
-function sendViaMailto(data: FormData) {
-  const { recipient, subject, body } = buildEmailContent(data);
-  const mailtoLink = `mailto:${recipient}?subject=${encodeURIComponent(
-    subject
-  )}&body=${encodeURIComponent(body)}`;
-  window.location.href = mailtoLink;
 }
 
 async function tryFormspree(data: FormData): Promise<boolean> {
@@ -291,10 +278,10 @@ async function tryFormspree(data: FormData): Promise<boolean> {
 
 function buildEmailContent(data: FormData) {
   const sender = data.submitterEmail.trim();
-  const recipient = "ankit.a@coforge.com,omparashuram.b@coforge.com";
+  const recipient = "ankit.a@coforge.com";
   const subject = `AWS Account Request: ${data.projectName} (${data.division})`;
 
-  const formattedBody = `Dear Ankit & Om,
+  const formattedBody = `Dear Ankit,
 
 Please find the AWS Account Provisioning Request details submitted by ${sender}:
 
@@ -456,10 +443,10 @@ export function AccountRequestForm({ onSubmit }: AccountRequestFormProps) {
 
           <div className="space-y-2 max-w-lg">
             <h3 className="text-2xl font-bold tracking-tight text-foreground">
-              Request Ready to Send!
+              Request Submitted Successfully!
             </h3>
             <p className="text-sm text-muted-foreground">
-              Your email client has been opened with all the request details pre-filled for <span className="font-semibold text-foreground">ankit.a@coforge.com</span> &amp; <span className="font-semibold text-foreground">omparashuram.b@coforge.com</span>. Just press send to deliver the request.
+              Your account provisioning request has been saved and automatically routed to <span className="font-semibold text-foreground">ankit.a@coforge.com</span>.
             </p>
           </div>
 
@@ -470,7 +457,7 @@ export function AccountRequestForm({ onSubmit }: AccountRequestFormProps) {
               <span className="font-semibold text-indigo-600 dark:text-indigo-400">{sentSuccessDetails.sender}</span>
             </div>
             <div className="flex justify-between border-b border-muted/50 pb-2">
-              <span className="font-bold text-muted-foreground">To (Recipients):</span>
+              <span className="font-bold text-muted-foreground">To (Recipient):</span>
               <span className="font-semibold text-emerald-600 dark:text-emerald-400">{sentSuccessDetails.recipient}</span>
             </div>
             <div className="flex justify-between border-b border-muted/50 pb-2">
@@ -480,7 +467,7 @@ export function AccountRequestForm({ onSubmit }: AccountRequestFormProps) {
             <div className="flex justify-between pt-1">
               <span className="font-bold text-muted-foreground">Delivery:</span>
               <span className="inline-flex items-center gap-1 text-emerald-600 font-bold">
-                <Check size={13} /> Email client opened — click Send to deliver
+                <Check size={13} /> Automated email sent to ankit.a@coforge.com
               </span>
             </div>
           </div>
@@ -507,7 +494,7 @@ export function AccountRequestForm({ onSubmit }: AccountRequestFormProps) {
           <div>
             <h2 className="text-lg font-bold">AWS Account Request Form</h2>
             <p className="text-xs text-muted-foreground">
-              Submit your account request to directly send all details to <span className="font-semibold text-foreground">ankit.a@coforge.com</span> &amp; <span className="font-semibold text-foreground">omparashuram.b@coforge.com</span>
+              Submit your account request to directly notify <span className="font-semibold text-foreground">ankit.a@coforge.com</span>
             </p>
           </div>
         </div>
