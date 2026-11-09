@@ -1,7 +1,118 @@
 import { Router, Request, Response } from 'express';
 import { prisma } from '../db.ts';
+import { ClientSecretCredential } from '@azure/identity';
 
 const router = Router();
+
+async function sendRequestNotificationEmail(reqData: any) {
+  try {
+    const tenantId = process.env.AZURE_TENANT_ID || process.env.AZURE_AD_TENANT_ID;
+    const clientId = process.env.AZURE_CLIENT_ID || process.env.AZURE_AD_CLIENT_ID;
+    const clientSecret = process.env.AZURE_CLIENT_SECRET || process.env.AZURE_AD_CLIENT_SECRET;
+
+    if (!tenantId || !clientId || !clientSecret) {
+      console.warn('⚠️ [Email] Azure credentials missing. Skipping automated notification.');
+      return;
+    }
+
+    const credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
+    const { token } = await credential.getToken('https://graph.microsoft.com/.default');
+
+    const sender = 'omparashuram.b@coforge.com';
+    const recipients = ['ankit.a@coforge.com', 'omparashuram.b@coforge.com'];
+    const subject = `AWS Account Provisioning Request: ${reqData.projectName} (${reqData.division})`;
+
+    const htmlContent = `
+      <div style="font-family: Arial, sans-serif; max-width: 650px; margin: 0 auto; color: #1e293b; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden;">
+        <div style="background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); padding: 24px; color: #ffffff;">
+          <h2 style="margin: 0 0 6px 0; font-size: 20px;">AWS Account Provisioning Request</h2>
+          <p style="margin: 0; font-size: 13px; opacity: 0.9;">Cloud Cost Intelligence &amp; FinOps Governance Portal</p>
+        </div>
+        
+        <div style="padding: 24px;">
+          <p style="margin-top: 0; font-size: 15px; font-weight: bold;">Dear Ankit &amp; Om,</p>
+          <p style="font-size: 14px; line-height: 1.5; color: #475569;">
+            A new AWS Account Request has been submitted by <strong>${reqData.submitterName || reqData.submitterEmail}</strong> (<code>${reqData.submitterEmail}</code>).
+          </p>
+
+          <table style="width: 100%; border-collapse: collapse; margin-top: 18px; font-size: 13px;">
+            <thead>
+              <tr style="background: #f8fafc; border-bottom: 2px solid #e2e8f0; text-align: left;">
+                <th style="padding: 10px; color: #475569;" colspan="2">1. Project &amp; Department Information</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr style="border-bottom: 1px solid #f1f5f9;"><td style="padding: 8px 10px; color: #64748b; width: 40%;">Division / BU:</td><td style="padding: 8px 10px; font-weight: bold;">${reqData.division}</td></tr>
+              <tr style="border-bottom: 1px solid #f1f5f9;"><td style="padding: 8px 10px; color: #64748b;">Project / Dept:</td><td style="padding: 8px 10px; font-weight: bold;">${reqData.projectName}</td></tr>
+              <tr style="border-bottom: 1px solid #f1f5f9;"><td style="padding: 8px 10px; color: #64748b;">Environments:</td><td style="padding: 8px 10px;">${reqData.accountEnvironment || 'DEV, UAT, PROD'}</td></tr>
+              <tr style="border-bottom: 1px solid #f1f5f9;"><td style="padding: 8px 10px; color: #64748b;">Point of Contact:</td><td style="padding: 8px 10px;">${reqData.pointOfContact}</td></tr>
+              <tr style="border-bottom: 1px solid #f1f5f9;"><td style="padding: 8px 10px; color: #64748b;">Account Manager:</td><td style="padding: 8px 10px;">${reqData.accountManager || 'N/A'}</td></tr>
+              <tr style="border-bottom: 1px solid #f1f5f9;"><td style="padding: 8px 10px; color: #64748b;">Business Justification:</td><td style="padding: 8px 10px;">${reqData.businessJustification || 'N/A'}</td></tr>
+            </tbody>
+          </table>
+
+          <table style="width: 100%; border-collapse: collapse; margin-top: 18px; font-size: 13px;">
+            <thead>
+              <tr style="background: #f8fafc; border-bottom: 2px solid #e2e8f0; text-align: left;">
+                <th style="padding: 10px; color: #475569;" colspan="2">2. Account Configuration &amp; Governance</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr style="border-bottom: 1px solid #f1f5f9;"><td style="padding: 8px 10px; color: #64748b; width: 40%;">Admin Emails:</td><td style="padding: 8px 10px; font-weight: bold;">${Array.isArray(reqData.adminEmails) ? reqData.adminEmails.join(', ') : reqData.adminEmails}</td></tr>
+              <tr style="border-bottom: 1px solid #f1f5f9;"><td style="padding: 8px 10px; color: #64748b;">Managed By Coforge:</td><td style="padding: 8px 10px;">${reqData.managedByCoforge ? 'Yes' : 'No'}</td></tr>
+              <tr style="border-bottom: 1px solid #f1f5f9;"><td style="padding: 8px 10px; color: #64748b;">External Audiences:</td><td style="padding: 8px 10px;">${reqData.externalAudienceAccess ? 'Yes' : 'No'}</td></tr>
+              <tr style="border-bottom: 1px solid #f1f5f9;"><td style="padding: 8px 10px; color: #64748b;">Customer / Conf Data:</td><td style="padding: 8px 10px;">${reqData.storesCustomerData ? 'Yes' : 'No'} / ${reqData.storesConfidentialData ? 'Yes' : 'No'}</td></tr>
+            </tbody>
+          </table>
+
+          <table style="width: 100%; border-collapse: collapse; margin-top: 18px; font-size: 13px;">
+            <thead>
+              <tr style="background: #f8fafc; border-bottom: 2px solid #e2e8f0; text-align: left;">
+                <th style="padding: 10px; color: #475569;" colspan="2">3. Financials &amp; Budget</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr style="border-bottom: 1px solid #f1f5f9;"><td style="padding: 8px 10px; color: #64748b; width: 40%;">Estimated Monthly Cost:</td><td style="padding: 8px 10px; font-size: 14px; font-weight: bold; color: #16a34a;">$${Number(reqData.estimatedMonthlyCost || 0).toLocaleString()} USD</td></tr>
+              <tr style="border-bottom: 1px solid #f1f5f9;"><td style="padding: 8px 10px; color: #64748b;">WBS Code:</td><td style="padding: 8px 10px;">${reqData.wbsCode || 'N/A'}</td></tr>
+              <tr style="border-bottom: 1px solid #f1f5f9;"><td style="padding: 8px 10px; color: #64748b;">Cost Center:</td><td style="padding: 8px 10px;">${reqData.costCenter || 'N/A'}</td></tr>
+              <tr style="border-bottom: 1px solid #f1f5f9;"><td style="padding: 8px 10px; color: #64748b;">BU Finance Controller:</td><td style="padding: 8px 10px;">${reqData.buFinanceController || 'N/A'}</td></tr>
+            </tbody>
+          </table>
+
+          <div style="margin-top: 24px; padding: 14px; background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 8px; text-align: center;">
+            <p style="margin: 0 0 8px 0; font-size: 13px; color: #3730a3; font-weight: bold;">Review and approve this request directly in the FinOps Admin Command Center.</p>
+            <p style="margin: 0; font-size: 11px; color: #6366f1;">Request ID: ${reqData.id || reqData.legacyId || 'New'} &bull; Submitted: ${new Date().toLocaleString()}</p>
+          </div>
+        </div>
+      </div>
+    `;
+
+    const res = await fetch(
+      `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(sender)}/sendMail`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: {
+            subject,
+            body: { contentType: 'HTML', content: htmlContent },
+            toRecipients: recipients.map((address) => ({ emailAddress: { address } })),
+          },
+          saveToSentItems: true,
+        }),
+      }
+    );
+
+    if (res.status === 202) {
+      console.log('📧 [Automated Email] Request email dispatched via Microsoft Graph to:', recipients.join(', '));
+    } else {
+      const errText = await res.text();
+      console.warn(`⚠️ [Automated Email] Graph sendMail returned status ${res.status}:`, errText);
+    }
+  } catch (emailErr: any) {
+    console.error('⚠️ [Automated Email] Failed to send email via Graph:', emailErr.message);
+  }
+}
 
 function toBool(val: any): boolean {
   if (typeof val === 'boolean') return val;
@@ -235,6 +346,12 @@ router.post('/', async (req: Request, res: Response) => {
     });
 
     const formatted = formatAccountRequest(newRequest);
+
+    // Automatically send email to ankit.a@coforge.com & omparashuram.b@coforge.com via Microsoft Graph
+    sendRequestNotificationEmail(formatted).catch((e) =>
+      console.error('Background notification error:', e.message)
+    );
+
     res.status(201).json({
       success: true,
       message: 'Account request submitted successfully.',
