@@ -41,7 +41,7 @@ interface TopSpendRow {
   sharePct: number;
 }
 
-interface AzureReportData {
+export interface AzureReportData {
   billingScopeName: string;
   reportMonth: string;
   generatedAt: string;
@@ -304,13 +304,19 @@ async function fetchReportDataFromCsv(): Promise<AzureReportData> {
   };
 }
 
-async function fetchReportData(): Promise<AzureReportData> {
+export async function fetchReportData(): Promise<AzureReportData> {
   try {
     return await fetchReportDataFromDb();
   } catch (dbErr: any) {
-    console.warn(
-      `⚠️ SQL Server unreachable (${dbErr.message?.split('\n')[0]}). Falling back to local AzureUsageReports CSVs...`
-    );
+    if (dbErr.message?.includes('No Azure report run found')) {
+      console.warn(
+        `⚠️  No completed Azure report run found in SQL Server. Run 'npm run report:azure' to compute reports from active usage records. Falling back to local AzureUsageReports CSVs...`
+      );
+    } else {
+      console.warn(
+        `⚠️  Could not query SQL Server (${dbErr.message?.split('\n')[0]}). Falling back to local AzureUsageReports CSVs...`
+      );
+    }
     return await fetchReportDataFromCsv();
   }
 }
@@ -406,7 +412,7 @@ function renderRechartsSpendChart(
   `;
 }
 
-function buildAzureReportHtml(data: AzureReportData): string {
+export function buildAzureReportHtml(data: AzureReportData): string {
   const isNetOver = data.netVariance < 0;
   const utilizationBarWidth = Math.min(100, Math.max(0, data.overallUtilizationPct));
   const avg6MonthSpend =
@@ -679,83 +685,116 @@ function buildAzureReportHtml(data: AzureReportData): string {
 </head>
 <body>
   <!-- Header -->
-  <div class="header">
-    <div>
-      <div class="header-title">Azure Cost Intelligence — Executive Budget &amp; Spend Report</div>
-      <div class="header-subtitle">Scope: ${data.billingScopeName}</div>
-    </div>
-    <div class="header-meta">
-      <div class="badge-period">Billing Period: ${formatMonthLabel(data.reportMonth)}</div>
-      <div>Generated: ${data.generatedAt}</div>
-    </div>
-  </div>
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="width: 100%; background: linear-gradient(135deg, #001f3f 0%, #004080 50%, #0078d4 100%); color: #ffffff; padding: 16px 20px; border-radius: 10px; margin-bottom: 14px;">
+    <tr>
+      <td align="left" style="vertical-align: middle;">
+        <div style="font-size: 17px; font-weight: 800; letter-spacing: -0.3px; color: #ffffff;">Azure Cost Intelligence — Executive Budget &amp; Spend Report</div>
+        <div style="font-size: 11px; color: #bae6fd; margin-top: 2px;">Scope: ${data.billingScopeName}</div>
+      </td>
+      <td align="right" style="vertical-align: middle;">
+        <div style="display: inline-block; background: rgba(14, 165, 233, 0.35); border: 1px solid rgba(186, 230, 253, 0.4); color: #ffffff; font-weight: 700; font-size: 10.5px; padding: 3px 9px; border-radius: 6px; margin-bottom: 3px;">
+          Billing Period: ${formatMonthLabel(data.reportMonth)}
+        </div>
+        <div style="font-size: 10px; color: #e0f2fe;">Generated: ${data.generatedAt}</div>
+      </td>
+    </tr>
+  </table>
 
   <!-- Section 1: Current Spend vs Total Budget -->
   <div class="section">
-    <div class="section-header">
-      <div>
-        <div class="section-title">1. Current Spend vs. Total Budget Summary</div>
-        <div class="section-subtitle">Consolidated monthly spend compared against configured Azure Subscriptions Budgets</div>
-      </div>
-    </div>
+    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid #f1f5f9;">
+      <tr>
+        <td align="left">
+          <div class="section-title">1. Current Spend vs. Total Budget Summary</div>
+          <div class="section-subtitle">Consolidated monthly spend compared against configured Azure Subscriptions Budgets</div>
+        </td>
+      </tr>
+    </table>
 
-    <div class="kpi-grid">
-      <div class="kpi-card highlight-azure">
-        <div class="kpi-label">Current Month Spend</div>
-        <div class="kpi-value">${fmtCurrency(data.currentMonthSpend)}</div>
-        <div class="kpi-sub">Prior Month: ${fmtCurrency(data.previousMonthSpend)} (${data.momPercentChange >= 0 ? '+' : ''}${data.momPercentChange.toFixed(1)}% MoM)</div>
-      </div>
+    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="width: 100%; border-collapse: separate; border-spacing: 8px 0; margin-bottom: 11px;">
+      <tr>
+        <td width="25%" style="vertical-align: top; border: 1px solid #bae6fd; border-radius: 8px; padding: 10px 12px; background: #f0f9ff;">
+          <div class="kpi-label">Current Month Spend</div>
+          <div class="kpi-value">${fmtCurrency(data.currentMonthSpend)}</div>
+          <div class="kpi-sub">Prior Month: ${fmtCurrency(data.previousMonthSpend)} (${data.momPercentChange >= 0 ? '+' : ''}${data.momPercentChange.toFixed(1)}% MoM)</div>
+        </td>
+        <td width="25%" style="vertical-align: top; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 12px; background: #f8fafc;">
+          <div class="kpi-label">Total Budget</div>
+          <div class="kpi-value">${fmtCurrency(data.totalBudget)}</div>
+          <div class="kpi-sub">Across ${data.activeBudgetCount} configured subscription budgets</div>
+        </td>
+        <td width="25%" style="vertical-align: top; border: 1px solid ${data.remainingBudget > 0 ? '#a7f3d0' : '#fecdd3'}; border-radius: 8px; padding: 10px 12px; background: ${data.remainingBudget > 0 ? '#ecfdf5' : '#fff1f2'};">
+          <div class="kpi-label">Remaining Budget</div>
+          <div class="kpi-value ${data.remainingBudget > 0 ? 'emerald' : 'rose'}">${fmtCurrency(data.remainingBudget)}</div>
+          <div class="kpi-sub">${
+            isNetOver
+              ? `Net Variance: -${fmtCurrency(Math.abs(data.netVariance))} (Exceeded)`
+              : `Available before reaching total cap`
+          }</div>
+        </td>
+        <td width="25%" style="vertical-align: top; border: 1px solid #fecdd3; border-radius: 8px; padding: 10px 12px; background: #fff1f2;">
+          <div class="kpi-label">Total Over-Spend</div>
+          <div class="kpi-value rose">+${fmtCurrency(data.totalOverSpend)}</div>
+          <div class="kpi-sub">Across ${data.overBudgetCount} breached budgets</div>
+        </td>
+      </tr>
+    </table>
 
-      <div class="kpi-card">
-        <div class="kpi-label">Total Budget</div>
-        <div class="kpi-value">${fmtCurrency(data.totalBudget)}</div>
-        <div class="kpi-sub">Across ${data.activeBudgetCount} configured subscription budgets</div>
-      </div>
-
-      <div class="kpi-card ${data.remainingBudget > 0 ? 'highlight-emerald' : 'highlight-rose'}">
-        <div class="kpi-label">Remaining Budget</div>
-        <div class="kpi-value ${data.remainingBudget > 0 ? 'emerald' : 'rose'}">${fmtCurrency(data.remainingBudget)}</div>
-        <div class="kpi-sub">${
-          isNetOver
-            ? `Net Variance: -${fmtCurrency(Math.abs(data.netVariance))} (Exceeded)`
-            : `Available before reaching total cap`
-        }</div>
-      </div>
-
-      <div class="kpi-card highlight-rose">
-        <div class="kpi-label">Total Over-Spend</div>
-        <div class="kpi-value rose">+${fmtCurrency(data.totalOverSpend)}</div>
-        <div class="kpi-sub">Across ${data.overBudgetCount} breached budgets</div>
-      </div>
-    </div>
-
-    <div class="progress-box">
-      <div class="progress-top">
-        <span>Overall Budget Consumption (${fmtCurrency(data.currentMonthSpend)} of ${fmtCurrency(data.totalBudget)})</span>
-        <span style="color: ${data.overallUtilizationPct > 100 ? '#be123c' : '#0284c7'}; font-weight: 800;">
-          ${data.overallUtilizationPct.toFixed(1)}% Utilized
-        </span>
-      </div>
-      <div class="progress-track">
-        <div class="progress-fill" style="width: ${utilizationBarWidth}%;"></div>
-      </div>
+    <div class="progress-box" style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 12px;">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom: 5px;">
+        <tr>
+          <td align="left" style="font-size: 10.5px; font-weight: 600; color: #334155;">
+            Overall Budget Consumption (${fmtCurrency(data.currentMonthSpend)} of ${fmtCurrency(data.totalBudget)})
+          </td>
+          <td align="right" style="color: ${data.overallUtilizationPct > 100 ? '#be123c' : '#0284c7'}; font-weight: 800; font-size: 10.5px;">
+            ${data.overallUtilizationPct.toFixed(1)}% Utilized
+          </td>
+        </tr>
+      </table>
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="width: 100%; height: 8px; background: #e2e8f0; border-radius: 999px; overflow: hidden;">
+        <tr>
+          <td width="${utilizationBarWidth}%" style="height: 8px; background: ${data.overallUtilizationPct > 100 ? '#e11d48' : '#0284c7'}; border-radius: 999px;"></td>
+          <td width="${Math.max(0, 100 - utilizationBarWidth)}%" style="height: 8px; background: #e2e8f0;"></td>
+        </tr>
+      </table>
     </div>
   </div>
 
   <!-- Section 2: 6-Month Spending Trend (Recharts-Style) -->
   <div class="section">
-    <div class="section-header">
-      <div>
-        <div class="section-title">2. 6-Month Spending Trend</div>
-        <div class="section-subtitle">Monthly spend progression with 6-month historical average</div>
-      </div>
-      <div>
-        <span class="badge-avg">6-Month Avg: ${fmtCurrency(avg6MonthSpend)}/mo</span>
-      </div>
-    </div>
+    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid #f1f5f9;">
+      <tr>
+        <td align="left">
+          <div class="section-title">2. 6-Month Spending Trend</div>
+          <div class="section-subtitle">Monthly spend progression with 6-month historical average</div>
+        </td>
+        <td align="right">
+          <span class="badge-avg" style="display: inline-block; background: #f0fdf4; border: 1px solid #bbf7d0; color: #166534; font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 6px;">
+            6-Month Avg: ${fmtCurrency(avg6MonthSpend)}/mo
+          </span>
+        </td>
+      </tr>
+    </table>
     <div style="width: 100%; display: flex; justify-content: center; padding: 2px 0;">
       ${renderRechartsSpendChart(data.last6MonthsSpend, '₹', '#0078d4', '#bae6fd')}
     </div>
+    ${
+      data.last6MonthsSpend && data.last6MonthsSpend.length > 0
+        ? `<table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top: 8px; border-top: 1px dashed #cbd5e1; padding-top: 6px; font-size: 10px; text-align: center;">
+            <tr>
+              ${data.last6MonthsSpend
+                .map(
+                  (p) => `
+                <td style="padding: 4px; color: #475569;">
+                  <div style="font-weight: 600; color: #64748b;">${formatMonthLabel(p.month)}</div>
+                  <div style="font-weight: 700; color: #0f172a; margin-top: 2px;">${fmtCurrency(p.spend)}</div>
+                </td>`
+                )
+                .join('')}
+            </tr>
+          </table>`
+        : ''
+    }
   </div>
 
   <!-- Section 3: Top 5 Subscriptions Over Budget -->
@@ -911,7 +950,11 @@ function toWindowsPath(filePath: string): string {
   return `\\\\wsl.localhost\\${distro}${winLinuxPath}`;
 }
 
-async function main() {
+export async function generateAzureReport(options: { htmlOnly?: boolean } = {}): Promise<{
+  htmlPath: string;
+  pdfPath?: string;
+  data: AzureReportData;
+}> {
   console.log('📊 Fetching Azure Spend & Budget metrics...');
   const data = await fetchReportData();
 
@@ -926,13 +969,17 @@ async function main() {
   const html = buildAzureReportHtml(data);
   fs.writeFileSync(htmlPath, html, 'utf-8');
 
+  if (options.htmlOnly || process.argv.includes('--html-only')) {
+    console.log(`✅ Executive HTML report successfully generated at:\n   ${htmlPath}`);
+    return { htmlPath, data };
+  }
+
   const browserExe = findBrowserExecutable();
   if (!browserExe) {
     console.warn(
       `⚠️ Could not find Microsoft Edge or Google Chrome to render PDF automatically.\n   Executive HTML report has been preserved at:\n   ${htmlPath}`
     );
-    console.log('💡 When running in an environment with Chrome or Edge, the PDF will be generated automatically.');
-    process.exit(0);
+    return { htmlPath, data };
   }
 
   const isWindowsExe =
@@ -943,24 +990,31 @@ async function main() {
   const inputTarget = isWindowsExe ? toWindowsPath(htmlPath) : htmlPath;
   const outputTarget = isWindowsExe ? toWindowsPath(pdfPath) : pdfPath;
 
-  console.log(`🖨️ Rendering PDF via ${path.basename(browserExe)}...`);
+  console.log(`🖨️ Rendering Azure PDF via ${path.basename(browserExe)}...`);
   execFileSync(browserExe, [
     '--headless',
     '--disable-gpu',
     '--no-pdf-header-footer',
+    '--no-first-run',
+    '--no-default-browser-check',
+    '--disable-sync',
+    '--disable-background-networking',
+    '--log-level=3',
     `--print-to-pdf=${outputTarget}`,
     inputTarget,
-  ]);
+  ], {
+    stdio: ['ignore', 'pipe', 'ignore'],
+  });
 
-  try {
-    fs.unlinkSync(htmlPath);
-  } catch {}
-
-  console.log(`✅ PDF successfully generated at:\n   ${pdfPath}`);
-  process.exit(0);
+  console.log(`✅ Azure PDF successfully generated at:\n   ${pdfPath}`);
+  return { htmlPath, pdfPath, data };
 }
 
-main().catch((err) => {
-  console.error('❌ Failed to generate Azure PDF report:', err.message);
-  process.exit(1);
-});
+if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+  generateAzureReport()
+    .then(() => process.exit(0))
+    .catch((err) => {
+      console.error('❌ Failed to generate Azure PDF report:', err.message);
+      process.exit(1);
+    });
+}

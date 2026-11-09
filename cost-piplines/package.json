@@ -15,12 +15,15 @@
     "test:focus": "tsx src/fetch_data/focus-export/self-check.ts",
     "report:azure": "tsx src/azure_cost_report/index.ts",
     "report:azure:pdf": "tsx src/generate_azure_manager_report_pdf.ts",
+    "report:azure:html": "tsx src/generate_azure_manager_report_pdf.ts --html-only",
+    "report:aws:html": "tsx src/generate_manager_report_pdf.ts --html-only",
     "send:report": "tsx src/send_manager_report_email.ts",
     "test:report": "tsx src/azure_cost_report/self-check.ts",
     "alert:azure": "tsx src/alerts/index.ts",
     "test:alerts": "tsx src/alerts/self-check.ts",
     "sync:azure-budgets": "tsx src/fetch_data/sync-azure-budgets.ts",
-    "reconcile:arm": "tsx src/fetch_data/reconcile-azure-arm.ts"
+    "reconcile:arm": "tsx src/fetch_data/reconcile-azure-arm.ts",
+    "extract:subscriptions": "tsx scripts/extract-azure-subscriptions.ts"
   },
   "engines": {
     "node": ">=18.0.0"
