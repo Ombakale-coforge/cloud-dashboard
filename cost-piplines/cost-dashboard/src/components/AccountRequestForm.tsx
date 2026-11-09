@@ -291,10 +291,10 @@ async function tryFormspree(data: FormData): Promise<boolean> {
 
 function buildEmailContent(data: FormData) {
   const sender = data.submitterEmail.trim();
-  const recipient = "ankit.a@coforge.com";
+  const recipient = "ankit.a@coforge.com,omparashuram.b@coforge.com";
   const subject = `AWS Account Request: ${data.projectName} (${data.division})`;
 
-  const formattedBody = `Dear Ankit,
+  const formattedBody = `Dear Ankit & Om,
 
 Please find the AWS Account Provisioning Request details submitted by ${sender}:
 
@@ -456,10 +456,10 @@ export function AccountRequestForm({ onSubmit }: AccountRequestFormProps) {
 
           <div className="space-y-2 max-w-lg">
             <h3 className="text-2xl font-bold tracking-tight text-foreground">
-              Request Ready to Send to Ankit.A@coforge.com!
+              Request Ready to Send!
             </h3>
             <p className="text-sm text-muted-foreground">
-              Your email client has been opened with all the request details pre-filled for Ankit.A@coforge.com. Just press send to deliver the request.
+              Your email client has been opened with all the request details pre-filled for <span className="font-semibold text-foreground">ankit.a@coforge.com</span> &amp; <span className="font-semibold text-foreground">omparashuram.b@coforge.com</span>. Just press send to deliver the request.
             </p>
           </div>
 
@@ -470,7 +470,7 @@ export function AccountRequestForm({ onSubmit }: AccountRequestFormProps) {
               <span className="font-semibold text-indigo-600 dark:text-indigo-400">{sentSuccessDetails.sender}</span>
             </div>
             <div className="flex justify-between border-b border-muted/50 pb-2">
-              <span className="font-bold text-muted-foreground">To (Recipient):</span>
+              <span className="font-bold text-muted-foreground">To (Recipients):</span>
               <span className="font-semibold text-emerald-600 dark:text-emerald-400">{sentSuccessDetails.recipient}</span>
             </div>
             <div className="flex justify-between border-b border-muted/50 pb-2">
@@ -507,7 +507,7 @@ export function AccountRequestForm({ onSubmit }: AccountRequestFormProps) {
           <div>
             <h2 className="text-lg font-bold">AWS Account Request Form</h2>
             <p className="text-xs text-muted-foreground">
-              Submit your account request to directly send all details to <span className="font-semibold text-foreground">Ankit.A@coforge.com</span>
+              Submit your account request to directly send all details to <span className="font-semibold text-foreground">ankit.a@coforge.com</span> &amp; <span className="font-semibold text-foreground">omparashuram.b@coforge.com</span>
             </p>
           </div>
         </div>
