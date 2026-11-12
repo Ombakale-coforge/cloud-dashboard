@@ -3,6 +3,13 @@ node_modules/
 
 # Secrets 
 .env
+*.json
+!package.json
+!package-lock.json
+!tsconfig.json
+!scripts/package.json
+*.json:Zone.Identifier
+*.Zone.Identifier
 
 #report data
 data/
@@ -12,6 +19,9 @@ AWSReports/
 AzureDashboardReports/
 AzureUsageReports/
 AzureAnomalyAlerts/
+cost-dashboard/*.html
+cost-dashboard/*.pdf
+cost-dashboard/preview_email_body.html
 
 # OS / editor junk
 .DS_Store

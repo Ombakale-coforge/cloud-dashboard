@@ -19,15 +19,19 @@ async function main() {
 
   try {
     // 1. Generate AWS Report PDF
-    console.log('\n[1/3] Generating AWS Executive PDF Report...');
+    console.log('\n[1/4] Generating AWS Executive PDF Report...');
     run('npx tsx src/generate_manager_report_pdf.ts');
 
-    // 2. Generate Azure Report PDF
-    console.log('\n[2/3] Generating Azure Executive PDF Report...');
+    // 2. Generate GCP Report PDF
+    console.log('\n[2/4] Generating GCP Executive PDF Report...');
+    run('npx tsx src/generate_gcp_manager_report_pdf.ts');
+
+    // 3. Generate Azure Report PDF
+    console.log('\n[3/4] Generating Azure Executive PDF Report...');
     run('npx tsx src/generate_azure_manager_report_pdf.ts');
 
-    // 3. Dispatch Email with both reports attached
-    console.log('\n[3/3] Sending email to managers with attached reports...');
+    // 4. Dispatch Email with all three reports embedded & attached (AWS -> GCP -> Azure)
+    console.log('\n[4/4] Sending email to managers with embedded & attached reports (AWS -> GCP -> Azure)...');
     run('npx tsx src/send_manager_report_email.ts');
 
     console.log('\n====================================================');

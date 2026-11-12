@@ -19,6 +19,7 @@ function parseCliArgs() {
   const args = process.argv.slice(2);
   const flags = {
     awsOnly: args.includes('--aws'),
+    gcpOnly: args.includes('--gcp'),
     azureOnly: args.includes('--azure'),
     dryRun: args.includes('--dry-run') || args.includes('--preview'),
     smtp: args.includes('--smtp'),
@@ -56,14 +57,16 @@ function extractStyleAndBody(fullHtml: string): { style: string; body: string } 
 }
 
 async function prepareFreshReport(
-  cloud: 'aws' | 'azure',
+  cloud: 'aws' | 'gcp' | 'azure',
   reportsDir: string,
   options: { noPdf?: boolean; cached?: boolean }
 ): Promise<string> {
   const filename =
-    cloud === 'azure'
-      ? 'Azure_Manager_Cost_Budget_Report.html'
-      : 'AWS_Manager_Cost_Budget_Report.html';
+    cloud === 'aws'
+      ? 'AWS_Manager_Cost_Budget_Report.html'
+      : cloud === 'gcp'
+      ? 'GCP_Manager_Cost_Budget_Report.html'
+      : 'Azure_Manager_Cost_Budget_Report.html';
   const htmlPath = path.join(reportsDir, filename);
 
   if (options.cached && fs.existsSync(htmlPath)) {
@@ -77,6 +80,11 @@ async function prepareFreshReport(
       './generate_manager_report_pdf.ts'
     );
     await generateAwsReport({ htmlOnly: !!options.noPdf });
+  } else if (cloud === 'gcp') {
+    const { generateGcpReport } = await import(
+      './generate_gcp_manager_report_pdf.ts'
+    );
+    await generateGcpReport({ htmlOnly: !!options.noPdf });
   } else {
     const { generateAzureReport } = await import(
       './generate_azure_manager_report_pdf.ts'
@@ -91,11 +99,12 @@ async function prepareFreshReport(
 }
 
 function assembleConsolidatedEmail(params: {
-  azureHtml?: string;
   awsHtml?: string;
+  gcpHtml?: string;
+  azureHtml?: string;
   generatedDate: string;
 }): string {
-  const { azureHtml, awsHtml, generatedDate } = params;
+  const { awsHtml, gcpHtml, azureHtml, generatedDate } = params;
 
   let combinedStyles = `
     body {
@@ -138,13 +147,33 @@ function assembleConsolidatedEmail(params: {
     }
   `;
 
+  // Collect sections in exact requested order: 1. AWS -> 2. GCP -> 3. Azure
+  const orderedSections: Array<{ label: string; style: string; body: string }> = [];
+
+  if (awsHtml) {
+    const aws = extractStyleAndBody(awsHtml);
+    orderedSections.push({ label: 'AWS', style: aws.style, body: aws.body });
+  }
+  if (gcpHtml) {
+    const gcp = extractStyleAndBody(gcpHtml);
+    orderedSections.push({ label: 'GCP', style: gcp.style, body: gcp.body });
+  }
+  if (azureHtml) {
+    const az = extractStyleAndBody(azureHtml);
+    orderedSections.push({ label: 'Azure', style: az.style, body: az.body });
+  }
+
+  for (const sec of orderedSections) {
+    combinedStyles += `\n${sec.style}`;
+  }
+
   let bodyContent = '';
 
-  if (azureHtml && awsHtml) {
-    // Both Azure and AWS
-    const az = extractStyleAndBody(azureHtml);
-    const aws = extractStyleAndBody(awsHtml);
-    combinedStyles += `\n${az.style}\n${aws.style}`;
+  if (orderedSections.length > 1) {
+    const labelsText = orderedSections
+      .map((s) => s.label)
+      .join(', ')
+      .replace(/, ([^,]*)$/, ' &amp; $1');
 
     bodyContent = `
       <!-- Consolidated Header -->
@@ -152,7 +181,7 @@ function assembleConsolidatedEmail(params: {
         <tr>
           <td align="left" style="vertical-align: middle;">
             <div style="font-size: 19px; font-weight: 800; letter-spacing: -0.3px; color: #ffffff;">Executive Multi-Cloud Cost &amp; Budget Report</div>
-            <div style="font-size: 11.5px; color: #94a3b8; margin-top: 3px;">Coforge Cloud Cost Intelligence &bull; Unified AWS &amp; Azure Executive Summary</div>
+            <div style="font-size: 11.5px; color: #94a3b8; margin-top: 3px;">Coforge Cloud Cost Intelligence &bull; Unified ${labelsText} Executive Summary</div>
           </td>
           <td align="right" style="vertical-align: middle;">
             <div style="display: inline-block; background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.25); color: #ffffff; font-weight: 700; font-size: 10.5px; padding: 3px 10px; border-radius: 6px; margin-bottom: 3px;">
@@ -163,24 +192,15 @@ function assembleConsolidatedEmail(params: {
         </tr>
       </table>
 
-      <!-- AWS Cloud Report Section (1st) -->
-      ${aws.body}
-
-      <div class="section-divider"></div>
-
-      <!-- Azure Cloud Report Section (2nd) -->
-      ${az.body}
+      ${orderedSections
+        .map(
+          (sec, idx) =>
+            `<!-- ${idx + 1}. ${sec.label} Cloud Report Section -->\n${sec.body}`
+        )
+        .join('\n\n      <div class="section-divider"></div>\n\n      ')}
     `;
-  } else if (azureHtml) {
-    // Only Azure
-    const az = extractStyleAndBody(azureHtml);
-    combinedStyles += `\n${az.style}`;
-    bodyContent = az.body;
-  } else if (awsHtml) {
-    // Only AWS
-    const aws = extractStyleAndBody(awsHtml);
-    combinedStyles += `\n${aws.style}`;
-    bodyContent = aws.body;
+  } else if (orderedSections.length === 1) {
+    bodyContent = orderedSections[0].body;
   }
 
   return `<!DOCTYPE html>
@@ -256,11 +276,17 @@ async function main() {
   const flags = parseCliArgs();
   const reportsDir = path.resolve(__dirname, '../cost-dashboard');
 
-  let azureHtml: string | undefined;
-  let awsHtml: string | undefined;
+  const hasCloudFilter = flags.awsOnly || flags.gcpOnly || flags.azureOnly;
+  const includeAws = !hasCloudFilter || flags.awsOnly;
+  const includeGcp = !hasCloudFilter || flags.gcpOnly;
+  const includeAzure = !hasCloudFilter || flags.azureOnly;
 
-  // 1. Generate fresh AWS report & PDF (unless azureOnly)
-  if (!flags.azureOnly) {
+  let awsHtml: string | undefined;
+  let gcpHtml: string | undefined;
+  let azureHtml: string | undefined;
+
+  // 1. Generate fresh AWS report & PDF (1st)
+  if (includeAws) {
     try {
       awsHtml = await prepareFreshReport('aws', reportsDir, {
         noPdf: flags.noPdf,
@@ -271,8 +297,20 @@ async function main() {
     }
   }
 
-  // 2. Generate fresh Azure report & PDF (unless awsOnly)
-  if (!flags.awsOnly) {
+  // 2. Generate fresh GCP report & PDF (2nd)
+  if (includeGcp) {
+    try {
+      gcpHtml = await prepareFreshReport('gcp', reportsDir, {
+        noPdf: flags.noPdf,
+        cached: flags.cached,
+      });
+    } catch (err: any) {
+      console.warn(`⚠️ Could not generate fresh GCP report: ${err.message}`);
+    }
+  }
+
+  // 3. Generate fresh Azure report & PDF (3rd)
+  if (includeAzure) {
     try {
       azureHtml = await prepareFreshReport('azure', reportsDir, {
         noPdf: flags.noPdf,
@@ -283,29 +321,36 @@ async function main() {
     }
   }
 
-  if (!azureHtml && !awsHtml) {
+  if (!awsHtml && !gcpHtml && !azureHtml) {
     console.error('❌ No report data available to send in email body.');
-    console.error('   Please run `npm run report:azure:html` or `npm run report:aws:html` first.');
+    console.error(
+      '   Please run `npm run report:aws:html`, `npm run report:gcp:html`, or `npm run report:azure:html` first.'
+    );
     process.exit(1);
   }
 
   const generatedDate = new Date().toISOString().slice(0, 10);
   const consolidatedHtml = assembleConsolidatedEmail({
-    azureHtml,
     awsHtml,
+    gcpHtml,
+    azureHtml,
     generatedDate,
   });
 
-  // Attach generated PDFs by default unless --no-pdf is specified
+  // Attach generated PDFs in order (AWS -> GCP -> Azure) unless --no-pdf is specified
   const attachments: AttachmentOption[] = [];
   if (!flags.noPdf) {
     const awsPdf = path.join(reportsDir, 'AWS_Manager_Cost_Budget_Report.pdf');
+    const gcpPdf = path.join(reportsDir, 'GCP_Manager_Cost_Budget_Report.pdf');
     const azurePdf = path.join(reportsDir, 'Azure_Manager_Cost_Budget_Report.pdf');
 
-    if (!flags.azureOnly && fs.existsSync(awsPdf)) {
+    if (includeAws && fs.existsSync(awsPdf)) {
       attachments.push({ filename: 'AWS_Manager_Cost_Budget_Report.pdf', path: awsPdf });
     }
-    if (!flags.awsOnly && fs.existsSync(azurePdf)) {
+    if (includeGcp && fs.existsSync(gcpPdf)) {
+      attachments.push({ filename: 'GCP_Manager_Cost_Budget_Report.pdf', path: gcpPdf });
+    }
+    if (includeAzure && fs.existsSync(azurePdf)) {
       attachments.push({ filename: 'Azure_Manager_Cost_Budget_Report.pdf', path: azurePdf });
     }
     if (attachments.length > 0) {
@@ -335,27 +380,33 @@ async function main() {
   const rawPass = process.env.SMTP_PASSWORD || process.env.SMTP_PASS || '';
   const smtpPass = rawPass.trim().replace(/\s+/g, '');
   const smtpFrom = process.env.ALERT_EMAIL_FROM || process.env.EMAIL_FROM || smtpUser || 'finops@coforge.com';
+  const smtpReady = !!smtpHost && !!smtpUser;
 
   if (recipients.length === 0) {
     console.error('❌ Recipient email not specified. Set ALERT_EMAIL_TO in .env or pass --to="email@domain.com"');
     process.exit(1);
   }
 
+  const activeCloudLabels = [
+    awsHtml ? 'AWS' : '',
+    gcpHtml ? 'GCP' : '',
+    azureHtml ? 'Azure' : '',
+  ].filter(Boolean);
+
   let subject = `Executive Multi-Cloud Cost & Budget Report - ${generatedDate}`;
-  if (azureHtml && !awsHtml) {
-    subject = `Azure Executive Cost & Budget Report - ${generatedDate}`;
-  } else if (!azureHtml && awsHtml) {
-    subject = `AWS Executive Cost & Budget Report - ${generatedDate}`;
+  if (activeCloudLabels.length === 1) {
+    subject = `${activeCloudLabels[0]} Executive Cost & Budget Report - ${generatedDate}`;
   }
 
   const textBody = `Executive Cloud Cost & Budget Report - ${generatedDate}
 Coforge Cloud Cost Intelligence & FinOps Governance
 
-This report has been formatted as an interactive rich HTML email. The complete executive reports for AWS and Azure are rendered directly in the message body, and official PDF copies are also attached for offline download and archival.
+This report has been formatted as an interactive rich HTML email. The complete executive reports (${activeCloudLabels.join(', ')}) are rendered directly in the message body, and official PDF copies are also attached for offline download and archival.
 
 Report Sections Included:
-${awsHtml ? '• 1. AWS Cloud Cost & Budget Executive Report\n' : ''}${azureHtml ? '• 2. Azure Cloud Cost & Budget Executive Report\n' : ''}
-${attachments.length > 0 ? `Attached Documents:\n${attachments.map((a) => `• ${a.filename}`).join('\n')}\n\n` : ''}Generated: ${new Date().toLocaleString('en-US', { dateStyle: 'long', timeStyle: 'short' })}
+${activeCloudLabels.map((label, idx) => `• ${idx + 1}. ${label} Cloud Cost & Budget Executive Report`).join('\n')}
+${attachments.length > 0 ? `\nAttached Documents:\n${attachments.map((a) => `• ${a.filename}`).join('\n')}\n` : ''}
+Generated: ${new Date().toLocaleString('en-US', { dateStyle: 'long', timeStyle: 'short' })}
 — Coforge FinOps Team`;
 
   const transport = useGraph ? 'Microsoft Graph' : 'SMTP';
@@ -363,7 +414,7 @@ ${attachments.length > 0 ? `Attached Documents:\n${attachments.map((a) => `• $
   fs.writeFileSync(previewPath, consolidatedHtml, 'utf-8');
 
   console.log(`📧 Report Email Assembly Complete:`);
-  console.log(`   - Sections: ${[azureHtml ? 'Azure' : '', awsHtml ? 'AWS' : ''].filter(Boolean).join(' + ')}`);
+  console.log(`   - Sections: ${activeCloudLabels.join(' -> ')}`);
   console.log(`   - In-Body HTML Size: ${(consolidatedHtml.length / 1024).toFixed(1)} KB`);
   console.log(`   - Attachments: ${attachments.length > 0 ? attachments.map((a) => a.filename).join(', ') : 'None (In-body report)'}`);
   console.log(`   - Local Preview: ${previewPath}`);
