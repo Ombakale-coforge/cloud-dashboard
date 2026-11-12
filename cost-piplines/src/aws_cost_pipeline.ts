@@ -51,7 +51,7 @@ export function getAwsAccountConfigs(): AwsAccountConfig[] {
       name:
         process.env.AWS_ACCOUNT_NAME ||
         process.env.AWS_ACCOUNT_1_NAME ||
-        "AWS Account 1 (5076-7238-5186)",
+        "AWS-Encora (5076-7238-5186)",
       accessKeyId: process.env.AWS_ACCESS_KEY_ID,
       secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
       region: process.env.AWS_REGION || "us-east-1",
@@ -68,7 +68,7 @@ export function getAwsAccountConfigs(): AwsAccountConfig[] {
       id: "account-2",
       name:
         process.env.AWS_ACCOUNT_2_NAME ||
-        "AWS Account 2 (5131-6780-3309)",
+        "AWS-Coforge (5131-6780-3309)",
       accessKeyId: process.env.AWS_ACCOUNT_2_ACCESS_KEY_ID,
       secretAccessKey: process.env.AWS_ACCOUNT_2_SECRET_ACCESS_KEY,
       region:

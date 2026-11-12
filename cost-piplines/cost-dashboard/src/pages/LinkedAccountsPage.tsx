@@ -70,16 +70,16 @@ export function LinkedAccountsPage() {
   const [awsAccounts, setAwsAccounts] = useState<AccountOption[]>([
     {
       id: "account-1",
-      name: "AWS Account 1 (5076-7238-5186)",
+      name: "AWS-Encora (5076-7238-5186)",
       accountId: "5076-7238-5186",
-      accountName: "AWS Account 1",
+      accountName: "AWS-Encora",
       path: "/data",
     },
     {
       id: "account-2",
-      name: "AWS Account 2 (5131-6780-3309)",
+      name: "AWS-Coforge (5131-6780-3309)",
       accountId: "5131-6780-3309",
-      accountName: "AWS Account 2",
+      accountName: "AWS-Coforge",
       path: "/data/accounts/account-2",
     },
   ]);
@@ -108,7 +108,18 @@ export function LinkedAccountsPage() {
       .then((res) => (res.ok ? res.json() : []))
       .then((accs) => {
         if (Array.isArray(accs) && accs.length > 0) {
-          setAwsAccounts(accs);
+          const mapped = accs.map((a: AccountOption) => {
+            const cleanId = (a.accountId || a.id || "").replace(/[^0-9]/g, "");
+            let accountName = a.accountName || a.name;
+            if (cleanId === "513167803309" || a.id === "account-2") {
+              accountName = "AWS-Coforge";
+            } else if (cleanId === "507672385186" || a.id === "account-1") {
+              accountName = "AWS-Encora";
+            }
+            const name = a.accountId ? `${accountName} (${a.accountId})` : accountName;
+            return { ...a, name, accountName };
+          });
+          setAwsAccounts(mapped);
         }
       })
       .catch(() => {});
