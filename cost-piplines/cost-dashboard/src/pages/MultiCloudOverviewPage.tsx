@@ -988,9 +988,17 @@ export function MultiCloudOverviewPage() {
                   <div className="h-9 w-9 shrink-0 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-600 dark:text-sky-400 font-extrabold text-xs shadow-2xs">
                     AZ
                   </div>
-                  <h2 className="text-sm font-bold text-slate-900 dark:text-white truncate">
-                    Azure Budgets & Governance
-                  </h2>
+                  <div className="min-w-0">
+                    <h2 className="text-sm font-bold text-slate-900 dark:text-white truncate">
+                      Azure Budgets & Governance
+                    </h2>
+                    <p
+                      className="text-[11px] font-medium text-sky-700 dark:text-sky-400 truncate"
+                      title="Tenant: Coforge Limited (EnterpriseMaster-PROD-GBL)"
+                    >
+                      Tenant: Coforge Limited (EnterpriseMaster-PROD-GBL)
+                    </p>
+                  </div>
                 </div>
 
                 <button

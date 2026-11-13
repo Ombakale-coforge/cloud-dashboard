@@ -89,7 +89,7 @@ export function Navbar({
                             : activeProvider === "aws"
                             ? "Live AWS Cost Analytics"
                             : activeProvider === "azure"
-                            ? "Live Azure Cost Analytics"
+                            ? "Live Azure Cost Analytics · Coforge Limited (EnterpriseMaster-PROD-GBL)"
                             : "Live GCP Cost & BigQuery Analytics"}
                     </p>
                 </div>

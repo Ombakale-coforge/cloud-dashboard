@@ -189,10 +189,13 @@ export function AzureSubscriptionsPage() {
               <Layers className="h-5 w-5" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <h2 className="text-xl font-bold tracking-tight text-foreground">
                   Azure Subscriptions Directory
                 </h2>
+                <Badge variant="outline" className="text-[10px] font-semibold bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300 border-sky-300 dark:border-sky-800">
+                  Coforge Limited (EnterpriseMaster-PROD-GBL)
+                </Badge>
                 <Badge variant="outline" className="text-[10px] font-semibold bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300 border-sky-300 dark:border-sky-800">
                   FOCUS 1.0 Export
                 </Badge>

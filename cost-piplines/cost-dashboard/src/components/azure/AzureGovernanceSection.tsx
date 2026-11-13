@@ -169,9 +169,12 @@ export function AzureGovernanceSection({
       {/* Header and Refresh Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h2 className="text-xl font-bold tracking-tight text-slate-900 dark:text-slate-100 flex items-center gap-2">
+          <h2 className="text-xl font-bold tracking-tight text-slate-900 dark:text-slate-100 flex flex-wrap items-center gap-2">
             <ShieldCheck className="h-5 w-5 text-blue-600" />
-            Azure Budgets & Governance
+            <span>Azure Budgets & Governance</span>
+            <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-800">
+              Coforge Limited (EnterpriseMaster-PROD-GBL)
+            </span>
           </h2>
           <p className="text-xs text-muted-foreground mt-0.5">
             Management-configured Azure budgets, spending thresholds, and RBAC permission checks

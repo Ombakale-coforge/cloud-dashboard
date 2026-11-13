@@ -286,13 +286,16 @@ export function AzureAlertsSection({ selectedMonth }: { selectedMonth?: string }
             <CardHeader className="pb-3">
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                     <div className="space-y-1">
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                             <span className="p-1.5 rounded-lg bg-rose-500/10 text-rose-600 dark:text-rose-400">
                                 <ShieldAlert className="h-5 w-5" />
                             </span>
                             <CardTitle className="text-lg font-bold tracking-tight">
                                 Azure Cost Alerts & Meter Budgets
                             </CardTitle>
+                            <span className="text-[11px] font-semibold px-2 py-0.5 rounded-md bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-800">
+                                Coforge Limited (EnterpriseMaster-PROD-GBL)
+                            </span>
                         </div>
                         <CardDescription className="text-xs text-muted-foreground">
                             View daily anomaly spike alerts generated for any date, or set manual meter budgets with automated 50%, 75%, 100%, and over-budget daily email pings.
