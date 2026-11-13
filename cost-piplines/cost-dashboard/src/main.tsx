@@ -14,6 +14,7 @@ import { ResourceInventoryPage } from './pages/ResourceInventoryPage.tsx'
 import { GcpDashboardPage } from './pages/GcpDashboardPage.tsx'
 import { AuthProvider } from './lib/auth.tsx'
 import { ProtectedRoute } from './components/ProtectedRoute.tsx'
+import { AiChatWidget } from './components/AiChatWidget.tsx'
 
 // Global Uncaught Error Loggers for Easy Copy-Pasting
 if (typeof window !== "undefined") {
@@ -207,6 +208,9 @@ createRoot(document.getElementById('root')!).render(
           {/* Fallback Catch-all: redirect to dashboard root, never forcefully to login */}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+
+        {/* Global Floating FinOps & Form AI Assistant */}
+        <AiChatWidget />
       </BrowserRouter>
     </AuthProvider>
   </StrictMode>,
