@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   CheckCircle2,
   ChevronRight,
@@ -16,6 +16,7 @@ import {
   User,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
+import { useAuth } from "@/lib/auth";
 import type { AccountRequest } from "@/lib/useAccountRequests";
 
 /* ─────────────── helpers ─────────────── */
@@ -251,22 +252,9 @@ function validateStep(step: number, data: FormData): Errors {
 
 async function sendEmailDirectly(data: FormData) {
   const { recipient, sender, subject, body } = buildEmailContent(data);
-
-  // Primary: open the user's email client (mailto:) with everything
-  // pre-filled, so the mail is actually delivered from their own account.
-  sendViaMailto(data);
-  // Bonus: also fire the Formspree web dispatch (best-effort).
+  // Web-based delivery fallback (no mailto redirect popup)
   await tryFormspree(data);
-
   return { recipient, sender, subject, body };
-}
-
-function sendViaMailto(data: FormData) {
-  const { recipient, subject, body } = buildEmailContent(data);
-  const mailtoLink = `mailto:${recipient}?subject=${encodeURIComponent(
-    subject
-  )}&body=${encodeURIComponent(body)}`;
-  window.location.href = mailtoLink;
 }
 
 async function tryFormspree(data: FormData): Promise<boolean> {
@@ -290,10 +278,10 @@ async function tryFormspree(data: FormData): Promise<boolean> {
 
 function buildEmailContent(data: FormData) {
   const sender = data.submitterEmail.trim();
-  const recipient = "Ankit.A@coforge.com";
+  const recipient = "ankit.a@coforge.com";
   const subject = `AWS Account Request: ${data.projectName} (${data.division})`;
 
-  const formattedBody = `Dear Om,
+  const formattedBody = `Dear Ankit,
 
 Please find the AWS Account Provisioning Request details submitted by ${sender}:
 
@@ -354,8 +342,17 @@ interface AccountRequestFormProps {
 }
 
 export function AccountRequestForm({ onSubmit }: AccountRequestFormProps) {
+  const { user } = useAuth();
   const [step, setStep] = useState(0);
-  const [form, setForm] = useState<FormData>(emptyForm());
+  const [form, setForm] = useState<FormData>(() => {
+    const empty = emptyForm();
+    if (user?.email) {
+      empty.submitterEmail = user.email;
+      empty.pointOfContact = user.email;
+      empty.adminEmails = [user.email];
+    }
+    return empty;
+  });
   const [errors, setErrors] = useState<Errors>({});
   const [submitting, setSubmitting] = useState(false);
   const [sentSuccessDetails, setSentSuccessDetails] = useState<{
@@ -364,6 +361,17 @@ export function AccountRequestForm({ onSubmit }: AccountRequestFormProps) {
     subject: string;
     body: string;
   } | null>(null);
+
+  useEffect(() => {
+    if (user?.email && !form.submitterEmail) {
+      setForm((prev) => ({
+        ...prev,
+        submitterEmail: prev.submitterEmail || user.email,
+        pointOfContact: prev.pointOfContact || user.email,
+        adminEmails: prev.adminEmails.length > 0 ? prev.adminEmails : [user.email],
+      }));
+    }
+  }, [user]);
 
   const set = <K extends keyof FormData>(key: K, value: FormData[K]) =>
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -435,10 +443,10 @@ export function AccountRequestForm({ onSubmit }: AccountRequestFormProps) {
 
           <div className="space-y-2 max-w-lg">
             <h3 className="text-2xl font-bold tracking-tight text-foreground">
-              Request Ready to Send to Ankit.A@coforge.com!
+              Request Submitted Successfully!
             </h3>
             <p className="text-sm text-muted-foreground">
-              Your email client has been opened with all the request details pre-filled for Ankit.A@coforge.com. Just press send to deliver the request.
+              Your account provisioning request has been saved and automatically routed to <span className="font-semibold text-foreground">ankit.a@coforge.com</span> &amp; <span className="font-semibold text-foreground">omparashuram.b@coforge.com</span>.
             </p>
           </div>
 
@@ -449,8 +457,8 @@ export function AccountRequestForm({ onSubmit }: AccountRequestFormProps) {
               <span className="font-semibold text-indigo-600 dark:text-indigo-400">{sentSuccessDetails.sender}</span>
             </div>
             <div className="flex justify-between border-b border-muted/50 pb-2">
-              <span className="font-bold text-muted-foreground">To (Recipient):</span>
-              <span className="font-semibold text-emerald-600 dark:text-emerald-400">{sentSuccessDetails.recipient}</span>
+              <span className="font-bold text-muted-foreground">To (Recipients):</span>
+              <span className="font-semibold text-emerald-600 dark:text-emerald-400">ankit.a@coforge.com, omparashuram.b@coforge.com</span>
             </div>
             <div className="flex justify-between border-b border-muted/50 pb-2">
               <span className="font-bold text-muted-foreground">Subject:</span>
@@ -459,7 +467,7 @@ export function AccountRequestForm({ onSubmit }: AccountRequestFormProps) {
             <div className="flex justify-between pt-1">
               <span className="font-bold text-muted-foreground">Delivery:</span>
               <span className="inline-flex items-center gap-1 text-emerald-600 font-bold">
-                <Check size={13} /> Email client opened — click Send to deliver
+                <Check size={13} /> Automated email sent to ankit.a@coforge.com &amp; omparashuram.b@coforge.com
               </span>
             </div>
           </div>
@@ -486,7 +494,7 @@ export function AccountRequestForm({ onSubmit }: AccountRequestFormProps) {
           <div>
             <h2 className="text-lg font-bold">AWS Account Request Form</h2>
             <p className="text-xs text-muted-foreground">
-              Submit your account request to directly send all details to <span className="font-semibold text-foreground">Ankit.A@coforge.com</span>
+              Submit your account request to directly notify <span className="font-semibold text-foreground">ankit.a@coforge.com</span> &amp; <span className="font-semibold text-foreground">omparashuram.b@coforge.com</span>
             </p>
           </div>
         </div>

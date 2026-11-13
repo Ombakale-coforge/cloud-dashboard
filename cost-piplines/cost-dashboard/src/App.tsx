@@ -58,16 +58,16 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
 const DEFAULT_AWS_ACCOUNTS: AccountOption[] = [
     {
         id: "account-1",
-        name: "AWS Account 1 (5076-7238-5186)",
+        name: "AWS-Encora (5076-7238-5186)",
         accountId: "5076-7238-5186",
-        accountName: "AWS Account 1",
+        accountName: "AWS-Encora",
         path: "/data",
     },
     {
         id: "account-2",
-        name: "AWS Account 2 (5131-6780-3309)",
+        name: "AWS-Coforge (5131-6780-3309)",
         accountId: "5131-6780-3309",
-        accountName: "AWS Account 2",
+        accountName: "AWS-Coforge",
         path: "/data/accounts/account-2",
     },
 ];
@@ -102,9 +102,16 @@ const formatAwsAccount = (acc: AccountOption): AccountOption => {
         accountName = rawName;
     }
 
+    const cleanId = (accountId || acc.id || "").replace(/[^0-9]/g, "");
+    if (cleanId === "513167803309" || acc.id === "account-2") {
+        accountName = "AWS-Coforge";
+    } else if (cleanId === "507672385186" || acc.id === "account-1") {
+        accountName = "AWS-Encora";
+    }
+
     return {
         ...acc,
-        name: accountId && accountName ? `${accountName} (${accountId})` : rawName,
+        name: accountId && accountName ? `${accountName} (${accountId})` : (accountName || rawName),
         accountName: accountName || rawName,
         accountId: accountId || acc.id,
     };

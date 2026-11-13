@@ -85,11 +85,23 @@ router.get('/accounts', async (req: Request, res: Response) => {
         accountName = a.name.replace(/\s*\([^)]+\)/, '').trim();
       }
 
+      // Friendly display mapping:
+      // 513167803309 -> AWS-Coforge
+      // 507672385186 -> AWS-Encora
+      const cleanId = (accountId || a.awsAccountId || '').replace(/[^0-9]/g, '');
+      if (cleanId === '513167803309' || a.configId === 'account-2') {
+        accountName = 'AWS-Coforge';
+      } else if (cleanId === '507672385186' || a.configId === 'account-1' || a.isPrimary) {
+        accountName = 'AWS-Encora';
+      }
+
+      const formattedName = accountId ? `${accountName} (${accountId})` : accountName;
+
       return {
         id: a.configId,
-        name: a.name,
+        name: formattedName,
         accountId: accountId || a.configId,
-        accountName: accountName || a.name,
+        accountName: accountName,
         path: a.isPrimary ? '/data' : `/data/accounts/${a.configId}`,
       };
     });
