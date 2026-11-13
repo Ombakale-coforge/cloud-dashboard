@@ -18,6 +18,7 @@ const DEFAULT_ADMIN_EMAILS = [
   'jayant.goyal@coforge.com',
   'ankit.a@coforge.com',
   'Rajiv.Khanayat@coforge.com',
+  'Dikeshreddy.sn@coforge.com',
 ];
 
 function getAdminEmails(): Set<string> {
@@ -263,12 +264,13 @@ router.post('/signup', async (req: Request, res: Response) => {
 
     const newUser = await prisma.user.create({
       data: {
+        legacyId: `user-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         name: finalName,
         email: normalizedEmail,
         passwordHash: password,
         passwordAlgo: 'plain',
         department: department?.trim() || 'Digital Engineering',
-        role: 'basic',
+        role: isAdminEmail(normalizedEmail) ? 'admin' : 'basic',
         provider: 'credentials',
       },
     });
@@ -450,6 +452,7 @@ router.get('/azure/callback', async (req: Request, res: Response) => {
         } else {
           userRecord = await prisma.user.create({
             data: {
+              legacyId: `sso-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
               name: displayName,
               email: normalizedEmail,
               passwordHash: 'SSO_MANAGED_AZURE_AD',
