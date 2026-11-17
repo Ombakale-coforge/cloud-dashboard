@@ -23,6 +23,7 @@ import { loadActiveUsageRecords, getDateDaysBefore, todayUTC } from './data-load
 import { generateAlerts, evaluateMeterBudgets } from './alert-service.ts';
 import { sendAlertEmail, sendBudgetAlertEmail } from './email-service.ts';
 import { ensureAlertTablesExist } from '../server/db-alert-tables.ts';
+import { evaluateAndNotifyAllAccountBudgets } from '../server/services/accountBudgetService.ts';
 import type { AlertReport, UsageRecord, MeterBudget } from './types.ts';
 
 function parseArgs(): { mode: 'preview' | 'send'; endDate: string; lookbackDays: number } {
@@ -194,6 +195,20 @@ export async function runAlertPipeline(options?: {
 
         // Step 4: Evaluate manual meter budgets and trigger daily pings
         await processMeterBudgets(prisma, records, alertReport.evaluationDate, mode);
+
+        // Step 4b: Evaluate multi-cloud manual account budgets (AWS, Azure, GCP)
+        try {
+            const accountBudgetSummary = await evaluateAndNotifyAllAccountBudgets({
+                month: alertReport.evaluationDate.slice(0, 7),
+            });
+            logger.info('Multi-cloud account budget evaluation completed.', {
+                evaluatedCount: accountBudgetSummary.evaluatedCount,
+                breachedCount: accountBudgetSummary.breachedCount,
+                triggeredCount: accountBudgetSummary.triggeredCount,
+            });
+        } catch (accBudgetErr: any) {
+            logger.error('Error evaluating multi-cloud account budgets:', { error: accBudgetErr.message });
+        }
 
         // Step 5: Email / preview spike & anomaly report
         logger.info(`Processing alert notification (mode: ${mode})...`);

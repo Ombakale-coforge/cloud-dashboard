@@ -11,6 +11,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { useCsv } from "@/lib/useCsv";
 import { resolveBudgetsForMonth, type AccountSpendInfo } from "@/lib/budgetMatcher";
+import { ManualBudgetAlertsSection } from "@/components/ManualBudgetAlertsSection";
 import type {
   GovernanceSummary,
   UnbudgetedAccountRow,
@@ -831,6 +832,12 @@ export function OrganizationGovernanceSection({
           </CardContent>
         </Card>
       </div>
+
+      <ManualBudgetAlertsSection
+        defaultProvider="aws"
+        lockProvider
+        selectedMonth={selectedMonth}
+      />
     </div>
   );
 }

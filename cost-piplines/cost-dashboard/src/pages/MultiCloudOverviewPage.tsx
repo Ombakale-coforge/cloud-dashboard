@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Badge } from "@/components/ui/badge";
 import { AdminRequestsModal } from "@/components/AdminRequestsModal";
+import { ManualBudgetAlertsSection } from "@/components/ManualBudgetAlertsSection";
 import { useAccountRequests } from "@/lib/useAccountRequests";
 import { useAuth } from "@/lib/auth";
 import { useCsv } from "@/lib/useCsv";
@@ -569,7 +570,8 @@ export function MultiCloudOverviewPage() {
         {/* ================================================================= */}
         {/* MULTI-CLOUD EXECUTIVE COMMAND CENTER (AWS | AZURE | GCP)          */}
         {/* ================================================================= */}
-        <main className="flex-1 p-4 sm:p-5 grid grid-cols-1 xl:grid-cols-3 gap-5">
+        <main className="flex-1 p-4 sm:p-5 space-y-5">
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
           {/* =============================================================== */}
           {/* LEFT PORTAL CARD: AWS ORGANIZATION & BUDGET GOVERNANCE          */}
           {/* =============================================================== */}
@@ -1460,6 +1462,12 @@ export function MultiCloudOverviewPage() {
               </div>
             </div>
           </div>
+          </div>
+
+          {/* ================================================================= */}
+          {/* UNIFIED MULTI-CLOUD MANUAL BUDGET ALERTS & INSTANT EMAILS         */}
+          {/* ================================================================= */}
+          <ManualBudgetAlertsSection defaultProvider="all" />
         </main>
 
         {/* Admin Requests Modal */}

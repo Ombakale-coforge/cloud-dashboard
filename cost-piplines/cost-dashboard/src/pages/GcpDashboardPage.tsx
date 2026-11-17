@@ -26,7 +26,15 @@ import {
   ChevronRight,
   BarChart3,
   CheckCircle,
+  Bell,
+  Send,
 } from 'lucide-react';
+import {
+  ManualBudgetAlertsSection,
+  sendInstantAccountBudgetEmail,
+  type EnrichedAccountBudget,
+  type ExternalBudgetTrigger,
+} from '@/components/ManualBudgetAlertsSection';
 
 interface GcpProject {
   id: string;
@@ -153,6 +161,68 @@ export function GcpDashboardPage() {
   // Diagnostic Test Connection state
   const [testingConnection, setTestingConnection] = useState(false);
   const [connectionResult, setConnectionResult] = useState<TestConnectionResponse | null>(null);
+
+  // Manual Budgets & Instant Email actions
+  const [manualBudgets, setManualBudgets] = useState<EnrichedAccountBudget[]>([]);
+  const [budgetTrigger, setBudgetTrigger] = useState<ExternalBudgetTrigger | null>(null);
+  const [sendingRowId, setSendingRowId] = useState<string | null>(null);
+  const [rowEmailBanner, setRowEmailBanner] = useState<{
+    type: 'success' | 'warning' | 'error';
+    message: string;
+  } | null>(null);
+
+  const fetchManualBudgets = () => {
+    fetch('/api/budgets?provider=gcp')
+      .then((res) => (res.ok ? res.json() : []))
+      .then((rows) => {
+        if (Array.isArray(rows)) setManualBudgets(rows);
+      })
+      .catch(() => {});
+  };
+
+  useEffect(() => {
+    fetchManualBudgets();
+  }, []);
+
+  const findManualBudgetForProject = (p: GcpProject) =>
+    manualBudgets.find(
+      (b) =>
+        b.accountId.toLowerCase() === p.projectId.toLowerCase() ||
+        b.accountName.toLowerCase() === p.name.toLowerCase()
+    );
+
+  const handleQuickSendEmail = async (p: GcpProject) => {
+    const existing = findManualBudgetForProject(p);
+    const activeCurr: 'USD' | 'INR' =
+      summary?.isDemo || currencyMode === 'USD' ? 'USD' : 'INR';
+    if (!existing) {
+      setBudgetTrigger({
+        cloudProvider: 'gcp',
+        accountId: p.projectId,
+        accountName: p.name,
+        parentAccountId: p.folder || 'Global / Root',
+        currentSpend: activeCurr === 'USD' ? p.currentSpendUsd || p.currentSpend : p.currentSpend,
+        billingCurrency: activeCurr,
+        mode: 'instant-email',
+      });
+      return;
+    }
+
+    setSendingRowId(p.projectId);
+    setRowEmailBanner(null);
+    try {
+      const result = await sendInstantAccountBudgetEmail(existing.id, p.name);
+      setRowEmailBanner(result);
+      fetchManualBudgets();
+    } catch (err: any) {
+      setRowEmailBanner({
+        type: 'error',
+        message: err.message || 'Failed to send instant email.',
+      });
+    } finally {
+      setSendingRowId(null);
+    }
+  };
 
   const loadData = async () => {
     setLoading(true);
@@ -671,6 +741,25 @@ export function GcpDashboardPage() {
             </div>
 
             <div className="overflow-x-auto">
+              {rowEmailBanner && (
+                <div
+                  className={`m-4 mb-0 p-3 rounded-lg border text-xs font-medium flex items-center justify-between gap-2 ${
+                    rowEmailBanner.type === 'success'
+                      ? 'bg-emerald-50 border-emerald-200 text-emerald-800 dark:bg-emerald-950/40 dark:border-emerald-800 dark:text-emerald-300'
+                      : rowEmailBanner.type === 'warning'
+                      ? 'bg-amber-50 border-amber-200 text-amber-800 dark:bg-amber-950/40 dark:border-amber-800 dark:text-amber-300'
+                      : 'bg-rose-50 border-rose-200 text-rose-800 dark:bg-rose-950/40 dark:border-rose-800 dark:text-rose-300'
+                  }`}
+                >
+                  <span>{rowEmailBanner.message}</span>
+                  <button
+                    onClick={() => setRowEmailBanner(null)}
+                    className="text-xs underline cursor-pointer shrink-0"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              )}
               <table className="w-full text-left text-xs">
                 <thead className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 uppercase tracking-wider text-[11px] border-b border-slate-200 dark:border-slate-800">
                   <tr>
@@ -750,16 +839,62 @@ export function GcpDashboardPage() {
                             </Badge>
                           </td>
                           <td className="py-3.5 px-4 text-right">
-                            <button
-                              onClick={() => {
-                                setSkuProjectFilter(p.name);
-                                setActiveTab('skus');
-                              }}
-                              className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 hover:text-blue-800 dark:text-blue-400 cursor-pointer"
-                            >
-                              <span>View SKUs</span>
-                              <ChevronRight className="w-3.5 h-3.5" />
-                            </button>
+                            <div className="inline-flex items-center justify-end gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const activeCurr: 'USD' | 'INR' =
+                                    summary?.isDemo || currencyMode === 'USD' ? 'USD' : 'INR';
+                                  setBudgetTrigger({
+                                    cloudProvider: 'gcp',
+                                    accountId: p.projectId,
+                                    accountName: p.name,
+                                    parentAccountId: p.folder || 'Global / Root',
+                                    currentSpend:
+                                      activeCurr === 'USD'
+                                        ? p.currentSpendUsd || p.currentSpend
+                                        : p.currentSpend,
+                                    billingCurrency: activeCurr,
+                                    mode: 'budget',
+                                  });
+                                }}
+                                title={
+                                  findManualBudgetForProject(p)
+                                    ? `Edit Manual Budget (${findManualBudgetForProject(p)?.percentUsed}%)`
+                                    : 'Set Manual Budget Alert'
+                                }
+                                className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-md border border-blue-200 dark:border-blue-800 bg-blue-50/70 dark:bg-blue-950/30 hover:bg-blue-100 text-blue-700 dark:text-blue-300 transition-colors cursor-pointer"
+                              >
+                                <Bell className="w-3 h-3" />
+                                <span>
+                                  {findManualBudgetForProject(p)
+                                    ? `${findManualBudgetForProject(p)?.percentUsed}%`
+                                    : 'Budget'}
+                                </span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => handleQuickSendEmail(p)}
+                                disabled={sendingRowId === p.projectId}
+                                title="Send Instant Usage Details Email"
+                                className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-md border border-emerald-200 dark:border-emerald-800 bg-emerald-50/70 dark:bg-emerald-950/30 hover:bg-emerald-100 text-emerald-700 dark:text-emerald-300 transition-colors cursor-pointer disabled:opacity-50"
+                              >
+                                <Send className="w-3 h-3" />
+                                <span>{sendingRowId === p.projectId ? '...' : 'Email'}</span>
+                              </button>
+
+                              <button
+                                onClick={() => {
+                                  setSkuProjectFilter(p.name);
+                                  setActiveTab('skus');
+                                }}
+                                className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 hover:text-blue-800 dark:text-blue-400 cursor-pointer ml-1"
+                              >
+                                <span>SKUs</span>
+                                <ChevronRight className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       );
@@ -1027,6 +1162,14 @@ export function GcpDashboardPage() {
             </div>
           </Card>
         )}
+
+        <ManualBudgetAlertsSection
+          defaultProvider="gcp"
+          lockProvider
+          externalTriggerAccount={budgetTrigger}
+          onClearExternalTrigger={() => setBudgetTrigger(null)}
+          onBudgetsChanged={fetchManualBudgets}
+        />
       </main>
     </div>
   );

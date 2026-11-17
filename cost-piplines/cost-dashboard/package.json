@@ -5,9 +5,9 @@
   "type": "module",
   "scripts": {
     "start": "tsx ../src/server/index.ts",
-    "server": "tsx ../src/server/index.ts",
+    "server": "tsx watch ../src/server/index.ts",
     "dev:vite": "vite",
-    "dev": "concurrently -k -p \"[{name}]\" -n \"API,VITE\" -c \"cyan,magenta\" \"tsx ../src/server/index.ts\" \"vite\"",
+    "dev": "concurrently -k -p \"[{name}]\" -n \"API,VITE\" -c \"cyan,magenta\" \"tsx watch ../src/server/index.ts\" \"vite\"",
     "build": "vite build",
     "deploy": "npm run build && wrangler pages deploy dist",
     "lint": "eslint .",

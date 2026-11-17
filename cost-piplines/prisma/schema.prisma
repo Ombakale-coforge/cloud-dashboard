@@ -1154,3 +1154,26 @@ model AzureSubscriptionBudget {
   @@map("azure_subscription_budgets")
 }
 
+model CloudAccountBudget {
+  id                    Int       @id @default(autoincrement()) @map("id")
+  cloudProvider         String    @map("cloud_provider") @db.NVarChar(16)
+  accountId             String    @map("account_id") @db.NVarChar(128)
+  accountName           String    @map("account_name") @db.NVarChar(255)
+  parentAccountId       String?   @map("parent_account_id") @db.NVarChar(128)
+  monthlyBudget         Decimal   @map("monthly_budget") @db.Decimal(18, 2)
+  billingCurrency       String    @default("USD") @map("billing_currency") @db.NVarChar(8)
+  alertEmail            String    @map("alert_email") @db.NVarChar(512)
+  contactName           String?   @map("contact_name") @db.NVarChar(255)
+  isActive              Boolean   @default(true) @map("is_active")
+  lastNotifiedThreshold String?   @map("last_notified_threshold") @db.NVarChar(32)
+  lastNotifiedMonth     String?   @map("last_notified_month") @db.Char(7)
+  lastNotifiedAt        DateTime? @map("last_notified_at")
+  lastManualEmailAt     DateTime? @map("last_manual_email_at")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  @@unique([cloudProvider, accountId], map: "cloud_account_budgets_unique")
+  @@index([cloudProvider], map: "cloud_account_budgets_provider_idx")
+  @@map("cloud_account_budgets")
+}
+
