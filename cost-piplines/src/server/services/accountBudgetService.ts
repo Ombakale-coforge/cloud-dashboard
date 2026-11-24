@@ -1580,27 +1580,35 @@ export function buildAccountBudgetEmailContent(
   return { subject, html, text };
 }
 
-export async function sendAccountUsageEmail(
-  item: EnrichedAccountBudget,
-  mode: 'threshold' | 'instant',
-  overrideEmail?: string | string[]
-): Promise<EmailDeliveryResult> {
-  const overrideList = overrideEmail ? normalizeEmailList(overrideEmail) : [];
-  const recipients = overrideList.length > 0 ? overrideList : normalizeEmailList(item.alertEmails?.length ? item.alertEmails : item.alertEmail);
+export async function deliverHtmlEmail(options: {
+  recipients: string[];
+  cc?: string[];
+  subject: string;
+  html: string;
+  text: string;
+  previewFilename: string;
+  dryRun?: boolean;
+}): Promise<EmailDeliveryResult> {
+  const recipients = normalizeEmailList(options.recipients);
+  const cc = normalizeEmailList(options.cc || []).filter((e) => !recipients.includes(e));
   if (recipients.length === 0) {
     throw new Error('At least one valid recipient email address is required.');
   }
 
-  const resolvedItem = await resolveAccountSpecificTopServices(item);
-  const { subject, html, text } = buildAccountBudgetEmailContent(resolvedItem, mode);
-
   if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
-  const safeId = item.accountId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 48);
-  const previewPath = path.join(
-    LOG_DIR,
-    `account-budget-${mode}-${item.cloudProvider}-${safeId}-${Date.now()}.html`
-  );
-  fs.writeFileSync(previewPath, html, 'utf-8');
+  const previewPath = path.join(LOG_DIR, options.previewFilename);
+  fs.writeFileSync(previewPath, options.html, 'utf-8');
+
+  if (options.dryRun) {
+    return {
+      sent: false,
+      previewed: true,
+      transport: 'preview',
+      recipients,
+      subject: options.subject,
+      previewPath,
+    };
+  }
 
   let lastError = '';
 
@@ -1614,6 +1622,14 @@ export async function sendAccountUsageEmail(
     try {
       const credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
       const { token } = await credential.getToken('https://graph.microsoft.com/.default');
+      const graphMessage: Record<string, unknown> = {
+        subject: options.subject,
+        body: { contentType: 'HTML', content: options.html },
+        toRecipients: recipients.map((address) => ({ emailAddress: { address } })),
+      };
+      if (cc.length > 0) {
+        graphMessage.ccRecipients = cc.map((address) => ({ emailAddress: { address } }));
+      }
       const res = await fetch(
         `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(senderEmail)}/sendMail`,
         {
@@ -1623,11 +1639,7 @@ export async function sendAccountUsageEmail(
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            message: {
-              subject,
-              body: { contentType: 'HTML', content: html },
-              toRecipients: recipients.map((address) => ({ emailAddress: { address } })),
-            },
+            message: graphMessage,
             saveToSentItems: true,
           }),
         }
@@ -1639,15 +1651,15 @@ export async function sendAccountUsageEmail(
           previewed: true,
           transport: 'graph',
           recipients,
-          subject,
+          subject: options.subject,
           previewPath,
         };
       }
       lastError = `Microsoft Graph returned HTTP ${res.status}: ${await res.text()}`;
-      console.warn('[AccountBudgetService] Graph sendMail failed, attempting SMTP fallback:', lastError);
+      console.warn('[MailTransport] Graph sendMail failed, attempting SMTP fallback:', lastError);
     } catch (err: any) {
       lastError = err.message;
-      console.warn('[AccountBudgetService] Graph email error, attempting SMTP fallback:', lastError);
+      console.warn('[MailTransport] Graph email error, attempting SMTP fallback:', lastError);
     }
   }
 
@@ -1673,9 +1685,10 @@ export async function sendAccountUsageEmail(
       const info = await transporter.sendMail({
         from: smtpFrom,
         to: recipients.join(', '),
-        subject,
-        text,
-        html,
+        ...(cc.length > 0 ? { cc: cc.join(', ') } : {}),
+        subject: options.subject,
+        text: options.text,
+        html: options.html,
       });
 
       return {
@@ -1683,13 +1696,13 @@ export async function sendAccountUsageEmail(
         previewed: true,
         transport: 'smtp',
         recipients,
-        subject,
+        subject: options.subject,
         messageId: info.messageId,
         previewPath,
       };
     } catch (err: any) {
       lastError = lastError ? `${lastError}; SMTP: ${err.message}` : `SMTP: ${err.message}`;
-      console.warn('[AccountBudgetService] SMTP sendMail failed:', err.message);
+      console.warn('[MailTransport] SMTP sendMail failed:', err.message);
     }
   }
 
@@ -1699,10 +1712,34 @@ export async function sendAccountUsageEmail(
     previewed: true,
     transport: 'preview',
     recipients,
-    subject,
+    subject: options.subject,
     previewPath,
     error: lastError || 'No external mail transport succeeded; HTML preview generated locally.',
   };
+}
+
+export async function sendAccountUsageEmail(
+  item: EnrichedAccountBudget,
+  mode: 'threshold' | 'instant',
+  overrideEmail?: string | string[]
+): Promise<EmailDeliveryResult> {
+  const overrideList = overrideEmail ? normalizeEmailList(overrideEmail) : [];
+  const recipients = overrideList.length > 0 ? overrideList : normalizeEmailList(item.alertEmails?.length ? item.alertEmails : item.alertEmail);
+  if (recipients.length === 0) {
+    throw new Error('At least one valid recipient email address is required.');
+  }
+
+  const resolvedItem = await resolveAccountSpecificTopServices(item);
+  const { subject, html, text } = buildAccountBudgetEmailContent(resolvedItem, mode);
+  const safeId = item.accountId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 48);
+
+  return deliverHtmlEmail({
+    recipients,
+    subject,
+    html,
+    text,
+    previewFilename: `account-budget-${mode}-${item.cloudProvider}-${safeId}-${Date.now()}.html`,
+  });
 }
 
 // ────────────────────────────────────────────────────────────────────────────

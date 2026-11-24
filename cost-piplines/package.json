@@ -28,6 +28,9 @@
     "test:report": "tsx src/azure_cost_report/self-check.ts",
     "alert:azure": "tsx src/alerts/index.ts",
     "test:alerts": "tsx src/alerts/self-check.ts",
+    "alerts:burst": "tsx src/send_azure_daily_burst_alerts.ts",
+    "alerts:burst:preview": "tsx src/send_azure_daily_burst_alerts.ts --dry-run",
+    "test:burst": "tsx src/server/services/azureDailyBurstService.self-check.ts",
     "sync:azure-budgets": "tsx src/fetch_data/sync-azure-budgets.ts",
     "reconcile:arm": "tsx src/fetch_data/reconcile-azure-arm.ts",
     "extract:subscriptions": "tsx scripts/extract-azure-subscriptions.ts"

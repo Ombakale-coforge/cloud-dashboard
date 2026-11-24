@@ -109,6 +109,42 @@ BEGIN
     CREATE UNIQUE NONCLUSTERED INDEX [cloud_account_budgets_unique] ON [dbo].[cloud_account_budgets]([cloud_provider], [account_id]);
     CREATE NONCLUSTERED INDEX [cloud_account_budgets_provider_idx] ON [dbo].[cloud_account_budgets]([cloud_provider]);
 END;
+
+IF OBJECT_ID('dbo.azure_daily_burst_alerts', 'U') IS NULL
+BEGIN
+    CREATE TABLE [dbo].[azure_daily_burst_alerts] (
+        [id] INT IDENTITY(1,1) NOT NULL,
+        [evaluation_date] CHAR(10) NOT NULL,
+        [previous_month] CHAR(7) NOT NULL,
+        [subscription_id] NVARCHAR(100) NOT NULL,
+        [subscription_name] NVARCHAR(255) NOT NULL,
+        [previous_month_cost] DECIMAL(18,2) NOT NULL,
+        [current_day_cost] DECIMAL(18,2) NOT NULL,
+        [percent_of_prev_month] DECIMAL(10,2) NOT NULL,
+        [billing_currency] NVARCHAR(8) NOT NULL CONSTRAINT [DF_azure_daily_burst_currency] DEFAULT ('INR'),
+        [threshold_percent] DECIMAL(6,2) NOT NULL,
+        [min_cost_floor] DECIMAL(18,2) NOT NULL,
+        [top_drivers_json] NVARCHAR(MAX) NULL,
+        [recipients] NVARCHAR(1024) NOT NULL,
+        [used_fallback_email] BIT NOT NULL CONSTRAINT [DF_azure_daily_burst_fallback] DEFAULT 0,
+        [transport] NVARCHAR(32) NOT NULL,
+        [sent] BIT NOT NULL CONSTRAINT [DF_azure_daily_burst_sent] DEFAULT 0,
+        [error_message] NVARCHAR(1024) NULL,
+        [created_at] DATETIME2 NOT NULL CONSTRAINT [DF_azure_daily_burst_created_at] DEFAULT SYSUTCDATETIME(),
+        CONSTRAINT [PK_azure_daily_burst_alerts] PRIMARY KEY CLUSTERED ([id])
+    );
+    CREATE UNIQUE NONCLUSTERED INDEX [azure_daily_burst_unique] ON [dbo].[azure_daily_burst_alerts]([evaluation_date], [subscription_id]);
+    CREATE NONCLUSTERED INDEX [azure_daily_burst_date_idx] ON [dbo].[azure_daily_burst_alerts]([evaluation_date]);
+END;
+
+IF COL_LENGTH('dbo.azure_daily_burst_alerts', 'previous_month') IS NULL
+    ALTER TABLE [dbo].[azure_daily_burst_alerts] ADD [previous_month] CHAR(7) NULL;
+IF COL_LENGTH('dbo.azure_daily_burst_alerts', 'previous_month_cost') IS NULL
+    ALTER TABLE [dbo].[azure_daily_burst_alerts] ADD [previous_month_cost] DECIMAL(18,2) NULL;
+IF COL_LENGTH('dbo.azure_daily_burst_alerts', 'percent_of_prev_month') IS NULL
+    ALTER TABLE [dbo].[azure_daily_burst_alerts] ADD [percent_of_prev_month] DECIMAL(10,2) NULL;
+IF COL_LENGTH('dbo.azure_daily_burst_alerts', 'min_cost_floor') IS NULL
+    ALTER TABLE [dbo].[azure_daily_burst_alerts] ADD [min_cost_floor] DECIMAL(18,2) NULL;
 `;
 
     await client.$executeRawUnsafe(ddl);
