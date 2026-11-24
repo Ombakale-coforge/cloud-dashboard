@@ -33,7 +33,7 @@ async function main() {
 
     // 4. Dispatch Email with all three reports embedded & attached (AWS -> GCP -> Azure)
     console.log('\n[4/5] Sending email to managers with embedded & attached reports (AWS -> GCP -> Azure)...');
-    run('npx tsx src/send_manager_report_email.ts');
+    run('npx tsx src/send_manager_report_email.ts --cached');
 
     // 5. Evaluate manual multi-cloud account budgets (50%, 75%, 100%, >100%)
     console.log('\n[5/5] Evaluating multi-cloud manual account budgets across AWS, Azure, and GCP...');
