@@ -37,7 +37,15 @@ import {
   Calendar,
   User,
   FileCode,
+  Bell,
+  Send,
 } from "lucide-react";
+import {
+  ManualBudgetAlertsSection,
+  sendInstantAccountBudgetEmail,
+  type EnrichedAccountBudget,
+  type ExternalBudgetTrigger,
+} from "@/components/ManualBudgetAlertsSection";
 
 interface LinkedAccountItem {
   linkedAccountId: string;
@@ -140,6 +148,71 @@ export function LinkedAccountsPage() {
   const [selectedMonth, setSelectedMonth] = useState<string>("");
 
   const weekBounds = useMemo(() => getClientCurrentWeekBounds(), []);
+
+  // Manual Budgets & Instant Email actions
+  const [manualBudgets, setManualBudgets] = useState<EnrichedAccountBudget[]>([]);
+  const [budgetTrigger, setBudgetTrigger] = useState<ExternalBudgetTrigger | null>(null);
+  const [sendingRowId, setSendingRowId] = useState<string | null>(null);
+  const [rowEmailBanner, setRowEmailBanner] = useState<{
+    type: "success" | "warning" | "error";
+    message: string;
+  } | null>(null);
+
+  const fetchManualBudgets = () => {
+    const monthQ = selectedMonth ? `&month=${encodeURIComponent(selectedMonth)}` : "";
+    fetch(`/api/budgets?provider=aws${monthQ}`)
+      .then((res) => (res.ok ? res.json() : []))
+      .then((rows) => {
+        if (Array.isArray(rows)) setManualBudgets(rows);
+      })
+      .catch(() => {});
+  };
+
+  useEffect(() => {
+    fetchManualBudgets();
+  }, [selectedMonth]);
+
+  const findManualBudgetForAccount = (acc: LinkedAccountItem) =>
+    manualBudgets.find(
+      (b) =>
+        b.accountId.toLowerCase() === acc.linkedAccountId.toLowerCase() ||
+        b.accountName.toLowerCase() === acc.accountName.toLowerCase()
+    );
+
+  const handleQuickSendEmail = async (acc: LinkedAccountItem) => {
+    const existing = findManualBudgetForAccount(acc);
+    if (!existing) {
+      setBudgetTrigger({
+        cloudProvider: "aws",
+        accountId: acc.linkedAccountId,
+        accountName: acc.accountName,
+        parentAccountId: selectedAwsAccount,
+        currentSpend: acc.currentSpend,
+        billingCurrency: "USD",
+        mode: "instant-email",
+      });
+      return;
+    }
+
+    setSendingRowId(acc.linkedAccountId);
+    setRowEmailBanner(null);
+    try {
+      const result = await sendInstantAccountBudgetEmail(
+        existing.id,
+        acc.accountName,
+        selectedMonth
+      );
+      setRowEmailBanner(result);
+      fetchManualBudgets();
+    } catch (err: any) {
+      setRowEmailBanner({
+        type: "error",
+        message: err.message || "Failed to send instant email.",
+      });
+    } finally {
+      setSendingRowId(null);
+    }
+  };
 
   // 1. Fetch AWS Accounts
   useEffect(() => {
@@ -875,6 +948,25 @@ export function LinkedAccountsPage() {
           </CardHeader>
 
           <CardContent className="p-0">
+            {rowEmailBanner && (
+              <div
+                className={`m-4 mb-0 p-3 rounded-lg border text-xs font-medium flex items-center justify-between gap-2 ${
+                  rowEmailBanner.type === "success"
+                    ? "bg-emerald-50 border-emerald-200 text-emerald-800 dark:bg-emerald-950/40 dark:border-emerald-800 dark:text-emerald-300"
+                    : rowEmailBanner.type === "warning"
+                    ? "bg-amber-50 border-amber-200 text-amber-800 dark:bg-amber-950/40 dark:border-amber-800 dark:text-amber-300"
+                    : "bg-rose-50 border-rose-200 text-rose-800 dark:bg-rose-950/40 dark:border-rose-800 dark:text-rose-300"
+                }`}
+              >
+                <span>{rowEmailBanner.message}</span>
+                <button
+                  onClick={() => setRowEmailBanner(null)}
+                  className="text-xs underline cursor-pointer shrink-0"
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
             {loading ? (
               <div className="py-20 text-center space-y-3">
                 <RefreshCw className="w-6 h-6 text-indigo-500 animate-spin mx-auto" />
@@ -956,7 +1048,7 @@ export function LinkedAccountsPage() {
                     <TableHead className="py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                       Top Cost Driver
                     </TableHead>
-                    <TableHead className="py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider text-center w-[90px]">
+                    <TableHead className="py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider text-center w-[220px]">
                       Action
                     </TableHead>
                   </TableRow>
@@ -1126,15 +1218,52 @@ export function LinkedAccountsPage() {
                           {acc.topCostDriver}
                         </TableCell>
 
-                        {/* Action: Open in Current Tab */}
+                        {/* Action: Set Budget, Instant Email & Open */}
                         <TableCell className="py-3 px-4 text-center">
-                          <Link
-                            to={`/linked-accounts/${encodeURIComponent(acc.linkedAccountId || "")}?account=${encodeURIComponent(selectedAwsAccount)}${selectedMonth ? `&month=${encodeURIComponent(selectedMonth)}` : ""}`}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md border border-input bg-background hover:bg-muted text-foreground transition-colors cursor-pointer"
-                          >
-                            <span>Open</span>
-                            <ArrowRight className="w-3 h-3 text-muted-foreground" />
-                          </Link>
+                          <div className="inline-flex items-center justify-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setBudgetTrigger({
+                                  cloudProvider: "aws",
+                                  accountId: acc.linkedAccountId,
+                                  accountName: acc.accountName,
+                                  parentAccountId: selectedAwsAccount,
+                                  currentSpend: acc.currentSpend,
+                                  billingCurrency: "USD",
+                                  mode: "budget",
+                                })
+                              }
+                              title={
+                                findManualBudgetForAccount(acc)
+                                  ? `Edit Manual Budget (${findManualBudgetForAccount(acc)?.percentUsed}%)`
+                                  : "Set Manual Budget Alert"
+                              }
+                              className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-md border border-indigo-200 dark:border-indigo-800 bg-indigo-50/70 dark:bg-indigo-950/30 hover:bg-indigo-100 text-indigo-700 dark:text-indigo-300 transition-colors cursor-pointer"
+                            >
+                              <Bell className="w-3 h-3" />
+                              <span>{findManualBudgetForAccount(acc) ? `${findManualBudgetForAccount(acc)?.percentUsed}%` : "Budget"}</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleQuickSendEmail(acc)}
+                              disabled={sendingRowId === acc.linkedAccountId}
+                              title="Send Instant Usage Details Email"
+                              className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-md border border-emerald-200 dark:border-emerald-800 bg-emerald-50/70 dark:bg-emerald-950/30 hover:bg-emerald-100 text-emerald-700 dark:text-emerald-300 transition-colors cursor-pointer disabled:opacity-50"
+                            >
+                              <Send className="w-3 h-3" />
+                              <span>{sendingRowId === acc.linkedAccountId ? "..." : "Email"}</span>
+                            </button>
+
+                            <Link
+                              to={`/linked-accounts/${encodeURIComponent(acc.linkedAccountId || "")}?account=${encodeURIComponent(selectedAwsAccount)}${selectedMonth ? `&month=${encodeURIComponent(selectedMonth)}` : ""}`}
+                              className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-md border border-input bg-background hover:bg-muted text-foreground transition-colors cursor-pointer"
+                            >
+                              <span>Open</span>
+                              <ArrowRight className="w-3 h-3 text-muted-foreground" />
+                            </Link>
+                          </div>
                         </TableCell>
                       </TableRow>
                     );
@@ -1177,6 +1306,15 @@ export function LinkedAccountsPage() {
             </div>
           </CardContent>
         </Card>
+
+        <ManualBudgetAlertsSection
+          defaultProvider="aws"
+          lockProvider
+          selectedMonth={selectedMonth}
+          externalTriggerAccount={budgetTrigger}
+          onClearExternalTrigger={() => setBudgetTrigger(null)}
+          onBudgetsChanged={fetchManualBudgets}
+        />
       </main>
     </div>
   );

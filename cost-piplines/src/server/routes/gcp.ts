@@ -6,8 +6,18 @@ import { BigQuery } from '@google-cloud/bigquery';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const REPO_ROOT = path.resolve(__dirname, '../../..');
 
 const router = Router();
+
+/** Resolve a GCP key file against cwd first, falling back to repo root. */
+export function resolveGcpKeyFile(keyFile?: string): string | null {
+  if (!keyFile) return null;
+  const candidates = path.isAbsolute(keyFile)
+    ? [keyFile]
+    : [path.resolve(process.cwd(), keyFile), path.resolve(REPO_ROOT, keyFile)];
+  return candidates.find((p) => fs.existsSync(p)) || null;
+}
 
 // Helper to initialize BigQuery client safely
 export function getBigQueryClient(): BigQuery | null {
@@ -25,21 +35,20 @@ export function getBigQueryClient(): BigQuery | null {
     if (projectId) options.projectId = projectId;
     if (location) options.location = location;
 
-    if (keyFile) {
-      const resolvedPath = path.isAbsolute(keyFile)
-        ? keyFile
-        : path.resolve(process.cwd(), keyFile);
-      if (fs.existsSync(resolvedPath)) {
-        process.env.GOOGLE_APPLICATION_CREDENTIALS = resolvedPath;
-      }
+    const resolvedPath = resolveGcpKeyFile(keyFile);
+    if (resolvedPath) {
+      process.env.GOOGLE_APPLICATION_CREDENTIALS = resolvedPath;
     } else if (inlineJson) {
       try {
-        const tempKeyPath = path.resolve(process.cwd(), '.gcp-temp-credentials.json');
+        const tempKeyPath = path.resolve(REPO_ROOT, '.gcp-temp-credentials.json');
         fs.writeFileSync(tempKeyPath, inlineJson);
         process.env.GOOGLE_APPLICATION_CREDENTIALS = tempKeyPath;
       } catch (e) {
         console.error('[GCP] Failed to handle GCP_SERVICE_ACCOUNT_JSON');
       }
+    } else if (keyFile) {
+      console.warn(`[GCP] Key file not found (${keyFile}); skipping BigQuery client init.`);
+      return null;
     }
 
     return new BigQuery(options);
@@ -72,7 +81,7 @@ export async function resolveBillingTable(bq: BigQuery, datasetId: string): Prom
 }
 
 // Demo fallback data when BigQuery credentials are not configured yet
-const DEMO_GCP_PROJECTS = [
+export const DEMO_GCP_PROJECTS = [
   {
     id: 'prj-coforge-finops-prod',
     name: 'Coforge FinOps Production',

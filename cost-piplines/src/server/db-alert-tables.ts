@@ -84,6 +84,31 @@ BEGIN
     CREATE UNIQUE NONCLUSTERED INDEX [azure_sub_budget_unique] ON [dbo].[azure_subscription_budgets]([subscription_id], [budget_name]);
     CREATE NONCLUSTERED INDEX [azure_sub_budget_sub_idx] ON [dbo].[azure_subscription_budgets]([subscription_id]);
 END;
+
+IF OBJECT_ID('dbo.cloud_account_budgets', 'U') IS NULL
+BEGIN
+    CREATE TABLE [dbo].[cloud_account_budgets] (
+        [id] INT IDENTITY(1,1) NOT NULL,
+        [cloud_provider] NVARCHAR(16) NOT NULL,
+        [account_id] NVARCHAR(128) NOT NULL,
+        [account_name] NVARCHAR(255) NOT NULL,
+        [parent_account_id] NVARCHAR(128) NULL,
+        [monthly_budget] DECIMAL(18,2) NOT NULL,
+        [billing_currency] NVARCHAR(8) NOT NULL CONSTRAINT [DF_cloud_account_budgets_currency] DEFAULT ('USD'),
+        [alert_email] NVARCHAR(512) NOT NULL,
+        [contact_name] NVARCHAR(255) NULL,
+        [is_active] BIT NOT NULL CONSTRAINT [DF_cloud_account_budgets_active] DEFAULT 1,
+        [last_notified_threshold] NVARCHAR(32) NULL,
+        [last_notified_month] CHAR(7) NULL,
+        [last_notified_at] DATETIME2 NULL,
+        [last_manual_email_at] DATETIME2 NULL,
+        [created_at] DATETIME2 NOT NULL CONSTRAINT [DF_cloud_account_budgets_created_at] DEFAULT SYSUTCDATETIME(),
+        [updated_at] DATETIME2 NOT NULL CONSTRAINT [DF_cloud_account_budgets_updated_at] DEFAULT SYSUTCDATETIME(),
+        CONSTRAINT [PK_cloud_account_budgets] PRIMARY KEY CLUSTERED ([id])
+    );
+    CREATE UNIQUE NONCLUSTERED INDEX [cloud_account_budgets_unique] ON [dbo].[cloud_account_budgets]([cloud_provider], [account_id]);
+    CREATE NONCLUSTERED INDEX [cloud_account_budgets_provider_idx] ON [dbo].[cloud_account_budgets]([cloud_provider]);
+END;
 `;
 
     await client.$executeRawUnsafe(ddl);

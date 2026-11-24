@@ -13,6 +13,7 @@ import azureRoutes from './routes/azure.ts';
 import gcpRoutes from './routes/gcp.ts';
 import inventoryRoutes from './routes/inventory.ts';
 import chatRoutes from './routes/chat.ts';
+import budgetRoutes from './routes/budgets.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -35,6 +36,7 @@ app.use('/api/azure', azureRoutes);
 app.use('/api/gcp', gcpRoutes);
 app.use('/api/inventory', inventoryRoutes);
 app.use('/api/chat', chatRoutes);
+app.use('/api/budgets', budgetRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
