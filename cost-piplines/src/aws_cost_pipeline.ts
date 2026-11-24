@@ -333,6 +333,8 @@ async function fetchCostByLinkedAccount(
     Status?: string;
     Arn?: string;
     Email?: string;
+    JoinedMethod?: string;
+    JoinedTimestamp?: Date | string;
   }> = [];
   try {
     for await (const page of paginateListAccounts({ client: orgClient }, {})) {
@@ -345,6 +347,8 @@ async function fetchCostByLinkedAccount(
             Status: account.Status,
             Arn: account.Arn,
             Email: account.Email,
+            JoinedMethod: account.JoinedMethod,
+            JoinedTimestamp: account.JoinedTimestamp,
           });
         }
       }

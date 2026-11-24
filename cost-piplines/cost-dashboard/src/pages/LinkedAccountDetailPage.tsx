@@ -17,6 +17,8 @@ import {
   DollarSign,
   PieChart as PieChartIcon,
   Sparkles,
+  User,
+  FileCode,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -85,6 +87,9 @@ interface AccountDetailResponse {
       arn?: string;
       joinedMethod?: string;
       joinedTimestamp?: string;
+      ownerName?: string;
+      wbsCode?: string;
+      tags?: Array<{ key: string; value: string }>;
     };
     services?: Array<{ service: string; cost: number; sharePct: number }>;
     regions?: Array<{ region: string; cost: number; sharePct: number }>;
@@ -319,13 +324,29 @@ export function LinkedAccountDetailPage() {
                   </span>
                 </div>
 
-                {/* Owner Email from Organizations */}
-                {liveAws?.orgDetails?.email && (
+                {/* Owner Name & Email from Organizations */}
+                {(liveAws?.orgDetails?.ownerName || liveAws?.orgDetails?.email) && (
                   <div className="flex items-center gap-1.5">
-                    <Mail className="w-3.5 h-3.5 text-indigo-500" />
+                    <User className="w-3.5 h-3.5 text-indigo-500" />
                     <span className="text-muted-foreground">Owner:</span>
-                    <span className="font-medium text-foreground font-mono">
-                      {liveAws.orgDetails.email}
+                    <span className="font-medium text-foreground">
+                      {liveAws?.orgDetails?.ownerName || (liveAws?.orgDetails?.email ? liveAws.orgDetails.email.split("@")[0].replace(/[._-]/g, " ") : "Unassigned")}
+                    </span>
+                    {liveAws?.orgDetails?.email && (
+                      <span className="text-[11px] text-muted-foreground font-mono">
+                        ({liveAws.orgDetails.email})
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {/* WBS Code */}
+                {liveAws?.orgDetails?.wbsCode && (
+                  <div className="flex items-center gap-1.5">
+                    <FileCode className="w-3.5 h-3.5 text-indigo-500" />
+                    <span className="text-muted-foreground">WBS Code:</span>
+                    <span className="font-mono font-semibold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/40 px-1.5 py-0.5 rounded border border-indigo-200/60 dark:border-indigo-900/60 text-xs">
+                      {liveAws.orgDetails.wbsCode}
                     </span>
                   </div>
                 )}

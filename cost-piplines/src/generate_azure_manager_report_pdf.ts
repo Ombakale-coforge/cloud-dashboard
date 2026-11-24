@@ -4,6 +4,12 @@ import { execFileSync, execSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { prisma } from './server/db.ts';
+import {
+  renderEmailSafeSpendGraph,
+  renderAiToolUsageSection,
+  buildAzureAiUsage,
+  type AiToolUsageSummary,
+} from './report_charts_and_ai_helper.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -58,6 +64,7 @@ export interface AzureReportData {
   last6MonthsSpend: MonthlySpendPoint[];
   top5OverBudget: OverBudgetRow[];
   top5MostSpend: TopSpendRow[];
+  aiUsage?: AiToolUsageSummary;
 }
 
 function parseCsvSimple(content: string): Array<Record<string, string>> {
@@ -239,9 +246,18 @@ async function fetchReportDataFromDb(): Promise<AzureReportData> {
 }
 
 async function fetchReportDataFromCsv(): Promise<AzureReportData> {
-  const reportsDir = path.resolve(__dirname, '../AzureUsageReports/latest');
+  const candidateDirs = [
+    path.resolve(__dirname, '../AzureUsageReports/latest'),
+    path.resolve(__dirname, '../cost-dashboard/public/data/azure'),
+  ];
+  const reportsDir =
+    candidateDirs.find((d) =>
+      fs.existsSync(path.join(d, 'azure_usage_mom_change.csv'))
+    ) || candidateDirs[0];
+
   const momPath = path.join(reportsDir, 'azure_usage_mom_change.csv');
   const subPath = path.join(reportsDir, 'azure_usage_by_subscription.csv');
+  const svcPath = path.join(reportsDir, 'azure_usage_by_service.csv');
 
   if (!fs.existsSync(momPath) || !fs.existsSync(subPath)) {
     throw new Error(`CSV reports not found at ${reportsDir}`);
@@ -249,9 +265,14 @@ async function fetchReportDataFromCsv(): Promise<AzureReportData> {
 
   const momRecords = parseCsvSimple(fs.readFileSync(momPath, 'utf-8'));
   const subRecords = parseCsvSimple(fs.readFileSync(subPath, 'utf-8'));
+  const svcRecords = fs.existsSync(svcPath)
+    ? parseCsvSimple(fs.readFileSync(svcPath, 'utf-8'))
+    : [];
 
   const latestMom = momRecords[momRecords.length - 1] || {};
+  const prevMom = momRecords.length > 1 ? momRecords[momRecords.length - 2] : {};
   const reportMonth = latestMom['Month'] || new Date().toISOString().slice(0, 7);
+  const prevMonth = prevMom['Month'] || '';
   const currentMonthSpend = parseFloat(latestMom['Total Cost'] || '0') || 0;
   const previousMonthSpend = parseFloat(latestMom['Previous Month Cost'] || '0') || 0;
   const momPercentChange = parseFloat(latestMom['MoM % Change'] || '0') || 0;
@@ -281,6 +302,12 @@ async function fetchReportDataFromCsv(): Promise<AzureReportData> {
         : 0,
   }));
 
+  const mappedServices = svcRecords.map((r) => ({
+    month: r['Month'] || '',
+    service: r['ConsumedService'] || r['Service'] || '',
+    cost: parseFloat(r['Cost'] || '0') || 0,
+  }));
+
   return {
     billingScopeName: 'Azure Subscriptions (Consolidated)',
     reportMonth,
@@ -301,6 +328,12 @@ async function fetchReportDataFromCsv(): Promise<AzureReportData> {
     last6MonthsSpend,
     top5OverBudget: [],
     top5MostSpend,
+    aiUsage: buildAzureAiUsage(
+      mappedServices,
+      reportMonth,
+      prevMonth,
+      currentMonthSpend
+    ),
   };
 }
 
@@ -760,13 +793,13 @@ export function buildAzureReportHtml(data: AzureReportData): string {
     </div>
   </div>
 
-  <!-- Section 2: 6-Month Spending Trend (Recharts-Style) -->
+  <!-- Section 2: Monthly Spend Graph (Email & PDF Safe Bar Graph) -->
   <div class="section">
     <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid #f1f5f9;">
       <tr>
         <td align="left">
-          <div class="section-title">2. 6-Month Spending Trend</div>
-          <div class="section-subtitle">Monthly spend progression with 6-month historical average</div>
+          <div class="section-title">2. Monthly Spend Graph (6-Month Progression)</div>
+          <div class="section-subtitle">Monthly spend progression with MoM delta and 6-month historical average</div>
         </td>
         <td align="right">
           <span class="badge-avg" style="display: inline-block; background: #f0fdf4; border: 1px solid #bbf7d0; color: #166534; font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 6px;">
@@ -775,26 +808,14 @@ export function buildAzureReportHtml(data: AzureReportData): string {
         </td>
       </tr>
     </table>
-    <div style="width: 100%; display: flex; justify-content: center; padding: 2px 0;">
-      ${renderRechartsSpendChart(data.last6MonthsSpend, '₹', '#0078d4', '#bae6fd')}
+    <div style="width: 100%; padding: 2px 0;">
+      ${renderEmailSafeSpendGraph(data.last6MonthsSpend, {
+        currencySymbol: '₹',
+        brandColor: '#0078d4',
+        accentColor: '#7dd3fc',
+        budgetLimit: data.totalBudget,
+      })}
     </div>
-    ${
-      data.last6MonthsSpend && data.last6MonthsSpend.length > 0
-        ? `<table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top: 8px; border-top: 1px dashed #cbd5e1; padding-top: 6px; font-size: 10px; text-align: center;">
-            <tr>
-              ${data.last6MonthsSpend
-                .map(
-                  (p) => `
-                <td style="padding: 4px; color: #475569;">
-                  <div style="font-weight: 600; color: #64748b;">${formatMonthLabel(p.month)}</div>
-                  <div style="font-weight: 700; color: #0f172a; margin-top: 2px;">${fmtCurrency(p.spend)}</div>
-                </td>`
-                )
-                .join('')}
-            </tr>
-          </table>`
-        : ''
-    }
   </div>
 
   <!-- Section 3: Top 5 Subscriptions Over Budget -->
@@ -886,6 +907,22 @@ export function buildAzureReportHtml(data: AzureReportData): string {
       </tbody>
     </table>
   </div>
+
+  ${renderAiToolUsageSection(
+    data.aiUsage ||
+      buildAzureAiUsage(
+        [],
+        data.reportMonth,
+        '',
+        data.currentMonthSpend
+      ),
+    {
+      sectionNumber: 5,
+      cloudName: 'Azure',
+      currencySymbol: '₹',
+      brandColor: '#0078d4',
+    }
+  )}
 
   <div class="footer">
     Confidential — Coforge Cloud Cost Intelligence &amp; FinOps Governance Platform (Azure)

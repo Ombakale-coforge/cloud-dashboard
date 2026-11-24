@@ -1,8 +1,79 @@
 import nodemailer from 'nodemailer';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { AlertReport, Alert, EmailResult, AlertSeverity, MeterBudgetAlert } from './types.ts';
 import { EMAIL_MODE, LOG_DIR_PATH, validateEmailEnvironment, logger } from './config.ts';
+import {
+    renderEmailSafeSpendGraph,
+    renderAiToolUsageSection,
+    buildAzureAiUsage,
+    type MonthlySpendPoint,
+} from '../report_charts_and_ai_helper.ts';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+function loadAzureMonthlyAndAiForAlertEmail(): {
+    monthlyPoints: MonthlySpendPoint[];
+    aiSectionHtml: string;
+} {
+    let monthlyPoints: MonthlySpendPoint[] = [
+        { month: '2026-08', spend: 39496796.62 },
+        { month: '2026-09', spend: 16190803.19 },
+    ];
+    let currentSpend = 16190803.19;
+    let reportMonth = '2026-09';
+    let prevMonth = '2026-08';
+    const svcRows: Array<{ month: string; service: string; cost: number }> = [];
+
+    try {
+        const csvDir = path.resolve(__dirname, '../../cost-dashboard/public/data/azure');
+        const totalsPath = path.join(csvDir, 'azure_usage_monthly_totals.csv');
+        const svcPath = path.join(csvDir, 'azure_usage_by_service.csv');
+
+        if (fs.existsSync(totalsPath)) {
+            const lines = fs.readFileSync(totalsPath, 'utf-8').split(/\r?\n/).filter(Boolean).slice(1);
+            const parsed = lines
+                .map((l) => {
+                    const [m, c] = l.split(',');
+                    return { month: (m || '').trim(), spend: parseFloat(c || '0') || 0 };
+                })
+                .filter((p) => p.month);
+            if (parsed.length > 0) {
+                monthlyPoints = parsed.slice(-6);
+                reportMonth = monthlyPoints[monthlyPoints.length - 1].month;
+                currentSpend = monthlyPoints[monthlyPoints.length - 1].spend;
+                if (monthlyPoints.length > 1) {
+                    prevMonth = monthlyPoints[monthlyPoints.length - 2].month;
+                }
+            }
+        }
+        if (fs.existsSync(svcPath)) {
+            const lines = fs.readFileSync(svcPath, 'utf-8').split(/\r?\n/).filter(Boolean).slice(1);
+            for (const l of lines) {
+                const [m, svc, cost] = l.split(',');
+                if (m && svc) {
+                    svcRows.push({
+                        month: m.trim(),
+                        service: svc.trim(),
+                        cost: parseFloat(cost || '0') || 0,
+                    });
+                }
+            }
+        }
+    } catch {}
+
+    const aiSummary = buildAzureAiUsage(svcRows, reportMonth, prevMonth, currentSpend);
+    const aiSectionHtml = renderAiToolUsageSection(aiSummary, {
+        sectionNumber: 2,
+        cloudName: 'Azure',
+        currencySymbol: '₹',
+        brandColor: '#0078d4',
+    });
+
+    return { monthlyPoints, aiSectionHtml };
+}
 
 function escapeHtml(value: string | number | null | undefined): string {
     return String(value ?? "")
@@ -131,20 +202,55 @@ export function createEmailHtml(report: AlertReport): string {
         .join('');
 
     const cards = alerts.map(renderAlertCard).join('');
+    const { monthlyPoints, aiSectionHtml } = loadAzureMonthlyAndAiForAlertEmail();
+    const spendGraphHtml = renderEmailSafeSpendGraph(monthlyPoints, {
+        currencySymbol: '₹',
+        brandColor: '#0078d4',
+        accentColor: '#7dd3fc',
+    });
 
     return `<!DOCTYPE html>
 <html lang="en">
-<head><meta charset="UTF-8"><title>Azure Cost Alerts</title></head>
+<head>
+<meta charset="UTF-8"><title>Azure Cost Alerts</title>
+<style>
+  .section { margin-top: 18px; margin-bottom: 18px; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px 16px; background: #ffffff; }
+  .section-title { font-size: 13px; font-weight: 800; color: #0f172a; text-transform: uppercase; letter-spacing: 0.4px; }
+  .section-subtitle { font-size: 11px; color: #64748b; }
+  table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+  th { background: #f8fafc; color: #475569; font-size: 10px; font-weight: 700; text-transform: uppercase; padding: 7px 9px; text-align: left; border-bottom: 1px solid #cbd5e1; }
+  th.right, td.right { text-align: right; }
+  td { padding: 7.5px 9px; border-bottom: 1px solid #f1f5f9; color: #1e293b; }
+</style>
+</head>
 <body style="margin: 0; padding: 0; background-color: #f8fafc; font-family: Arial, Helvetica, sans-serif;">
-    <div style="max-width: 760px; margin: 0 auto; padding: 24px 12px;">
+    <div style="max-width: 780px; margin: 0 auto; padding: 24px 12px;">
         <div style="border-radius: 10px; padding: 24px; background-color: #0f172a; color: #ffffff;">
-            <h1 style="margin: 0 0 8px; font-size: 24px;">Azure Cost Alert Report</h1>
+            <h1 style="margin: 0 0 8px; font-size: 24px;">Azure Daily Cost &amp; AI Governance Report</h1>
             <p style="margin: 0; color: #cbd5e1; font-size: 14px;">Evaluation date: ${escapeHtml(evaluationDate)} | Highest Severity: <span style="color: ${getSeverityColor(highestSev)}; font-weight: bold;">${highestSev}</span></p>
         </div>
         <div style="padding: 22px; border: 1px solid #e2e8f0; background-color: #ffffff;">
-            <p style="margin-top: 0; color: #334155;">The alert engine detected <strong>${escapeHtml(summary?.total ?? alerts.length)}</strong> alerts.</p>
-            <div style="display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap;">${chips}</div>
-            ${cards}
+            <!-- 1. Monthly Spend Graph -->
+            <div class="section">
+                <div style="margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid #f1f5f9;">
+                    <div class="section-title">1. Monthly Spend Graph</div>
+                    <div class="section-subtitle">Historical monthly Azure spend progression</div>
+                </div>
+                ${spendGraphHtml}
+            </div>
+
+            <!-- 2. AI Tool & Model Usage -->
+            ${aiSectionHtml}
+
+            <!-- 3. Daily Cost Alerts -->
+            <div class="section">
+                <div style="margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid #f1f5f9;">
+                    <div class="section-title">3. Daily Anomaly &amp; Spike Alerts</div>
+                    <div class="section-subtitle">The alert engine detected <strong>${escapeHtml(summary?.total ?? alerts.length)}</strong> alerts for ${escapeHtml(evaluationDate)}</div>
+                </div>
+                <div style="display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap;">${chips}</div>
+                ${cards}
+            </div>
         </div>
     </div>
 </body>

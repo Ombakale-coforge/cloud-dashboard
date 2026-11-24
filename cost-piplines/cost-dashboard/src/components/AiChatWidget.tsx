@@ -238,16 +238,12 @@ const CHEAT_SHEET_SECTIONS = [
         desc: "Projected monthly AWS bill in USD (e.g. $500, $2,500).",
       },
       {
-        name: "Client Chargeback & FY'27 Budget",
-        desc: "Whether costs are billed back to a client and planned in annual BU budget.",
+        name: "Client Chargeback",
+        desc: "Whether costs are billed back directly to an external client.",
       },
       {
-        name: "WBS Code & Cost Center",
-        desc: "Finance ERP project billing code (WBS) and department Cost Center (CC) for allocation.",
-      },
-      {
-        name: "80% Budget Alert Emails",
-        desc: "Recipients automatically notified when monthly spend reaches 80% of budget.",
+        name: "WBS Code & Cost Center (Mandatory)",
+        desc: "Mandatory finance ERP project billing code (WBS) and department Cost Center (CC).",
       },
     ],
   },

@@ -54,6 +54,8 @@ export interface LinkedAccountData {
         Status?: string;
         Arn?: string;
         Email?: string;
+        JoinedMethod?: string;
+        JoinedTimestamp?: Date | string;
     }>;
 }
 
@@ -155,6 +157,8 @@ export async function saveAwsReportRunToDb({
         // 3. Upsert linked accounts directory
         if (linkedAccountData?.fullAccountDetails && linkedAccountData.fullAccountDetails.length > 0) {
             for (const la of linkedAccountData.fullAccountDetails) {
+                const joinedDate = la.JoinedTimestamp ? new Date(la.JoinedTimestamp) : undefined;
+                const validJoinedDate = joinedDate && !isNaN(joinedDate.getTime()) ? joinedDate : undefined;
                 await prisma.awsLinkedAccount.upsert({
                     where: {
                         accountId_linkedAccountId: {
@@ -165,6 +169,7 @@ export async function saveAwsReportRunToDb({
                     update: {
                         name: la.Name,
                         status: la.Status || "ACTIVE",
+                        ...(validJoinedDate ? { firstSeenAt: validJoinedDate } : {}),
                         lastSeenAt: new Date(),
                     },
                     create: {
@@ -172,6 +177,7 @@ export async function saveAwsReportRunToDb({
                         linkedAccountId: la.Id,
                         name: la.Name,
                         status: la.Status || "ACTIVE",
+                        ...(validJoinedDate ? { firstSeenAt: validJoinedDate } : {}),
                     },
                 });
             }
