@@ -446,7 +446,7 @@ router.get('/azure/callback', async (req: Request, res: Response) => {
             data: {
               lastLoginAt: new Date(),
               provider: 'azure-ad',
-              ...(isSystemAdmin ? { role: 'admin' } : {}),
+              role: isSystemAdmin ? 'admin' : 'basic',
             },
           }).catch(() => userRecord);
         } else {
@@ -486,7 +486,7 @@ router.get('/azure/callback', async (req: Request, res: Response) => {
       id: userRecord?.id || `sso-${Date.now()}`,
       name: userRecord?.name || displayName,
       email: normalizedEmail,
-      role: isSystemAdmin ? 'admin' : (userRecord?.role || 'basic'),
+      role: isSystemAdmin ? 'admin' : 'basic',
       department: userRecord?.department || department,
       provider: 'azure-ad',
       loginTime: new Date().toISOString(),

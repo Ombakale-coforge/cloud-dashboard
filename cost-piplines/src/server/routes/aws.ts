@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { CostExplorerClient, GetCostAndUsageCommand } from '@aws-sdk/client-cost-explorer';
-import { OrganizationsClient, DescribeAccountCommand } from '@aws-sdk/client-organizations';
+import { OrganizationsClient, DescribeAccountCommand, paginateListAccounts, ListTagsForResourceCommand } from '@aws-sdk/client-organizations';
 import { prisma } from '../db.ts';
 
 const router = Router();
@@ -25,6 +25,147 @@ function getAwsCredentials(configId: string) {
     };
   }
   return null;
+}
+
+interface OrgAccountMeta {
+  id: string;
+  name?: string;
+  email?: string;
+  status?: string;
+  joinedMethod?: string;
+  joinedTimestamp?: string;
+  ownerName?: string;
+  wbsCode?: string;
+}
+
+const orgAccountsCache = new Map<string, { fetchedAt: number; data: Map<string, OrgAccountMeta> }>();
+const ORG_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+export function getCurrentWeekBounds(now = new Date()) {
+  const dayOfWeek = now.getDay(); // 0 (Sun) .. 6 (Sat)
+  const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+  const weekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() + diffToMonday, 0, 0, 0, 0);
+  const weekEnd = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + 6, 23, 59, 59, 999);
+  const fmtShort = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const weekLabel = `${fmtShort(weekStart)} – ${fmtShort(weekEnd)}, ${weekEnd.getFullYear()}`;
+  return { weekStart, weekEnd, weekLabel };
+}
+
+async function getOrgAccountsMetadata(configId: string, dbAccountId?: number): Promise<Map<string, OrgAccountMeta>> {
+  const cacheKey = configId || 'account-1';
+  const cached = orgAccountsCache.get(cacheKey);
+  if (cached && Date.now() - cached.fetchedAt < ORG_CACHE_TTL_MS && cached.data.size > 0) {
+    return cached.data;
+  }
+
+  const creds = getAwsCredentials(cacheKey);
+  if (!creds) {
+    return cached?.data || new Map();
+  }
+
+  try {
+    const orgClient = new OrganizationsClient({
+      region: creds.region,
+      credentials: {
+        accessKeyId: creds.accessKeyId,
+        secretAccessKey: creds.secretAccessKey,
+      },
+    });
+
+    const metaMap = new Map<string, OrgAccountMeta>();
+    const accountList: Array<{ id: string; name?: string; email?: string; status?: string; joinedMethod?: string; joinedTimestamp?: string }> = [];
+
+    for await (const page of paginateListAccounts({ client: orgClient }, {})) {
+      for (const acc of page.Accounts || []) {
+        if (acc.Id) {
+          const joinedIso = acc.JoinedTimestamp ? new Date(acc.JoinedTimestamp).toISOString() : undefined;
+          const item = {
+            id: acc.Id,
+            name: acc.Name,
+            email: acc.Email,
+            status: acc.Status,
+            joinedMethod: acc.JoinedMethod,
+            joinedTimestamp: joinedIso,
+          };
+          accountList.push(item);
+          metaMap.set(acc.Id, { ...item });
+        }
+      }
+    }
+
+    // Concurrently fetch tags in batches of 10 for Owner Name and WBS Code
+    const BATCH_SIZE = 10;
+    for (let i = 0; i < accountList.length; i += BATCH_SIZE) {
+      const chunk = accountList.slice(i, i + BATCH_SIZE);
+      await Promise.all(
+        chunk.map(async (acc) => {
+          try {
+            const tagRes = await orgClient.send(new ListTagsForResourceCommand({ ResourceId: acc.id }));
+            const tags = tagRes.Tags || [];
+            let ownerName: string | undefined;
+            let wbsCode: string | undefined;
+
+            for (const t of tags) {
+              const k = (t.Key || '').trim().toLowerCase();
+              const v = (t.Value || '').trim();
+              if (!v) continue;
+
+              // Owner Name detection: "Owner Name", "Owner Name:", "Owner", "Point-of-Contact Name"
+              if (!ownerName) {
+                if (k === 'owner name' || k === 'owner name:' || k === 'owner' || k === 'account owner') {
+                  ownerName = v;
+                } else if (k === 'point-of-contact name' || k === 'contact name') {
+                  ownerName = v;
+                }
+              }
+
+              // WBS / Project Code detection: "wbs", "wbs code", "wbscode", "project code", "ledgercode", "prcode"
+              if (!wbsCode) {
+                if (k.includes('wbs') || k === 'wbs code' || k === 'wbscode') {
+                  wbsCode = v;
+                } else if (k === 'ledgercode' || k.includes('prcode') || k === 'project code' || k === 'costcenter' || k === 'cost center') {
+                  wbsCode = v;
+                }
+              }
+            }
+
+            const existing = metaMap.get(acc.id);
+            if (existing) {
+              if (ownerName) existing.ownerName = ownerName;
+              if (wbsCode) existing.wbsCode = wbsCode;
+            }
+          } catch {
+            // ignore tag fetch failures on individual accounts
+          }
+        })
+      );
+    }
+
+    if (metaMap.size > 0) {
+      orgAccountsCache.set(cacheKey, { fetchedAt: Date.now(), data: metaMap });
+
+      // Background sync JoinedTimestamp -> firstSeenAt in SQL Server if prisma is available
+      if (prisma && dbAccountId) {
+        Promise.all(
+          Array.from(metaMap.values())
+            .filter((m) => m.joinedTimestamp)
+            .map((m) =>
+              prisma.awsLinkedAccount
+                .updateMany({
+                  where: { accountId: dbAccountId, linkedAccountId: m.id },
+                  data: { firstSeenAt: new Date(m.joinedTimestamp!) },
+                })
+                .catch(() => null)
+            )
+        ).catch(() => null);
+      }
+    }
+
+    return metaMap;
+  } catch (err: any) {
+    console.warn(`[AWS Orgs Metadata] Could not list accounts for ${cacheKey}:`, err.message);
+    return cached?.data || new Map();
+  }
 }
 
 
@@ -664,10 +805,39 @@ router.get('/dataset/:filename', async (req: Request, res: Response) => {
       }
 
       case 'governance_summary': {
-        const record = await prisma.awsGovernanceSummary.findFirst({
-          where: { reportRunId },
-        });
+        const [record, linkedAccs, orgMetaMap] = await Promise.all([
+          prisma.awsGovernanceSummary.findFirst({ where: { reportRunId } }),
+          prisma.awsLinkedAccount.findMany({ where: { accountId: accountContext.account.id } }),
+          getOrgAccountsMetadata(accountContext.account.configId, accountContext.account.id),
+        ]);
         if (!record) return res.json(null);
+
+        const { weekStart, weekEnd, weekLabel } = getCurrentWeekBounds();
+        const minuteBucketCounts = new Map<string, number>();
+        for (const la of linkedAccs) {
+          if (la.firstSeenAt) {
+            const key = la.firstSeenAt.toISOString().slice(0, 16);
+            minuteBucketCounts.set(key, (minuteBucketCounts.get(key) || 0) + 1);
+          }
+        }
+
+        let newAccountsCurrentWeekCount = 0;
+        for (const la of linkedAccs) {
+          const meta = orgMetaMap.get(la.linkedAccountId);
+          let createdIso = meta?.joinedTimestamp || null;
+          if (!createdIso && la.firstSeenAt) {
+            const key = la.firstSeenAt.toISOString().slice(0, 16);
+            if ((minuteBucketCounts.get(key) || 0) <= 3) {
+              createdIso = la.firstSeenAt.toISOString();
+            }
+          }
+          if (createdIso) {
+            const dt = new Date(createdIso);
+            if (!isNaN(dt.getTime()) && dt >= weekStart && dt <= weekEnd) {
+              newAccountsCurrentWeekCount++;
+            }
+          }
+        }
 
         // If targetMonth is provided and different from pipeline run latest month, dynamically compute spend for that month
         if (targetMonth && targetMonth.match(/^\d{4}-\d{2}$/) && targetMonth !== record.selectedMonth) {
@@ -710,6 +880,8 @@ router.get('/dataset/:filename', async (req: Request, res: Response) => {
             suspendedAccountsChargingCount: record.suspendedAccountsChargingCount,
             suspendedAccountsSpendTotal: Number(record.suspendedAccountsSpendTotal),
             suspendedPeriodLabel: record.suspendedPeriodLabel,
+            newAccountsCurrentWeekCount,
+            currentWeekLabel: weekLabel,
           });
         }
 
@@ -729,6 +901,8 @@ router.get('/dataset/:filename', async (req: Request, res: Response) => {
           suspendedAccountsChargingCount: record.suspendedAccountsChargingCount,
           suspendedAccountsSpendTotal: Number(record.suspendedAccountsSpendTotal),
           suspendedPeriodLabel: record.suspendedPeriodLabel,
+          newAccountsCurrentWeekCount,
+          currentWeekLabel: weekLabel,
         });
       }
 
@@ -770,11 +944,23 @@ router.get('/linked-accounts', async (req: Request, res: Response) => {
       prevMonthStr = `${prevDate.getUTCFullYear()}-${String(prevDate.getUTCMonth() + 1).padStart(2, '0')}`;
     }
 
-    // 1. Fetch all linked accounts in directory
-    const linkedAccounts = await prisma.awsLinkedAccount.findMany({
-      where: { accountId: account.id },
-      orderBy: { name: 'asc' },
-    });
+    // 1. Fetch all linked accounts in directory & live AWS Organizations metadata
+    const [linkedAccounts, orgMetaMap] = await Promise.all([
+      prisma.awsLinkedAccount.findMany({
+        where: { accountId: account.id },
+        orderBy: { name: 'asc' },
+      }),
+      getOrgAccountsMetadata(account.configId, account.id),
+    ]);
+
+    const { weekStart, weekEnd, weekLabel } = getCurrentWeekBounds();
+    const minuteBucketCounts = new Map<string, number>();
+    for (const la of linkedAccounts) {
+      if (la.firstSeenAt) {
+        const key = la.firstSeenAt.toISOString().slice(0, 16);
+        minuteBucketCounts.set(key, (minuteBucketCounts.get(key) || 0) + 1);
+      }
+    }
 
     // 2. Fetch costs for current and previous month
     const monthsToFetch = prevMonthStr ? [targetMonth, prevMonthStr] : [targetMonth];
@@ -805,11 +991,35 @@ router.get('/linked-accounts', async (req: Request, res: Response) => {
     const hasAnyOrgBudgets = budgetsList.length > 0 && (govSummary ? govSummary.accountsWithBudget > 0 : true);
     const normalizeStr = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 
-    // 4. Fetch variances
-    const variances = await prisma.awsAccountCostVariance.findMany({
-      where: { reportRunId },
-    });
+    // 4. Fetch variances and account requests (for Owner & WBS code mapping)
+    const [variances, accountRequests] = await Promise.all([
+      prisma.awsAccountCostVariance.findMany({
+        where: { reportRunId },
+      }),
+      (prisma as any).accountRequest ? (prisma as any).accountRequest.findMany({
+        select: {
+          projectName: true,
+          submitterName: true,
+          pointOfContact: true,
+          accountManager: true,
+          wbsCode: true,
+          costCenter: true,
+          status: true,
+        },
+      }).catch(() => []) : Promise.resolve([]),
+    ]);
     const varianceMap = new Map(variances.map((v) => [v.linkedAccount, v]));
+
+    // Index account requests by normalized project name and words for lookup
+    const reqByName = new Map<string, any>();
+    if (Array.isArray(accountRequests)) {
+      for (const r of accountRequests) {
+        if (r.projectName) {
+          const normP = normalizeStr(r.projectName);
+          if (normP) reqByName.set(normP, r);
+        }
+      }
+    }
 
     // Collect all accounts
     const allAccountIds = new Set<string>();
@@ -819,8 +1029,49 @@ router.get('/linked-accounts', async (req: Request, res: Response) => {
     const result = Array.from(allAccountIds).map((accId) => {
       const dirInfo = linkedAccounts.find((la) => la.linkedAccountId === accId || la.name === accId);
       const cleanId = dirInfo ? dirInfo.linkedAccountId : accId;
-      const name = dirInfo?.name || unbudgetedMap.get(cleanId)?.accountName || cleanId;
-      const status = dirInfo?.status || unbudgetedMap.get(cleanId)?.status || 'ACTIVE';
+      const orgMeta = orgMetaMap.get(cleanId);
+      const name = orgMeta?.name || dirInfo?.name || unbudgetedMap.get(cleanId)?.accountName || cleanId;
+      const status = orgMeta?.status || dirInfo?.status || unbudgetedMap.get(cleanId)?.status || 'ACTIVE';
+
+      // Match account request by name if available
+      const normAccountName = normalizeStr(name);
+      let matchedReq: any = null;
+      for (const [key, r] of reqByName.entries()) {
+        if (normAccountName === key || normAccountName.includes(key) || key.includes(normAccountName)) {
+          matchedReq = r;
+          break;
+        }
+      }
+
+      // Owner name resolution hierarchy: AWS Orgs Tag -> Account Request (submitterName/pointOfContact) -> Email username fallback
+      const ownerName =
+        orgMeta?.ownerName ||
+        matchedReq?.submitterName ||
+        matchedReq?.pointOfContact ||
+        (orgMeta?.email ? orgMeta.email.split('@')[0].replace(/[._-]/g, ' ') : null);
+
+      // WBS Code resolution hierarchy: AWS Orgs Tag -> Account Request wbsCode -> Cost Center fallback
+      const wbsCode =
+        orgMeta?.wbsCode ||
+        matchedReq?.wbsCode ||
+        matchedReq?.costCenter ||
+        null;
+
+      let createdAt: string | null = orgMeta?.joinedTimestamp || null;
+      if (!createdAt && dirInfo?.firstSeenAt) {
+        const key = dirInfo.firstSeenAt.toISOString().slice(0, 16);
+        if ((minuteBucketCounts.get(key) || 0) <= 3) {
+          createdAt = dirInfo.firstSeenAt.toISOString();
+        }
+      }
+
+      let isCreatedCurrentWeek = false;
+      if (createdAt) {
+        const dt = new Date(createdAt);
+        if (!isNaN(dt.getTime()) && dt >= weekStart && dt <= weekEnd) {
+          isCreatedCurrentWeek = true;
+        }
+      }
 
       const costs = costMap[cleanId] || costMap[name] || { current: 0, previous: 0 };
       const currentSpend = costs.current;
@@ -858,6 +1109,12 @@ router.get('/linked-accounts', async (req: Request, res: Response) => {
         hasBudget,
         budgetStatus: !isActive ? 'Closed' : hasBudget ? 'Budgeted' : 'Unbudgeted',
         topCostDriver,
+        createdAt,
+        joinedMethod: orgMeta?.joinedMethod || null,
+        email: orgMeta?.email || null,
+        ownerName: ownerName || null,
+        wbsCode: wbsCode || null,
+        isCreatedCurrentWeek,
         variance: v ? {
           mean: Number(v.meanMonthlyCost),
           stdDev: Number(v.stdDev),
@@ -871,6 +1128,12 @@ router.get('/linked-accounts', async (req: Request, res: Response) => {
     result.sort((a, b) => b.currentSpend - a.currentSpend);
 
     const activeResults = result.filter((r) => r.status === 'ACTIVE');
+    const newAccountsCurrentWeek = result
+      .filter((r) => r.isCreatedCurrentWeek)
+      .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+    const newAccountsCurrentWeekSpend = Number(
+      newAccountsCurrentWeek.reduce((sum, r) => sum + r.currentSpend, 0).toFixed(2)
+    );
 
     return res.json({
       rootAccount: {
@@ -885,6 +1148,12 @@ router.get('/linked-accounts', async (req: Request, res: Response) => {
       budgetedCount: activeResults.filter((r) => r.hasBudget).length,
       unbudgetedCount: activeResults.filter((r) => !r.hasBudget).length,
       totalSpend: Number(result.reduce((sum, r) => sum + r.currentSpend, 0).toFixed(2)),
+      currentWeekStart: weekStart.toISOString(),
+      currentWeekEnd: weekEnd.toISOString(),
+      currentWeekLabel: weekLabel,
+      newAccountsCurrentWeekCount: newAccountsCurrentWeek.length,
+      newAccountsCurrentWeekSpend,
+      newAccountsCurrentWeek,
       accounts: result,
     });
   } catch (err: any) {
@@ -1034,7 +1303,7 @@ router.get('/linked-accounts/:linkedAccountId', async (req: Request, res: Respon
         const nextMonthDate = new Date(Date.UTC(year, month, 1));
         const endStr = `${nextMonthDate.getUTCFullYear()}-${String(nextMonthDate.getUTCMonth() + 1).padStart(2, '0')}-01`;
 
-        const [descResult, serviceResult, regionResult] = await Promise.allSettled([
+        const [descResult, serviceResult, regionResult, tagsResult] = await Promise.allSettled([
           orgClient.send(new DescribeAccountCommand({ AccountId: cleanAccountId })),
           ceClient.send(new GetCostAndUsageCommand({
             TimePeriod: { Start: startStr, End: endStr },
@@ -1054,7 +1323,35 @@ router.get('/linked-accounts/:linkedAccountId', async (req: Request, res: Respon
             },
             GroupBy: [{ Type: 'DIMENSION', Key: 'REGION' }],
           })),
+          orgClient.send(new ListTagsForResourceCommand({ ResourceId: cleanAccountId })),
         ]);
+
+        let ownerNameFromTags: string | undefined;
+        let wbsCodeFromTags: string | undefined;
+        let accountTags: Array<{ key: string; value: string }> = [];
+
+        if (tagsResult.status === 'fulfilled' && tagsResult.value.Tags) {
+          accountTags = tagsResult.value.Tags.map((t) => ({ key: t.Key || '', value: t.Value || '' }));
+          for (const t of tagsResult.value.Tags) {
+            const k = (t.Key || '').trim().toLowerCase();
+            const v = (t.Value || '').trim();
+            if (!v) continue;
+            if (!ownerNameFromTags) {
+              if (k === 'owner name' || k === 'owner name:' || k === 'owner' || k === 'account owner') {
+                ownerNameFromTags = v;
+              } else if (k === 'point-of-contact name' || k === 'contact name') {
+                ownerNameFromTags = v;
+              }
+            }
+            if (!wbsCodeFromTags) {
+              if (k.includes('wbs') || k === 'wbs code' || k === 'wbscode') {
+                wbsCodeFromTags = v;
+              } else if (k === 'ledgercode' || k.includes('prcode') || k === 'project code' || k === 'costcenter' || k === 'cost center') {
+                wbsCodeFromTags = v;
+              }
+            }
+          }
+        }
 
         let orgDetails = null;
         if (descResult.status === 'fulfilled' && descResult.value.Account) {
@@ -1066,6 +1363,9 @@ router.get('/linked-accounts/:linkedAccountId', async (req: Request, res: Respon
             arn: acc.Arn,
             joinedMethod: acc.JoinedMethod,
             joinedTimestamp: acc.JoinedTimestamp,
+            ownerName: ownerNameFromTags || (acc.Email ? acc.Email.split('@')[0].replace(/[._-]/g, ' ') : undefined),
+            wbsCode: wbsCodeFromTags,
+            tags: accountTags,
           };
         }
 

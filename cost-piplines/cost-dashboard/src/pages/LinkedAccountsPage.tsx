@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { Navbar, type AccountOption } from "@/components/Navbar";
 import {
   Card,
@@ -32,6 +32,11 @@ import {
   ChevronRight,
   DollarSign,
   PieChart,
+  CalendarPlus,
+  Sparkles,
+  Calendar,
+  User,
+  FileCode,
 } from "lucide-react";
 
 interface LinkedAccountItem {
@@ -43,8 +48,14 @@ interface LinkedAccountItem {
   previousSpend: number;
   momChangePercent: number;
   hasBudget: boolean;
-  budgetStatus: "Budgeted" | "Unbudgeted";
+  budgetStatus: "Budgeted" | "Unbudgeted" | "Closed";
   topCostDriver: string;
+  createdAt?: string | null;
+  joinedMethod?: string | null;
+  email?: string | null;
+  ownerName?: string | null;
+  wbsCode?: string | null;
+  isCreatedCurrentWeek?: boolean;
 }
 
 interface ApiResponse {
@@ -60,13 +71,33 @@ interface ApiResponse {
   budgetedCount: number;
   unbudgetedCount: number;
   totalSpend: number;
+  currentWeekStart?: string;
+  currentWeekEnd?: string;
+  currentWeekLabel?: string;
+  newAccountsCurrentWeekCount?: number;
+  newAccountsCurrentWeekSpend?: number;
+  newAccountsCurrentWeek?: LinkedAccountItem[];
   accounts: LinkedAccountItem[];
 }
 
 const fmt = (n: number) =>
   `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+function getClientCurrentWeekBounds(now = new Date()) {
+  const dayOfWeek = now.getDay();
+  const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+  const weekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() + diffToMonday, 0, 0, 0, 0);
+  const weekEnd = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + 6, 23, 59, 59, 999);
+  const fmtShort = (d: Date) => d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const label = `${fmtShort(weekStart)} – ${fmtShort(weekEnd)}, ${weekEnd.getFullYear()}`;
+  return { weekStart, weekEnd, label };
+}
+
 export function LinkedAccountsPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialAccountParam = searchParams.get("account") || "account-1";
+  const initialFilterParam = searchParams.get("filter");
+
   const [awsAccounts, setAwsAccounts] = useState<AccountOption[]>([
     {
       id: "account-1",
@@ -83,7 +114,7 @@ export function LinkedAccountsPage() {
       path: "/data/accounts/account-2",
     },
   ]);
-  const [selectedAwsAccount, setSelectedAwsAccount] = useState<string>("account-1");
+  const [selectedAwsAccount, setSelectedAwsAccount] = useState<string>(initialAccountParam);
   const [data, setData] = useState<ApiResponse | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -92,6 +123,12 @@ export function LinkedAccountsPage() {
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [statusFilter, setStatusFilter] = useState<"ALL" | "ACTIVE" | "SUSPENDED">("ALL");
   const [budgetFilter, setBudgetFilter] = useState<"ALL" | "BUDGETED" | "UNBUDGETED">("ALL");
+  const [createdFilter, setCreatedFilter] = useState<"ALL" | "THIS_WEEK" | "NEWEST">(
+    initialFilterParam === "new-this-week" ? "THIS_WEEK" : "ALL"
+  );
+  const [showWeeklyDrawer, setShowWeeklyDrawer] = useState<boolean>(
+    initialFilterParam === "new-this-week"
+  );
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   // Pagination
@@ -101,6 +138,8 @@ export function LinkedAccountsPage() {
   // Available months
   const [availableMonths, setAvailableMonths] = useState<string[]>([]);
   const [selectedMonth, setSelectedMonth] = useState<string>("");
+
+  const weekBounds = useMemo(() => getClientCurrentWeekBounds(), []);
 
   // 1. Fetch AWS Accounts
   useEffect(() => {
@@ -170,12 +209,20 @@ export function LinkedAccountsPage() {
           budgetsList.length > 0 &&
           (govItem ? Number(govItem.accountsWithBudget ?? 1) > 0 : true);
 
-        const normalizedAccounts = (json.accounts || []).map((acc) => {
+        const normalizedAccounts: LinkedAccountItem[] = (json.accounts || []).map((acc) => {
           const isActive = acc.status?.toUpperCase() === "ACTIVE";
           const hasBudget = isActive && hasAnyOrgBudgets && acc.hasBudget;
+          let isCreatedCurrentWeek = Boolean(acc.isCreatedCurrentWeek);
+          if (acc.createdAt && acc.isCreatedCurrentWeek === undefined) {
+            const dt = new Date(acc.createdAt);
+            if (!isNaN(dt.getTime())) {
+              isCreatedCurrentWeek = dt >= weekBounds.weekStart && dt <= weekBounds.weekEnd;
+            }
+          }
           return {
             ...acc,
             hasBudget,
+            isCreatedCurrentWeek,
             budgetStatus: !isActive ? "Closed" : hasBudget ? "Budgeted" : "Unbudgeted",
           };
         });
@@ -209,6 +256,25 @@ export function LinkedAccountsPage() {
     setTimeout(() => setCopiedId(null), 2000);
   };
 
+  // Current week newly created accounts list
+  const newAccountsThisWeek = useMemo(() => {
+    if (!data?.accounts) return [];
+    return data.accounts
+      .filter((a) => a.isCreatedCurrentWeek)
+      .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+  }, [data]);
+
+  // Most recently created accounts (top 5 newest with a known createdAt timestamp)
+  const newestAccounts = useMemo(() => {
+    if (!data?.accounts) return [];
+    return [...data.accounts]
+      .filter((a) => Boolean(a.createdAt))
+      .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())
+      .slice(0, 5);
+  }, [data]);
+
+  const currentWeekLabel = data?.currentWeekLabel || weekBounds.label;
+
   // Filtered accounts
   const filteredAccounts = useMemo(() => {
     if (!data?.accounts) return [];
@@ -220,7 +286,10 @@ export function LinkedAccountsPage() {
         (a) =>
           a.accountName.toLowerCase().includes(q) ||
           a.linkedAccountId.includes(q) ||
-          a.topCostDriver.toLowerCase().includes(q)
+          a.topCostDriver.toLowerCase().includes(q) ||
+          (a.email && a.email.toLowerCase().includes(q)) ||
+          (a.ownerName && a.ownerName.toLowerCase().includes(q)) ||
+          (a.wbsCode && a.wbsCode.toLowerCase().includes(q))
       );
     }
 
@@ -234,8 +303,18 @@ export function LinkedAccountsPage() {
       list = list.filter((a) => !a.hasBudget && (statusFilter !== "ALL" || a.status.toUpperCase() === "ACTIVE"));
     }
 
+    if (createdFilter === "THIS_WEEK") {
+      list = list.filter((a) => a.isCreatedCurrentWeek);
+    } else if (createdFilter === "NEWEST") {
+      list.sort((a, b) => {
+        const tA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const tB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        return tB - tA;
+      });
+    }
+
     return list;
-  }, [data, searchQuery, statusFilter, budgetFilter]);
+  }, [data, searchQuery, statusFilter, budgetFilter, createdFilter]);
 
   const totalPages = Math.max(1, Math.ceil(filteredAccounts.length / ITEMS_PER_PAGE));
   const paginatedAccounts = useMemo(() => {
@@ -250,6 +329,29 @@ export function LinkedAccountsPage() {
     const date = new Date(Number(year), Number(month) - 1, 1);
     if (isNaN(date.getTime())) return mStr;
     return date.toLocaleString("default", { month: "long", year: "numeric" });
+  };
+
+  const formatCreatedDate = (iso?: string | null) => {
+    if (!iso) return "—";
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return "—";
+    return d.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+  };
+
+  const handleToggleThisWeekFilter = () => {
+    const next = createdFilter === "THIS_WEEK" ? "ALL" : "THIS_WEEK";
+    setCreatedFilter(next);
+    setShowWeeklyDrawer(true);
+    setCurrentPage(1);
+    if (next === "THIS_WEEK") {
+      setSearchParams({ account: selectedAwsAccount, filter: "new-this-week" });
+    } else {
+      setSearchParams({ account: selectedAwsAccount });
+    }
   };
 
   return (
@@ -274,7 +376,7 @@ export function LinkedAccountsPage() {
                 AWS Linked Accounts Directory
               </h2>
               <p className="text-xs text-muted-foreground">
-                Member account inventory, billing trajectory, and budget enforcement
+                Member account inventory, weekly account creations, billing trajectory, and budget enforcement
               </p>
             </div>
           </div>
@@ -327,9 +429,9 @@ export function LinkedAccountsPage() {
           </div>
         </div>
 
-        {/* 4 Summary KPI Cards */}
+        {/* 5 Summary KPI Cards */}
         {data && (
-          <div className="grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
             {/* Card 1: Org Accounts */}
             <Card className="border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 rounded-xl shadow-xs transition-all hover:border-slate-300">
               <div className="flex items-center justify-between">
@@ -356,7 +458,41 @@ export function LinkedAccountsPage() {
               </div>
             </Card>
 
-            {/* Card 2: Total Month Spend */}
+            {/* Card 2: New Accounts Created in Current Week */}
+            <Card
+              onClick={() => setShowWeeklyDrawer((prev) => !prev)}
+              className={`border p-5 rounded-xl shadow-xs transition-all cursor-pointer ${
+                showWeeklyDrawer || createdFilter === "THIS_WEEK"
+                  ? "border-indigo-500 ring-1 ring-indigo-500/30 bg-indigo-50/20 dark:bg-indigo-950/20"
+                  : "border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-indigo-300"
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <div className="space-y-1 min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <p className="text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider truncate">
+                      NEW THIS WEEK
+                    </p>
+                  </div>
+                  <div className="flex items-baseline gap-2">
+                    <h3 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight">
+                      {newAccountsThisWeek.length}
+                    </h3>
+                    <span className="text-[11px] font-semibold text-indigo-600 dark:text-indigo-400">
+                      {newAccountsThisWeek.length === 1 ? "account" : "accounts"}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate pt-0.5" title={currentWeekLabel}>
+                    {currentWeekLabel}
+                  </p>
+                </div>
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-violet-50 text-violet-600 dark:bg-violet-950/50 dark:text-violet-400">
+                  <CalendarPlus className="h-5 w-5" />
+                </div>
+              </div>
+            </Card>
+
+            {/* Card 3: Total Month Spend */}
             <Card className="border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 rounded-xl shadow-xs transition-all hover:border-slate-300">
               <div className="flex items-center justify-between">
                 <div className="space-y-1">
@@ -376,7 +512,7 @@ export function LinkedAccountsPage() {
               </div>
             </Card>
 
-            {/* Card 3: Budget Coverage */}
+            {/* Card 4: Budget Coverage */}
             <Card className="border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 rounded-xl shadow-xs transition-all hover:border-slate-300">
               <div className="flex items-center justify-between">
                 <div className="space-y-1">
@@ -404,7 +540,7 @@ export function LinkedAccountsPage() {
               </div>
             </Card>
 
-            {/* Card 4: Top Cost Account */}
+            {/* Card 5: Top Cost Account */}
             <Card className="border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 rounded-xl shadow-xs transition-all hover:border-slate-300">
               <div className="flex items-center justify-between">
                 <div className="space-y-1 min-w-0 pr-2">
@@ -426,6 +562,180 @@ export function LinkedAccountsPage() {
           </div>
         )}
 
+        {/* Dedicated "Accounts Created in Current Week" Spotlight Panel */}
+        {data && (
+          <Card className="border border-indigo-200/80 dark:border-indigo-900/60 bg-gradient-to-r from-indigo-50/50 via-white to-violet-50/40 dark:from-indigo-950/25 dark:via-slate-900 dark:to-slate-900 shadow-xs overflow-hidden">
+            <CardHeader className="py-3.5 px-5 border-b border-indigo-100/80 dark:border-slate-800">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                <div className="flex items-center gap-2.5">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600 text-white shadow-2xs">
+                    <CalendarPlus className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <CardTitle className="text-sm font-bold text-slate-900 dark:text-white">
+                        Accounts Created in Current Week
+                      </CardTitle>
+                      <Badge
+                        variant="outline"
+                        className="text-[10px] font-semibold bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 border-indigo-200 dark:border-indigo-800"
+                      >
+                        {currentWeekLabel}
+                      </Badge>
+                      <Badge
+                        variant="outline"
+                        className={`text-[10px] font-bold ${
+                          newAccountsThisWeek.length > 0
+                            ? "bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/50 dark:text-emerald-400"
+                            : "bg-slate-100 text-slate-600 border-slate-300 dark:bg-slate-800 dark:text-slate-400"
+                        }`}
+                      >
+                        {newAccountsThisWeek.length} Created This Week
+                      </Badge>
+                    </div>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                      Live AWS Organizations member account provisioning tracker (via AWS JoinedTimestamp)
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleToggleThisWeekFilter}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${
+                      createdFilter === "THIS_WEEK"
+                        ? "bg-indigo-600 text-white border-indigo-600 shadow-xs"
+                        : "bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:bg-slate-50"
+                    }`}
+                  >
+                    {createdFilter === "THIS_WEEK" ? "Showing Only This Week ✓" : "Filter Table: This Week"}
+                  </button>
+                  <button
+                    onClick={() => setShowWeeklyDrawer((v) => !v)}
+                    className="px-2.5 py-1.5 rounded-lg text-xs font-semibold border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 transition-colors cursor-pointer"
+                  >
+                    {showWeeklyDrawer ? "Hide Details" : "View Details"}
+                  </button>
+                </div>
+              </div>
+            </CardHeader>
+
+            {showWeeklyDrawer && (
+              <CardContent className="p-4">
+                {newAccountsThisWeek.length > 0 ? (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {newAccountsThisWeek.map((acc) => (
+                        <div
+                          key={acc.linkedAccountId}
+                          className="rounded-xl border border-indigo-200/80 dark:border-indigo-900/60 bg-white dark:bg-slate-900 p-3.5 shadow-2xs flex flex-col justify-between gap-2"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <div className="font-bold text-xs text-slate-900 dark:text-white truncate" title={acc.accountName}>
+                                {acc.accountName}
+                              </div>
+                              <div className="text-[11px] font-mono text-slate-500 mt-0.5">
+                                {acc.linkedAccountId}
+                              </div>
+                            </div>
+                            <Badge className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 text-[10px] font-bold shrink-0">
+                              NEW THIS WEEK
+                            </Badge>
+                          </div>
+
+                          <div className="flex items-center justify-between text-[11px] text-slate-500 pt-2 border-t border-slate-100 dark:border-slate-800">
+                            <span className="flex items-center gap-1">
+                              <Calendar className="w-3 h-3 text-indigo-500" />
+                              Created: <strong className="text-slate-700 dark:text-slate-200">{formatCreatedDate(acc.createdAt)}</strong>
+                            </span>
+                            <span className="font-mono font-bold text-slate-900 dark:text-white">
+                              {fmt(acc.currentSpend)}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white/90 dark:bg-slate-900/90 p-4">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2 text-xs font-bold text-slate-800 dark:text-slate-100">
+                        <Sparkles className="w-4 h-4 text-indigo-500" />
+                        <span>No new AWS member accounts created during {currentWeekLabel}</span>
+                      </div>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        {newestAccounts.length > 0
+                          ? `Most recent account created: ${newestAccounts[0].accountName} (${newestAccounts[0].linkedAccountId}) on ${formatCreatedDate(newestAccounts[0].createdAt)}.`
+                          : "All member accounts in this organization were provisioned prior to the current week."}
+                      </p>
+                    </div>
+
+                    {newestAccounts.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-2 shrink-0">
+                        <button
+                          onClick={() => {
+                            setCreatedFilter("NEWEST");
+                            setCurrentPage(1);
+                          }}
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 transition-colors cursor-pointer"
+                        >
+                          Sort Inventory by Newest Created
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Recent 5 Created Accounts Mini Strip */}
+                {newestAccounts.length > 0 && (
+                  <div className="mt-3 pt-3 border-t border-indigo-100/80 dark:border-slate-800">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                        Latest 5 Provisioned Accounts in Organization
+                      </span>
+                      <span className="text-[11px] text-slate-400">
+                        Sorted by AWS JoinedTimestamp
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5">
+                      {newestAccounts.map((acc) => (
+                        <Link
+                          key={acc.linkedAccountId}
+                          to={`/linked-accounts/${encodeURIComponent(acc.linkedAccountId)}?account=${encodeURIComponent(selectedAwsAccount)}${selectedMonth ? `&month=${encodeURIComponent(selectedMonth)}` : ""}`}
+                          className="rounded-lg border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 p-2.5 hover:border-indigo-400 transition-all group"
+                        >
+                          <div className="flex items-center justify-between gap-1">
+                            <span className="text-[11px] font-bold text-slate-800 dark:text-slate-100 truncate group-hover:text-indigo-600">
+                              {acc.accountName}
+                            </span>
+                            {acc.joinedMethod && (
+                              <span className="text-[9px] font-semibold px-1.5 py-0.2 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 shrink-0">
+                                {acc.joinedMethod}
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[10px] font-mono text-slate-400 mt-0.5">
+                            {acc.linkedAccountId}
+                          </div>
+                          <div className="flex items-center justify-between mt-1.5 pt-1.5 border-t border-slate-100 dark:border-slate-800 text-[10px]">
+                            <span className="text-indigo-600 dark:text-indigo-400 font-semibold">
+                              {formatCreatedDate(acc.createdAt)}
+                            </span>
+                            <span className="font-mono font-semibold text-slate-700 dark:text-slate-300">
+                              {fmt(acc.currentSpend)}
+                            </span>
+                          </div>
+                        </Link>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            )}
+          </Card>
+        )}
+
         {/* Directory Card with Search, Filter & Shadcn Table */}
         <Card className="border border-muted/40 shadow-sm bg-card/60 backdrop-blur-md">
           <CardHeader className="pb-3 border-b border-muted/30">
@@ -435,12 +745,49 @@ export function LinkedAccountsPage() {
                   Member Accounts Inventory
                 </CardTitle>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  Detailed billing, active governance status, and direct deep-dive analysis
+                  Detailed billing, creation date, active governance status, and direct deep-dive analysis
                 </p>
               </div>
 
-              {/* Status & Budget Quick Filters */}
+              {/* Status, Budget & Creation Date Quick Filters */}
               <div className="flex flex-wrap items-center gap-2">
+                {/* Created Filter Toggle */}
+                <div className="flex items-center bg-muted/40 p-0.5 rounded-lg border border-input text-xs">
+                  <button
+                    onClick={() => { setCreatedFilter("ALL"); setCurrentPage(1); }}
+                    className={`px-2.5 py-1 rounded-md font-medium transition-all cursor-pointer ${
+                      createdFilter === "ALL"
+                        ? "bg-background text-indigo-600 dark:text-indigo-400 shadow-xs font-semibold"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    All Dates
+                  </button>
+                  <button
+                    onClick={() => { setCreatedFilter("THIS_WEEK"); setCurrentPage(1); }}
+                    className={`px-2.5 py-1 rounded-md font-medium transition-all cursor-pointer flex items-center gap-1 ${
+                      createdFilter === "THIS_WEEK"
+                        ? "bg-background text-violet-600 dark:text-violet-400 shadow-xs font-semibold"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    <span>Created This Week</span>
+                    <span className="px-1.5 py-0 rounded-full text-[10px] bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 font-bold">
+                      {newAccountsThisWeek.length}
+                    </span>
+                  </button>
+                  <button
+                    onClick={() => { setCreatedFilter("NEWEST"); setCurrentPage(1); }}
+                    className={`px-2.5 py-1 rounded-md font-medium transition-all cursor-pointer ${
+                      createdFilter === "NEWEST"
+                        ? "bg-background text-indigo-600 dark:text-indigo-400 shadow-xs font-semibold"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    Newest First
+                  </button>
+                </div>
+
                 {/* Status Toggle */}
                 <div className="flex items-center bg-muted/40 p-0.5 rounded-lg border border-input text-xs">
                   <button
@@ -516,7 +863,7 @@ export function LinkedAccountsPage() {
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
               <input
                 type="text"
-                placeholder="Search by account name, 12-digit ID, or service driver..."
+                placeholder="Search by account name, 12-digit ID, owner name, WBS code, email, or service..."
                 value={searchQuery}
                 onChange={(e) => {
                   setSearchQuery(e.target.value);
@@ -547,18 +894,36 @@ export function LinkedAccountsPage() {
                 </button>
               </div>
             ) : paginatedAccounts.length === 0 ? (
-              <div className="py-16 text-center text-muted-foreground text-xs space-y-2">
-                <p>No member accounts found matching your filters.</p>
-                <button
-                  onClick={() => {
-                    setSearchQuery("");
-                    setStatusFilter("ALL");
-                    setBudgetFilter("ALL");
-                  }}
-                  className="text-xs text-indigo-600 dark:text-indigo-400 underline font-medium cursor-pointer"
-                >
-                  Reset filters
-                </button>
+              <div className="py-16 text-center text-muted-foreground text-xs space-y-2.5 px-4">
+                <p className="font-semibold text-foreground">
+                  {createdFilter === "THIS_WEEK"
+                    ? `No AWS member accounts were created in the current week (${currentWeekLabel}).`
+                    : "No member accounts found matching your filters."}
+                </p>
+                <div className="flex items-center justify-center gap-3">
+                  {createdFilter === "THIS_WEEK" && (
+                    <button
+                      onClick={() => {
+                        setCreatedFilter("NEWEST");
+                        setCurrentPage(1);
+                      }}
+                      className="px-3 py-1.5 rounded-md bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700 transition-colors cursor-pointer"
+                    >
+                      View Newest Created Accounts
+                    </button>
+                  )}
+                  <button
+                    onClick={() => {
+                      setSearchQuery("");
+                      setStatusFilter("ALL");
+                      setBudgetFilter("ALL");
+                      setCreatedFilter("ALL");
+                    }}
+                    className="text-xs text-indigo-600 dark:text-indigo-400 underline font-medium cursor-pointer"
+                  >
+                    Reset all filters
+                  </button>
+                </div>
               </div>
             ) : (
               <Table>
@@ -567,25 +932,31 @@ export function LinkedAccountsPage() {
                     <TableHead className="py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                       Account Name & ID
                     </TableHead>
-                    <TableHead className="py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider w-[100px]">
+                    <TableHead className="py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider min-w-[140px]">
+                      Owner & WBS Code
+                    </TableHead>
+                    <TableHead className="py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider w-[125px]">
+                      Created Date
+                    </TableHead>
+                    <TableHead className="py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider w-[90px]">
                       Status
                     </TableHead>
-                    <TableHead className="py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider text-right w-[120px]">
+                    <TableHead className="py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider text-right w-[110px]">
                       Current Spend
                     </TableHead>
-                    <TableHead className="py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider text-right w-[120px]">
+                    <TableHead className="py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider text-right w-[110px]">
                       Prior Spend
                     </TableHead>
-                    <TableHead className="py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider text-right w-[110px]">
+                    <TableHead className="py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider text-right w-[100px]">
                       MoM Variance
                     </TableHead>
-                    <TableHead className="py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider w-[120px]">
+                    <TableHead className="py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider w-[110px]">
                       Governance
                     </TableHead>
                     <TableHead className="py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                       Top Cost Driver
                     </TableHead>
-                    <TableHead className="py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider text-center w-[120px]">
+                    <TableHead className="py-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider text-center w-[90px]">
                       Action
                     </TableHead>
                   </TableRow>
@@ -600,9 +971,16 @@ export function LinkedAccountsPage() {
                         {/* Name and ID */}
                         <TableCell className="py-3 px-4">
                           <div className="flex flex-col">
-                            <span className="font-semibold text-xs text-foreground">
-                              {acc.accountName}
-                            </span>
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-semibold text-xs text-foreground">
+                                {acc.accountName}
+                              </span>
+                              {acc.isCreatedCurrentWeek && (
+                                <Badge className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 text-[9px] px-1.5 py-0 font-bold">
+                                  NEW THIS WEEK
+                                </Badge>
+                              )}
+                            </div>
                             <div className="flex items-center gap-1.5 mt-0.5 text-muted-foreground text-[11px] font-mono">
                               <span>{acc.linkedAccountId}</span>
                               <button
@@ -617,6 +995,50 @@ export function LinkedAccountsPage() {
                                 )}
                               </button>
                             </div>
+                          </div>
+                        </TableCell>
+
+                        {/* Owner & WBS Code */}
+                        <TableCell className="py-3 px-4">
+                          <div className="flex flex-col gap-1 min-w-[130px]">
+                            {/* Owner */}
+                            <div className="flex items-center gap-1.5 text-xs">
+                              <User className="w-3 h-3 text-indigo-500 shrink-0" />
+                              <span
+                                className="font-medium text-foreground truncate max-w-[160px]"
+                                title={acc.ownerName || acc.email || "Unassigned"}
+                              >
+                                {acc.ownerName || (acc.email ? acc.email.split("@")[0].replace(/[._-]/g, " ") : "Unassigned")}
+                              </span>
+                            </div>
+
+                            {/* WBS Code */}
+                            <div className="flex items-center gap-1.5 text-[11px]">
+                              <FileCode className="w-3 h-3 text-slate-400 shrink-0" />
+                              {acc.wbsCode ? (
+                                <span className="font-mono font-semibold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/40 px-1.5 py-0.2 rounded border border-indigo-200/60 dark:border-indigo-900/60 text-[10px]">
+                                  {acc.wbsCode}
+                                </span>
+                              ) : (
+                                <span className="text-muted-foreground font-mono text-[10px]">
+                                  N/A
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </TableCell>
+
+                        {/* Created Date */}
+                        <TableCell className="py-3 px-4 whitespace-nowrap">
+                          <div className="flex flex-col">
+                            <span className="text-xs font-medium text-foreground">
+                              {formatCreatedDate(acc.createdAt)}
+                            </span>
+                            {acc.joinedMethod && (
+                              <span className="text-[10px] text-muted-foreground">
+                                {acc.joinedMethod === "CREATED" ? "Created in Org" : "Invited"}
+                              </span>
+                            )}
                           </div>
                         </TableCell>
 
@@ -761,3 +1183,4 @@ export function LinkedAccountsPage() {
 }
 
 export default LinkedAccountsPage;
+

@@ -32,6 +32,8 @@ import {
   Lock,
   ChevronLeft,
   ChevronRight,
+  UserPlus,
+  Sparkles,
 } from "lucide-react";
 
 interface AzureGovernanceSummary {
@@ -691,6 +693,35 @@ export function MultiCloudOverviewPage() {
                       <span className="text-slate-300 dark:text-slate-700">•</span>
                       <span>{awsSummary ? awsSummary.suspendedAccounts : "--"} closed</span>
                     </div>
+
+                    {/* New Accounts Created This Week */}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        navigate(
+                          `/linked-accounts?account=${selectedAwsAccount}&filter=new-this-week`
+                        )
+                      }
+                      title={
+                        awsSummary?.currentWeekLabel
+                          ? `Week: ${awsSummary.currentWeekLabel}. Click to view new accounts.`
+                          : "Click to view accounts created this week"
+                      }
+                      className="inline-flex items-center gap-1.5 text-[10px] font-semibold text-sky-600 dark:text-sky-400 hover:text-sky-700 dark:hover:text-sky-300 transition-colors cursor-pointer group leading-tight pt-0.5"
+                    >
+                      <UserPlus className="w-3 h-3 text-sky-500 group-hover:scale-110 transition-transform" />
+                      <span>
+                        <strong className="font-bold">
+                          {awsSummary?.newAccountsCurrentWeekCount ?? 0}
+                        </strong>{" "}
+                        {awsSummary?.newAccountsCurrentWeekCount === 1
+                          ? "new account added this week"
+                          : "new accounts added this week"}
+                      </span>
+                      {Boolean(awsSummary?.newAccountsCurrentWeekCount) && (
+                        <span className="h-1.5 w-1.5 rounded-full bg-sky-500 animate-pulse" />
+                      )}
+                    </button>
                   </div>
                 </div>
 

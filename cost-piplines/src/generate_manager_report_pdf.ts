@@ -16,6 +16,12 @@ import {
   DescribeBudgetsCommand,
 } from '@aws-sdk/client-budgets';
 import { prisma } from './server/db.ts';
+import {
+  renderEmailSafeSpendGraph,
+  renderAiToolUsageSection,
+  buildAwsAiUsage,
+  type AiToolUsageSummary,
+} from './report_charts_and_ai_helper.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -70,6 +76,7 @@ export interface ReportData {
   last6MonthsSpend: MonthlySpendPoint[];
   top5OverBudget: OverBudgetRow[];
   top5MostSpend: TopSpendRow[];
+  aiUsage?: AiToolUsageSummary;
 }
 
 const META_TOKENS = new Set([
@@ -990,13 +997,13 @@ export function buildReportHtml(data: ReportData): string {
     </div>
   </div>
 
-  <!-- Section 2: 6-Month Spending Trend (Recharts-Style) -->
+  <!-- Section 2: 6-Month Spending Trend (Email & PDF Safe Bar Graph) -->
   <div class="section">
     <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid #f1f5f9;">
       <tr>
         <td align="left">
-          <div class="section-title">2. 6-Month Spending Trend</div>
-          <div class="section-subtitle">Monthly spend progression with 6-month historical average</div>
+          <div class="section-title">2. Monthly Spend Graph (6-Month Progression)</div>
+          <div class="section-subtitle">Monthly spend progression with MoM delta and 6-month historical average</div>
         </td>
         <td align="right">
           <span class="badge-avg" style="display: inline-block; background: #f0fdf4; border: 1px solid #bbf7d0; color: #166534; font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 6px;">
@@ -1005,26 +1012,14 @@ export function buildReportHtml(data: ReportData): string {
         </td>
       </tr>
     </table>
-    <div style="width: 100%; display: flex; justify-content: center; padding: 2px 0;">
-      ${renderRechartsSpendChart(data.last6MonthsSpend, '$', '#4f46e5', '#c7d2fe')}
+    <div style="width: 100%; padding: 2px 0;">
+      ${renderEmailSafeSpendGraph(data.last6MonthsSpend, {
+        currencySymbol: '$',
+        brandColor: '#4f46e5',
+        accentColor: '#a5b4fc',
+        budgetLimit: data.totalBudget,
+      })}
     </div>
-    ${
-      data.last6MonthsSpend && data.last6MonthsSpend.length > 0
-        ? `<table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top: 8px; border-top: 1px dashed #cbd5e1; padding-top: 6px; font-size: 10px; text-align: center;">
-            <tr>
-              ${data.last6MonthsSpend
-                .map(
-                  (p) => `
-                <td style="padding: 4px; color: #475569;">
-                  <div style="font-weight: 600; color: #64748b;">${formatMonthLabel(p.month)}</div>
-                  <div style="font-weight: 700; color: #0f172a; margin-top: 2px;">${fmtCurrency(p.spend)}</div>
-                </td>`
-                )
-                .join('')}
-            </tr>
-          </table>`
-        : ''
-    }
   </div>
 
   <!-- Section 3: Top 5 Accounts Over Budget -->
@@ -1108,6 +1103,22 @@ export function buildReportHtml(data: ReportData): string {
       </tbody>
     </table>
   </div>
+
+  ${renderAiToolUsageSection(
+    data.aiUsage ||
+      buildAwsAiUsage(
+        [],
+        data.reportMonth,
+        '',
+        data.currentMonthSpend
+      ),
+    {
+      sectionNumber: 5,
+      cloudName: 'AWS',
+      currencySymbol: '$',
+      brandColor: '#4f46e5',
+    }
+  )}
 
   <div class="footer">
     Confidential — Coforge Cloud Cost Intelligence &amp; FinOps Governance Platform

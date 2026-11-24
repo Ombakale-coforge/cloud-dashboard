@@ -125,6 +125,8 @@ export interface GovernanceSummary {
     suspendedAccountsChargingCount: number;
     suspendedAccountsSpendTotal: number;
     suspendedPeriodLabel: string;
+    newAccountsCurrentWeekCount?: number;
+    currentWeekLabel?: string;
 }
 
 export interface UnbudgetedAccountRow {
