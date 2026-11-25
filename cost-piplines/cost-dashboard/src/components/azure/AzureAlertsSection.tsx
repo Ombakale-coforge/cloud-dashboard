@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
+import { azureUsdToInr, formatAzureUsd } from "@/lib/azureCurrency";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -84,14 +85,8 @@ interface MeterBudgetItem {
     lastNotifiedDate?: string;
 }
 
-const fmtCurrency = (n: number | undefined | null, currency = "INR") => {
-    const val = Number(n ?? 0);
-    return new Intl.NumberFormat("en-IN", {
-        style: "currency",
-        currency,
-        maximumFractionDigits: 2,
-    }).format(Number.isFinite(val) ? val : 0);
-};
+const fmtCurrency = (n: number | undefined | null, currency = "INR") =>
+    formatAzureUsd(n, currency);
 
 export function AzureAlertsSection({ selectedMonth }: { selectedMonth?: string }) {
     // ── State: Alert Viewer ──────────────────────────────────────────────────
@@ -246,7 +241,7 @@ export function AzureAlertsSection({ selectedMonth }: { selectedMonth?: string }
                     meterName: newMeterName,
                     meterCategory: selectedMeterObj?.category || null,
                     service: selectedMeterObj?.service || null,
-                    monthlyBudget: amount,
+                    monthlyBudget: azureUsdToInr(amount),
                     alertEmail: newAlertEmail,
                 }),
             });
@@ -505,7 +500,7 @@ export function AzureAlertsSection({ selectedMonth }: { selectedMonth?: string }
                                                             <strong className="text-foreground">
                                                                 {item.likelyDrivenBy.resourceName || item.likelyDrivenBy.service}
                                                             </strong>{" "}
-                                                            (+{fmtCurrency(item.likelyDrivenBy.absoluteIncrease)}, {item.likelyDrivenBy.coveragePercent}% coverage)
+                                                            (+{fmtCurrency(item.likelyDrivenBy.absoluteIncrease, item.billingCurrency)}, {item.likelyDrivenBy.coveragePercent}% coverage)
                                                         </span>
                                                     </div>
                                                 )}
@@ -622,17 +617,17 @@ export function AzureAlertsSection({ selectedMonth }: { selectedMonth?: string }
 
                                         <div className="space-y-1">
                                             <label className="font-semibold text-foreground">
-                                                Monthly Budget Limit (INR):
+                                                Monthly Budget Limit (USD):
                                             </label>
                                             <div className="relative">
                                                 <span className="absolute left-2.5 top-2 text-muted-foreground font-semibold">
-                                                    ₹
+                                                    $
                                                 </span>
                                                 <input
                                                     type="number"
                                                     min="1"
                                                     step="0.01"
-                                                    placeholder="e.g. 50000"
+                                                    placeholder="e.g. 600"
                                                     value={newMonthlyBudget}
                                                     onChange={(e) => setNewMonthlyBudget(e.target.value)}
                                                     className="w-full h-8 pl-7 pr-3 rounded-md bg-background border border-input focus:outline-none focus:ring-1 focus:ring-ring text-xs"

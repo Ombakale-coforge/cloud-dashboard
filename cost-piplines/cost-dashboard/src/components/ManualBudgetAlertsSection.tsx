@@ -28,6 +28,11 @@ import {
   ChevronDown,
   Check,
 } from "lucide-react";
+import {
+  AZURE_USD_TO_INR_RATE,
+  azureInrToUsd,
+  formatAzureUsd,
+} from "@/lib/azureCurrency";
 
 export type CloudProvider = "aws" | "azure" | "gcp";
 
@@ -133,6 +138,17 @@ function fmtMoney(amount: number | undefined | null, currency: "USD" | "INR" = "
     currency: "USD",
     maximumFractionDigits: 2,
   }).format(safeVal);
+}
+
+function fmtAccountMoney(
+  provider: CloudProvider,
+  amount: number | undefined | null,
+  currency: "USD" | "INR" = "USD"
+): string {
+  if (provider === "azure") {
+    return formatAzureUsd(amount, currency);
+  }
+  return fmtMoney(amount, currency);
 }
 
 function getProviderPill(provider: CloudProvider): { label: string; className: string } {
@@ -358,9 +374,7 @@ export function ManualBudgetAlertsSection({
   const [formAccountId, setFormAccountId] = useState("");
   const [formAccountName, setFormAccountName] = useState("");
   const [formParentAccountId, setFormParentAccountId] = useState("");
-  const [formCurrency, setFormCurrency] = useState<"USD" | "INR">(
-    defaultProvider === "azure" ? "INR" : "USD"
-  );
+  const [formCurrency, setFormCurrency] = useState<"USD" | "INR">("USD");
   const [formMonthlyBudget, setFormMonthlyBudget] = useState("");
   const [formContactName, setFormContactName] = useState("");
   const [formAlertEmails, setFormAlertEmails] = useState<string[]>([]);
@@ -453,13 +467,26 @@ export function ManualBudgetAlertsSection({
     setFormAccountId(matchedUsage?.accountId || accountId);
     setFormAccountName(matchedUsage?.accountName || accountName);
     setFormParentAccountId(parentAccountId || matchedUsage?.parentAccountId || "");
-    setFormCurrency(
-      existing?.billingCurrency ||
-        billingCurrency ||
-        matchedUsage?.billingCurrency ||
-        (cloudProvider === "azure" ? "INR" : "USD")
-    );
-    setFormMonthlyBudget(existing ? String(existing.monthlyBudget) : "");
+    if (cloudProvider === "azure") {
+      setFormCurrency("USD");
+      if (existing) {
+        const prefill =
+          existing.billingCurrency === "INR"
+            ? Math.round(azureInrToUsd(existing.monthlyBudget, "INR") * 100) / 100
+            : existing.monthlyBudget;
+        setFormMonthlyBudget(String(prefill));
+      } else {
+        setFormMonthlyBudget("");
+      }
+    } else {
+      setFormCurrency(
+        existing?.billingCurrency ||
+          billingCurrency ||
+          matchedUsage?.billingCurrency ||
+          "USD"
+      );
+      setFormMonthlyBudget(existing ? String(existing.monthlyBudget) : "");
+    }
     setFormContactName(existing?.contactName || "");
     setFormAlertEmails(
       existing ? parseEmailList(existing.alertEmails?.length ? existing.alertEmails : existing.alertEmail) : []
@@ -507,7 +534,7 @@ export function ManualBudgetAlertsSection({
     if (selectedAccountUsage) {
       const native = selectedAccountUsage.billingCurrency;
       if (native === formCurrency) return selectedAccountUsage.currentSpend;
-      const rate = selectedAccountUsage.conversionRate || 85;
+      const rate = selectedAccountUsage.conversionRate || AZURE_USD_TO_INR_RATE;
       if (native === "INR" && formCurrency === "USD") {
         return selectedAccountUsage.currentSpendUsd !== undefined
           ? selectedAccountUsage.currentSpendUsd
@@ -517,6 +544,13 @@ export function ManualBudgetAlertsSection({
         return selectedAccountUsage.currentSpend * rate;
       }
       return selectedAccountUsage.currentSpend;
+    }
+    if (
+      externalTriggerAccount &&
+      externalTriggerAccount.billingCurrency === "INR" &&
+      formCurrency === "USD"
+    ) {
+      return azureInrToUsd(externalTriggerAccount.currentSpend, "INR");
     }
     return externalTriggerAccount?.currentSpend || 0;
   }, [selectedAccountUsage, formCurrency, externalTriggerAccount]);
@@ -544,7 +578,7 @@ export function ManualBudgetAlertsSection({
     setFormAccountId("");
     setFormAccountName("");
     setFormParentAccountId("");
-    setFormCurrency(p === "azure" ? "INR" : "USD");
+    setFormCurrency("USD");
     setFormMonthlyBudget("");
     setFormContactName("");
     setFormAlertEmails([]);
@@ -561,8 +595,15 @@ export function ManualBudgetAlertsSection({
     setFormAccountId(b.accountId);
     setFormAccountName(b.accountName);
     setFormParentAccountId(b.parentAccountId || "");
-    setFormCurrency(b.billingCurrency);
-    setFormMonthlyBudget(String(b.monthlyBudget));
+    if (b.cloudProvider === "azure" && b.billingCurrency === "INR") {
+      setFormCurrency("USD");
+      setFormMonthlyBudget(
+        String(Math.round(azureInrToUsd(b.monthlyBudget, "INR") * 100) / 100)
+      );
+    } else {
+      setFormCurrency(b.billingCurrency);
+      setFormMonthlyBudget(String(b.monthlyBudget));
+    }
     setFormContactName(b.contactName || "");
     setFormAlertEmails(parseEmailList(b.alertEmails?.length ? b.alertEmails : b.alertEmail));
     setEmailInputDraft("");
@@ -579,9 +620,17 @@ export function ManualBudgetAlertsSection({
     if (acc) {
       setFormAccountName(acc.accountName);
       setFormParentAccountId(acc.parentAccountId || "");
-      setFormCurrency(acc.manualBudget?.billingCurrency || acc.billingCurrency);
+      setFormCurrency(
+        acc.cloudProvider === "azure"
+          ? "USD"
+          : acc.manualBudget?.billingCurrency || acc.billingCurrency
+      );
       if (acc.manualBudget) {
-        setFormMonthlyBudget(String(acc.manualBudget.monthlyBudget));
+        const budgetVal =
+          acc.cloudProvider === "azure" && acc.manualBudget.billingCurrency === "INR"
+            ? Math.round(azureInrToUsd(acc.manualBudget.monthlyBudget, "INR") * 100) / 100
+            : acc.manualBudget.monthlyBudget;
+        setFormMonthlyBudget(String(budgetVal));
         setFormContactName(acc.manualBudget.contactName || "");
         setFormAlertEmails(
           parseEmailList(
@@ -1043,10 +1092,10 @@ export function ManualBudgetAlertsSection({
                     <div className="space-y-1.5 pt-1">
                       <div className="flex items-center justify-between gap-2">
                         <span className="font-bold text-foreground">
-                          {fmtMoney(b.currentSpend, b.billingCurrency)}
+                          {fmtAccountMoney(b.cloudProvider, b.currentSpend, b.billingCurrency)}
                           <span className="font-normal text-muted-foreground">
                             {" "}
-                            / {fmtMoney(b.monthlyBudget, b.billingCurrency)}
+                            / {fmtAccountMoney(b.cloudProvider, b.monthlyBudget, b.billingCurrency)}
                           </span>
                         </span>
                         <span
@@ -1078,11 +1127,11 @@ export function ManualBudgetAlertsSection({
                         <span>
                           {b.overBudgetAmount > 0 ? (
                             <span className="text-rose-600 dark:text-rose-400 font-semibold">
-                              Over by {fmtMoney(b.overBudgetAmount, b.billingCurrency)}
+                              Over by {fmtAccountMoney(b.cloudProvider, b.overBudgetAmount, b.billingCurrency)}
                             </span>
                           ) : (
                             <span>
-                              Remaining: {fmtMoney(b.remainingBudget, b.billingCurrency)}
+                              Remaining: {fmtAccountMoney(b.cloudProvider, b.remainingBudget, b.billingCurrency)}
                             </span>
                           )}
                         </span>
@@ -1244,7 +1293,7 @@ export function ManualBudgetAlertsSection({
                         setFormAccountId("");
                         setFormAccountName("");
                         setFormParentAccountId("");
-                        setFormCurrency(prov === "azure" ? "INR" : "USD");
+                        setFormCurrency("USD");
                         setAccountSearchQuery("");
                         setIsAccountDropdownOpen(false);
                       }}
@@ -1392,7 +1441,7 @@ export function ManualBudgetAlertsSection({
                               </div>
                               <div className="shrink-0 text-right flex flex-col items-end gap-0.5">
                                 <span className="font-mono font-semibold text-[11px] text-foreground">
-                                  {fmtMoney(acc.currentSpend, acc.billingCurrency)}
+                                  {fmtAccountMoney(acc.cloudProvider, acc.currentSpend, acc.billingCurrency)}
                                 </span>
                                 {acc.manualBudget && (
                                   <span className="text-[9px] font-semibold px-1.5 py-0 rounded bg-indigo-100 text-indigo-700 dark:bg-indigo-950/70 dark:text-indigo-300">

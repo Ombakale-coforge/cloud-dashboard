@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import {
   type CloudProvider,
   type EnrichedAccountBudget,
+  type StoredAccountBudget,
   deleteBudget,
   enrichBudgetWithUsage,
   evaluateAndNotifyAllAccountBudgets,
@@ -17,6 +18,13 @@ import {
   shouldSendThresholdAlert,
   upsertBudget,
 } from '../services/accountBudgetService.ts';
+import { requireAuth } from '../auth/middleware.ts';
+import {
+  findOwnedAccount,
+  getOwnedCloudAccounts,
+  normalizeSubscriptionId,
+  type OwnedCloudAccount,
+} from '../services/accountOwnershipService.ts';
 
 const router = Router();
 
@@ -25,6 +33,59 @@ const VALID_PROVIDERS = new Set<CloudProvider>(['aws', 'azure', 'gcp']);
 function parseProvider(raw: unknown): CloudProvider | null {
   const val = String(raw || '').trim().toLowerCase();
   return VALID_PROVIDERS.has(val as CloudProvider) ? (val as CloudProvider) : null;
+}
+
+function matchesOwnedAccountIdOrName(
+  provider: CloudProvider,
+  candidateId: string,
+  candidateName: string,
+  owned: OwnedCloudAccount
+): boolean {
+  if (provider !== owned.cloudProvider) return false;
+  if (provider === 'azure') {
+    if (normalizeSubscriptionId(candidateId) === owned.accountId) return true;
+  } else if (candidateId.trim().toLowerCase() === owned.accountId.toLowerCase()) {
+    return true;
+  }
+  return candidateName.trim().toLowerCase() === owned.accountName.toLowerCase();
+}
+
+async function enrichAndNotifySavedBudget(
+  saved: StoredAccountBudget,
+  month?: string,
+  notifyImmediatelyIfBreached: boolean = true
+): Promise<{ enriched: EnrichedAccountBudget; emailNotification: any }> {
+  const usageList = await getCloudAccountsUsage(saved.cloudProvider, month);
+  const matchedUsage = matchAccountUsage(saved, usageList);
+  const enriched = await resolveAccountSpecificTopServices(
+    enrichBudgetWithUsage(saved, matchedUsage, month)
+  );
+
+  let emailNotification: any = null;
+  if (
+    notifyImmediatelyIfBreached &&
+    enriched.isActive &&
+    shouldSendThresholdAlert(
+      enriched.thresholdCrossed,
+      enriched.evaluationMonth,
+      enriched.lastNotifiedThreshold,
+      enriched.lastNotifiedMonth
+    )
+  ) {
+    try {
+      emailNotification = await sendAccountUsageEmail(enriched, 'threshold');
+      if (emailNotification.sent && enriched.thresholdCrossed) {
+        await markThresholdNotified(saved.id, enriched.thresholdCrossed, enriched.evaluationMonth);
+        enriched.lastNotifiedThreshold = enriched.thresholdCrossed;
+        enriched.lastNotifiedMonth = enriched.evaluationMonth;
+        enriched.lastNotifiedAt = new Date().toISOString();
+      }
+    } catch (mailErr: any) {
+      emailNotification = { sent: false, error: mailErr.message };
+    }
+  }
+
+  return { enriched, emailNotification };
 }
 
 // 1. Discover all accounts across AWS, Azure, GCP with live spend and attached manual budget
@@ -67,6 +128,194 @@ router.get('/cloud-accounts', async (req: Request, res: Response) => {
     });
   } catch (err: any) {
     console.error('Error fetching multi-cloud accounts:', err.message);
+    return res.status(500).json({ error: 'SERVER_ERROR', message: err.message });
+  }
+});
+
+// 1b. Self-service: list accounts owned by the authenticated user + their budgets & live spend
+router.get('/my-accounts', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const requestedEmail =
+      req.user!.role === 'admin' && typeof req.query.email === 'string' && req.query.email.trim()
+        ? req.query.email.trim().toLowerCase()
+        : req.user!.email.toLowerCase();
+    const forceRefresh = req.query.refresh === 'true';
+    const monthParam = req.query.month ? String(req.query.month).trim() : undefined;
+
+    const ownedAccounts = await getOwnedCloudAccounts(requestedEmail, { forceRefresh });
+    const [usageList, rawBudgets] = await Promise.all([
+      getCloudAccountsUsage('all', monthParam),
+      listRawBudgets('all'),
+    ]);
+
+    const accounts = ownedAccounts.map((owned) => {
+      const matchedUsage = usageList.find((u) =>
+        matchesOwnedAccountIdOrName(u.cloudProvider, u.accountId, u.accountName, owned)
+      );
+      const matchedBudgetRow = rawBudgets.find((b) =>
+        matchesOwnedAccountIdOrName(b.cloudProvider, b.accountId, b.accountName, owned)
+      );
+      const manualBudget = matchedBudgetRow
+        ? enrichBudgetWithUsage(matchedBudgetRow, matchedUsage, monthParam)
+        : null;
+
+      return {
+        cloudProvider: owned.cloudProvider,
+        accountId: owned.accountId,
+        accountName: owned.accountName,
+        parentAccountId: matchedUsage?.parentAccountId || owned.parentAccountId || null,
+        state: owned.state || matchedUsage?.status || 'ACTIVE',
+        ownershipSources: owned.ownershipSources,
+        projectCode: owned.projectCode || null,
+        costCode: owned.costCode || null,
+        evaluationMonth: matchedUsage?.evaluationMonth || monthParam || new Date().toISOString().slice(0, 7),
+        currentSpend: matchedUsage?.currentSpend ?? 0,
+        previousSpend: matchedUsage?.previousSpend ?? 0,
+        momChangePercent: matchedUsage?.momChangePercent ?? 0,
+        billingCurrency: matchedUsage?.billingCurrency || (owned.cloudProvider === 'azure' ? 'INR' : 'USD'),
+        topCostDriver: matchedUsage?.topCostDriver || (owned.cloudProvider === 'azure' ? 'Azure Services' : 'AWS Services'),
+        topServices: matchedUsage?.topServices || [],
+        manualBudget,
+      };
+    });
+
+    return res.json({
+      userEmail: requestedEmail,
+      totalOwned: accounts.length,
+      accounts,
+    });
+  } catch (err: any) {
+    console.error('Error fetching owner accounts:', err.message);
+    return res.status(500).json({ error: 'SERVER_ERROR', message: err.message });
+  }
+});
+
+// 1c. Self-service: create or update a manual budget for an account owned by the caller
+router.post('/my-accounts/budget', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const {
+      cloudProvider,
+      accountId,
+      accountName,
+      parentAccountId,
+      monthlyBudget,
+      billingCurrency,
+      alertEmail,
+      alertEmails,
+      contactName,
+      isActive,
+      month,
+      notifyImmediatelyIfBreached,
+    } = req.body || {};
+
+    const provider = parseProvider(cloudProvider);
+    if (!provider || provider === 'gcp') {
+      return res.status(400).json({
+        error: 'INVALID_PROVIDER',
+        message: 'cloudProvider must be azure or aws.',
+      });
+    }
+    if (!accountId || typeof accountId !== 'string' || !accountId.trim()) {
+      return res.status(400).json({ error: 'INVALID_ACCOUNT_ID', message: 'Account ID is required.' });
+    }
+
+    const budgetNum = Number(monthlyBudget);
+    if (!Number.isFinite(budgetNum) || budgetNum <= 0) {
+      return res.status(400).json({
+        error: 'INVALID_BUDGET',
+        message: 'Monthly budget must be a positive number.',
+      });
+    }
+
+    const callerEmail = req.user!.email.toLowerCase();
+    const owned = await findOwnedAccount(callerEmail, provider, accountId, accountName);
+    if (!owned && req.user!.role !== 'admin') {
+      return res.status(403).json({
+        error: 'FORBIDDEN',
+        message: 'You are not listed as an owner of this account.',
+      });
+    }
+
+    const rawEmails = alertEmails ?? alertEmail ?? callerEmail;
+    const validEmails = normalizeEmailList(rawEmails);
+    if (validEmails.length === 0) {
+      return res.status(400).json({
+        error: 'INVALID_EMAIL',
+        message: 'At least one valid alert email address is required.',
+      });
+    }
+
+    const currency: 'USD' | 'INR' =
+      String(billingCurrency || '').toUpperCase() === 'INR'
+        ? 'INR'
+        : 'USD';
+
+    const canonicalId = owned?.accountId || accountId.trim();
+    const canonicalName =
+      owned?.accountName || (typeof accountName === 'string' && accountName.trim() ? accountName.trim() : canonicalId);
+
+    const saved = await upsertBudget({
+      cloudProvider: provider,
+      accountId: canonicalId,
+      accountName: canonicalName,
+      parentAccountId: owned?.parentAccountId || (parentAccountId ? String(parentAccountId).trim() : null),
+      monthlyBudget: budgetNum,
+      billingCurrency: currency,
+      alertEmail: validEmails.join(', '),
+      contactName: contactName ? String(contactName).trim() : req.user!.name || null,
+      isActive: isActive !== undefined ? Boolean(isActive) : true,
+    });
+
+    const { enriched, emailNotification } = await enrichAndNotifySavedBudget(
+      saved,
+      month ? String(month) : undefined,
+      notifyImmediatelyIfBreached !== false
+    );
+
+    return res.status(201).json({
+      success: true,
+      budget: enriched,
+      emailNotification,
+    });
+  } catch (err: any) {
+    console.error('Error saving self-service account budget:', err.message);
+    return res.status(500).json({ error: 'SERVER_ERROR', message: err.message });
+  }
+});
+
+// 1d. Self-service: delete a manual budget for an account owned by the caller
+router.delete('/my-accounts/budget/:id', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) {
+      return res.status(400).json({ error: 'INVALID_ID', message: 'Valid budget id is required.' });
+    }
+
+    const rawBudgets = await listRawBudgets('all');
+    const existing = rawBudgets.find((b) => b.id === id);
+    if (!existing) {
+      return res.status(404).json({ error: 'NOT_FOUND', message: 'Budget not found.' });
+    }
+
+    if (req.user!.role !== 'admin') {
+      const owned = await findOwnedAccount(
+        req.user!.email.toLowerCase(),
+        existing.cloudProvider,
+        existing.accountId,
+        existing.accountName
+      );
+      if (!owned) {
+        return res.status(403).json({
+          error: 'FORBIDDEN',
+          message: 'You are not listed as an owner of this account.',
+        });
+      }
+    }
+
+    await deleteBudget(id);
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('Error deleting self-service account budget:', err.message);
     return res.status(500).json({ error: 'SERVER_ERROR', message: err.message });
   }
 });
@@ -134,10 +383,6 @@ router.post('/', async (req: Request, res: Response) => {
     const currency =
       String(billingCurrency || '').toUpperCase() === 'INR'
         ? 'INR'
-        : String(billingCurrency || '').toUpperCase() === 'USD'
-        ? 'USD'
-        : provider === 'azure'
-        ? 'INR'
         : 'USD';
 
     const saved = await upsertBudget({
@@ -152,35 +397,11 @@ router.post('/', async (req: Request, res: Response) => {
       isActive: isActive !== undefined ? Boolean(isActive) : true,
     });
 
-    const usageList = await getCloudAccountsUsage(provider, month ? String(month) : undefined);
-    const matchedUsage = matchAccountUsage(saved, usageList);
-    const enriched = await resolveAccountSpecificTopServices(
-      enrichBudgetWithUsage(saved, matchedUsage, month ? String(month) : undefined)
+    const { enriched, emailNotification } = await enrichAndNotifySavedBudget(
+      saved,
+      month ? String(month) : undefined,
+      notifyImmediatelyIfBreached !== false
     );
-
-    let emailNotification: any = null;
-    if (
-      notifyImmediatelyIfBreached !== false &&
-      enriched.isActive &&
-      shouldSendThresholdAlert(
-        enriched.thresholdCrossed,
-        enriched.evaluationMonth,
-        enriched.lastNotifiedThreshold,
-        enriched.lastNotifiedMonth
-      )
-    ) {
-      try {
-        emailNotification = await sendAccountUsageEmail(enriched, 'threshold');
-        if (emailNotification.sent && enriched.thresholdCrossed) {
-          await markThresholdNotified(saved.id, enriched.thresholdCrossed, enriched.evaluationMonth);
-          enriched.lastNotifiedThreshold = enriched.thresholdCrossed;
-          enriched.lastNotifiedMonth = enriched.evaluationMonth;
-          enriched.lastNotifiedAt = new Date().toISOString();
-        }
-      } catch (mailErr: any) {
-        emailNotification = { sent: false, error: mailErr.message };
-      }
-    }
 
     return res.status(201).json({
       success: true,
@@ -318,7 +539,7 @@ router.post('/send-account-email', async (req: Request, res: Response) => {
         ? 'INR'
         : String(billingCurrency || '').toUpperCase() === 'USD'
         ? 'USD'
-        : saved?.billingCurrency || matchedUsage?.billingCurrency || (provider === 'azure' ? 'INR' : 'USD');
+        : saved?.billingCurrency || (provider === 'azure' ? 'USD' : matchedUsage?.billingCurrency || 'USD');
 
     const nowIso = new Date().toISOString();
     const pseudoStored = {

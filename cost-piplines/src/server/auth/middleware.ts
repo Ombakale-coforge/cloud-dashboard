@@ -31,23 +31,24 @@ function parseCookies(header: string | undefined): Record<string, string> {
   return out;
 }
 
-function isSecureCookie(): boolean {
+function isSecureCookie(req?: Request): boolean {
   if (process.env.COOKIE_SECURE) return process.env.COOKIE_SECURE === 'true';
+  if (req) return Boolean(req.secure || req.headers['x-forwarded-proto'] === 'https');
   return process.env.NODE_ENV === 'production';
 }
 
-export function setSessionCookie(res: Response, token: string) {
+export function setSessionCookie(res: Response, token: string, req?: Request) {
   res.cookie(SESSION_COOKIE, token, {
     httpOnly: true,
-    secure: isSecureCookie(),
+    secure: isSecureCookie(req),
     sameSite: 'lax',
     path: '/',
     maxAge: getTokenTtlSeconds() * 1000,
   });
 }
 
-export function clearSessionCookie(res: Response) {
-  res.clearCookie(SESSION_COOKIE, { httpOnly: true, secure: isSecureCookie(), sameSite: 'lax', path: '/' });
+export function clearSessionCookie(res: Response, req?: Request) {
+  res.clearCookie(SESSION_COOKIE, { httpOnly: true, secure: isSecureCookie(req), sameSite: 'lax', path: '/' });
 }
 
 /** Token from the httpOnly cookie, or `Authorization: Bearer <jwt>` for scripts/tools. */

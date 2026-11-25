@@ -8,6 +8,7 @@ import {
   APP_SYSTEM_CONTEXT,
   getSmartFallbackReply,
 } from '../../../cost-dashboard/src/lib/chatbotKnowledge.ts';
+import { convertAzureInrToUsd } from '../../utils/azureCurrency.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -305,7 +306,7 @@ async function buildLiveAppDataSnapshot(
           const azStr = azureMonthly
             .map(
               (m: any) =>
-                `${m.month}: ${Number(m.totalCost).toLocaleString()} (Billing Currency)`
+                `${m.month}: $${convertAzureInrToUsd(Number(m.totalCost), 'INR').toLocaleString('en-US', { maximumFractionDigits: 2 })} USD`
             )
             .join(' | ');
           costLines.push(`- **Azure Monthly Totals**: ${azStr}`);
@@ -317,7 +318,9 @@ async function buildLiveAppDataSnapshot(
                 `  • ${b.subscriptionName || b.subscriptionId} (${
                   b.budgetName
                 }): Limit ${
-                  b.amount != null ? Number(b.amount).toLocaleString() : 'N/A'
+                  b.amount != null
+                    ? `$${convertAzureInrToUsd(Number(b.amount), 'INR').toLocaleString('en-US', { maximumFractionDigits: 2 })} USD`
+                    : 'N/A'
                 } (${b.timeGrain}, Status: ${b.status})`
             )
             .join('\n');

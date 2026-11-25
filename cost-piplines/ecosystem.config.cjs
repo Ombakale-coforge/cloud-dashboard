@@ -61,5 +61,20 @@ module.exports = {
         NODE_ENV: 'production',
       },
     },
+    {
+      name: 'daily-ops-log-digest',
+      script: 'node_modules/tsx/dist/cli.mjs',
+      args: 'src/send_daily_log_digest.ts',
+      cwd: __dirname,
+      autorestart: false,
+      cron_restart: '0 10 * * *', // Runs every day at 10:00 AM (server local time)
+      watch: false,
+      time: true,
+      out_file: 'logs/cron-log-digest-out.log',
+      error_file: 'logs/cron-log-digest-error.log',
+      env: {
+        NODE_ENV: 'production',
+      },
+    },
   ],
 };

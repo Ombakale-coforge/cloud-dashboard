@@ -27,7 +27,7 @@ function getAwsCredentials(configId: string) {
   return null;
 }
 
-interface OrgAccountMeta {
+export interface OrgAccountMeta {
   id: string;
   name?: string;
   email?: string;
@@ -35,6 +35,7 @@ interface OrgAccountMeta {
   joinedMethod?: string;
   joinedTimestamp?: string;
   ownerName?: string;
+  ownerEmails?: string[];
   wbsCode?: string;
 }
 
@@ -51,7 +52,7 @@ export function getCurrentWeekBounds(now = new Date()) {
   return { weekStart, weekEnd, weekLabel };
 }
 
-async function getOrgAccountsMetadata(configId: string, dbAccountId?: number): Promise<Map<string, OrgAccountMeta>> {
+export async function getOrgAccountsMetadata(configId: string, dbAccountId?: number): Promise<Map<string, OrgAccountMeta>> {
   const cacheKey = configId || 'account-1';
   const cached = orgAccountsCache.get(cacheKey);
   if (cached && Date.now() - cached.fetchedAt < ORG_CACHE_TTL_MS && cached.data.size > 0) {
@@ -104,11 +105,22 @@ async function getOrgAccountsMetadata(configId: string, dbAccountId?: number): P
             const tags = tagRes.Tags || [];
             let ownerName: string | undefined;
             let wbsCode: string | undefined;
+            const ownerEmailSet = new Set<string>();
+            if (acc.email) {
+              const accEmails = acc.email.match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi) || [];
+              for (const em of accEmails) ownerEmailSet.add(em.toLowerCase());
+            }
 
             for (const t of tags) {
               const k = (t.Key || '').trim().toLowerCase();
               const v = (t.Value || '').trim();
               if (!v) continue;
+
+              // Collect email addresses from owner/contact/POC/manager/requestor/email tags
+              if (/(owner|contact|poc|spoc|manager|request(?:or|er)|email|lead)/i.test(k)) {
+                const tagEmails = v.match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi) || [];
+                for (const em of tagEmails) ownerEmailSet.add(em.toLowerCase());
+              }
 
               // Owner Name detection: "Owner Name", "Owner Name:", "Owner", "Point-of-Contact Name"
               if (!ownerName) {
@@ -132,6 +144,7 @@ async function getOrgAccountsMetadata(configId: string, dbAccountId?: number): P
             const existing = metaMap.get(acc.id);
             if (existing) {
               if (ownerName) existing.ownerName = ownerName;
+              if (ownerEmailSet.size > 0) existing.ownerEmails = Array.from(ownerEmailSet);
               if (wbsCode) existing.wbsCode = wbsCode;
             }
           } catch {

@@ -7,6 +7,7 @@ import { ManualBudgetAlertsSection } from "@/components/ManualBudgetAlertsSectio
 import { useAccountRequests } from "@/lib/useAccountRequests";
 import { useAuth } from "@/lib/auth";
 import { useCsv } from "@/lib/useCsv";
+import { formatAzureUsd, azureInrToUsd } from "@/lib/azureCurrency";
 import type { AccountOption } from "@/components/Navbar";
 import type {
   MonthTotal,
@@ -624,8 +625,8 @@ export function MultiCloudOverviewPage() {
       if (!b) return;
       const name = b["Linked Account"] || b["Account ID"] || "Subscription";
       const id = b["Account ID"] || "";
-      const spend = Number(b["Actual Spend"] || 0);
-      const limit = Number(b["Budget Limit"] || 0);
+      const spend = azureInrToUsd(b["Actual Spend"] || 0, "INR");
+      const limit = azureInrToUsd(b["Budget Limit"] || 0, "INR");
       seen.add(id || name);
       list.push({
         name,
@@ -641,7 +642,7 @@ export function MultiCloudOverviewPage() {
       const name = u["Linked Account"] || u["Account ID"] || "Subscription";
       const id = u["Account ID"] || "";
       if (seen.has(id || name)) return;
-      const spend = Number(u.Cost || u["Actual Spend"] || 0);
+      const spend = azureInrToUsd(u.Cost || u["Actual Spend"] || 0, "INR");
       list.push({
         name,
         id,
@@ -659,9 +660,11 @@ export function MultiCloudOverviewPage() {
       if (!b) return;
       const name = b["Linked Account"] || b["Account ID"] || "Subscription";
       const id = b["Account ID"] || "";
-      const spend = Number(b["Actual Spend"] || 0);
-      const limit = Number(b["Budget Limit"] || 0);
-      const pct = Number(b["% Utilized"] || (limit > 0 ? Math.round((spend / limit) * 100) : 0));
+      const rawSpend = Number(b["Actual Spend"] || 0);
+      const rawLimit = Number(b["Budget Limit"] || 0);
+      const spend = azureInrToUsd(rawSpend, "INR");
+      const limit = azureInrToUsd(rawLimit, "INR");
+      const pct = Number(b["% Utilized"] || (rawLimit > 0 ? Math.round((rawSpend / rawLimit) * 100) : 0));
       const isExceeded = b.Status === "Exceeded" || pct >= 100;
       if (isExceeded) {
         list.push({
@@ -1146,13 +1149,13 @@ export function MultiCloudOverviewPage() {
                     <div className="flex items-center justify-between text-xs">
                       <span className="text-slate-500 dark:text-slate-400 font-medium">Total spend:</span>
                       <span className="font-extrabold text-sm text-slate-900 dark:text-white">
-                        ₹{(azureSummary?.activeSpend || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                        {formatAzureUsd(azureSummary?.activeSpend || 0, "INR", { maximumFractionDigits: 0 })}
                       </span>
                     </div>
                     <div className="flex items-center justify-between text-xs">
                       <span className="text-slate-500 dark:text-slate-400 font-medium">Total budget:</span>
                       <span className="font-extrabold text-sm text-slate-900 dark:text-white">
-                        ₹{(azureSummary?.totalBudgetedSpend || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                        {formatAzureUsd(azureSummary?.totalBudgetedSpend || 0, "INR", { maximumFractionDigits: 0 })}
                       </span>
                     </div>
                   </div>
@@ -1179,7 +1182,7 @@ export function MultiCloudOverviewPage() {
                 <TopSpendTable
                   title="Top 10 Subscriptions by Spend"
                   items={top10AzureSpend}
-                  currency="₹"
+                  currency="$"
                   page={pageAzureSpend}
                   onPageChange={setPageAzureSpend}
                   emptyText="No Azure subscriptions found"
@@ -1187,7 +1190,7 @@ export function MultiCloudOverviewPage() {
                 <TopExceededTable
                   title="Top 10 Subscriptions Exceeding Budget"
                   items={top10AzureExceeded}
-                  currency="₹"
+                  currency="$"
                   page={pageAzureExceeded}
                   onPageChange={setPageAzureExceeded}
                   emptyText="No subscriptions exceeding budget limits"

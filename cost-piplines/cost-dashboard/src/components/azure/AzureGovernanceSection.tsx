@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
+import { formatAzureUsd } from "@/lib/azureCurrency";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import {
   Table,
@@ -217,7 +218,7 @@ export function AzureGovernanceSection({
             </div>
             <div className="mt-2">
               <span className="text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
-                ₹{(summary?.totalBudgetedSpend || 0).toLocaleString()}
+                {formatAzureUsd(summary?.totalBudgetedSpend || 0, "INR", { maximumFractionDigits: 0 })}
               </span>
             </div>
           </CardContent>
@@ -232,7 +233,7 @@ export function AzureGovernanceSection({
             </div>
             <div className="mt-2">
               <span className="text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
-                ₹{(summary?.activeSpend || 0).toLocaleString()}
+                {formatAzureUsd(summary?.activeSpend || 0, "INR", { maximumFractionDigits: 0 })}
               </span>
             </div>
           </CardContent>
@@ -315,10 +316,10 @@ export function AzureGovernanceSection({
                         </TableCell>
                         <TableCell className="text-muted-foreground">{b["Budget Name"]}</TableCell>
                         <TableCell className="text-right font-semibold">
-                          {b["Budget Limit"] ? `₹${b["Budget Limit"].toLocaleString()}` : "—"}
+                          {b["Budget Limit"] ? formatAzureUsd(b["Budget Limit"], "INR", { maximumFractionDigits: 0 }) : "—"}
                         </TableCell>
                         <TableCell className="text-right font-semibold">
-                          ₹{(b["Actual Spend"] || 0).toLocaleString()}
+                          {formatAzureUsd(b["Actual Spend"] || 0, "INR", { maximumFractionDigits: 0 })}
                         </TableCell>
                         <TableCell>
                           {b["Budget Limit"] > 0 ? (
@@ -441,7 +442,7 @@ export function AzureGovernanceSection({
                   {paginatedUnbudgeted.map((u, idx) => (
                     <TableRow key={idx} className="border-b border-slate-100/60 dark:border-slate-800/40 text-xs hover:bg-slate-50/50 dark:hover:bg-slate-900/30">
                       <TableCell className="font-medium">{u["Linked Account"]}</TableCell>
-                      <TableCell className="text-right font-semibold">₹{(u.Cost || 0).toLocaleString()}</TableCell>
+                      <TableCell className="text-right font-semibold">{formatAzureUsd(u.Cost || 0, "INR", { maximumFractionDigits: 0 })}</TableCell>
                       <TableCell>
                         {u.Status === "Permission Denied" ? (
                           <Badge className="bg-purple-500/10 text-purple-700 dark:text-purple-300 border border-purple-500/20 text-[10px] inline-flex items-center gap-1">

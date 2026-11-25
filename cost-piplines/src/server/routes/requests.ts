@@ -1,10 +1,15 @@
 import { Router, Request, Response } from 'express';
 import { prisma } from '../db.ts';
 import { ClientSecretCredential } from '@azure/identity';
+import { recordEmailAudit } from '../../logging/auditLogger.ts';
 
 const router = Router();
 
 async function sendRequestNotificationEmail(reqData: any) {
+  const sender = process.env.SENDER_EMAIL?.trim() || 'omparashuram.b@coforge.com';
+  const recipients = ['ankit.a@coforge.com', 'omparashuram.b@coforge.com'];
+  const subject = `AWS Account Provisioning Request: ${reqData.projectName} (${reqData.division})`;
+
   try {
     const tenantId = process.env.AZURE_TENANT_ID || process.env.AZURE_AD_TENANT_ID;
     const clientId = process.env.AZURE_CLIENT_ID || process.env.AZURE_AD_CLIENT_ID;
@@ -12,15 +17,21 @@ async function sendRequestNotificationEmail(reqData: any) {
 
     if (!tenantId || !clientId || !clientSecret) {
       console.warn('⚠️ [Email] Azure credentials missing. Skipping automated notification.');
+      recordEmailAudit({
+        category: 'account-request',
+        source: 'routes/requests',
+        to: recipients,
+        from: sender,
+        subject,
+        transport: 'none',
+        status: 'skipped',
+        error: 'Azure credentials missing',
+      });
       return;
     }
 
     const credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
     const { token } = await credential.getToken('https://graph.microsoft.com/.default');
-
-    const sender = process.env.SENDER_EMAIL?.trim() || 'omparashuram.b@coforge.com';
-    const recipients = ['ankit.a@coforge.com', 'omparashuram.b@coforge.com'];
-    const subject = `AWS Account Provisioning Request: ${reqData.projectName} (${reqData.division})`;
 
     const htmlContent = `
       <div style="font-family: Arial, sans-serif; max-width: 650px; margin: 0 auto; color: #1e293b; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden;">
@@ -105,12 +116,41 @@ async function sendRequestNotificationEmail(reqData: any) {
 
     if (res.status === 202) {
       console.log('📧 [Automated Email] Request email dispatched via Microsoft Graph to:', recipients.join(', '));
+      recordEmailAudit({
+        category: 'account-request',
+        source: 'routes/requests',
+        to: recipients,
+        from: sender,
+        subject,
+        transport: 'graph',
+        status: 'sent',
+      });
     } else {
       const errText = await res.text();
       console.warn(`⚠️ [Automated Email] Graph sendMail returned status ${res.status}:`, errText);
+      recordEmailAudit({
+        category: 'account-request',
+        source: 'routes/requests',
+        to: recipients,
+        from: sender,
+        subject,
+        transport: 'graph',
+        status: 'failed',
+        error: `HTTP ${res.status}: ${errText.slice(0, 300)}`,
+      });
     }
   } catch (emailErr: any) {
     console.error('⚠️ [Automated Email] Failed to send email via Graph:', emailErr.message);
+    recordEmailAudit({
+      category: 'account-request',
+      source: 'routes/requests',
+      to: recipients,
+      from: sender,
+      subject,
+      transport: 'graph',
+      status: 'failed',
+      error: emailErr?.message || String(emailErr),
+    });
   }
 }
 

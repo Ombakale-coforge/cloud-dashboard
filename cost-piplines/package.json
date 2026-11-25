@@ -14,6 +14,7 @@
     "report:aws:pdf": "tsx src/generate_manager_report_pdf.ts",
     "server": "tsx src/server/index.ts",
     "ingest:focus": "tsx src/fetch_data/focus-export/index.ts",
+    "test:currency": "tsx src/utils/azureCurrency.self-check.ts",
     "test:focus": "tsx src/fetch_data/focus-export/self-check.ts",
     "report:azure": "tsx src/azure_cost_report/index.ts",
     "report:azure:pdf": "tsx src/generate_azure_manager_report_pdf.ts",
@@ -33,7 +34,10 @@
     "test:burst": "tsx src/server/services/azureDailyBurstService.self-check.ts",
     "sync:azure-budgets": "tsx src/fetch_data/sync-azure-budgets.ts",
     "reconcile:arm": "tsx src/fetch_data/reconcile-azure-arm.ts",
-    "extract:subscriptions": "tsx scripts/extract-azure-subscriptions.ts"
+    "extract:subscriptions": "tsx scripts/extract-azure-subscriptions.ts",
+    "logs:digest": "tsx src/send_daily_log_digest.ts",
+    "logs:digest:preview": "tsx src/send_daily_log_digest.ts --dry-run",
+    "test:logging": "tsx src/logging/self-check.ts"
   },
   "engines": {
     "node": ">=18.0.0"

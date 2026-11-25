@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/table";
 
 import { useCsv } from "@/lib/useCsv";
+import { formatAzureUsd } from "@/lib/azureCurrency";
 
 interface AzureDataTablesProps {
     selectedMonth: string;
@@ -72,20 +73,7 @@ type SortDirection = "asc" | "desc";
 
 const ITEMS_PER_PAGE = 10;
 
-const inrFormatter = new Intl.NumberFormat("en-IN", {
-    style: "currency",
-    currency: "INR",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-});
-
-const formatCurrency = (value: unknown) => {
-    const amount = Number(value ?? 0);
-
-    return inrFormatter.format(
-        Number.isFinite(amount) ? amount : 0
-    );
-};
+const formatCurrency = (value: unknown) => formatAzureUsd(value, "INR");
 
 const formatMonthName = (monthValue: string) => {
     if (!monthValue) {
@@ -104,7 +92,7 @@ const formatMonthName = (monthValue: string) => {
         year,
         month - 1,
         1
-    ).toLocaleString("en-IN", {
+    ).toLocaleString("en-US", {
         month: "long",
         year: "numeric",
     });

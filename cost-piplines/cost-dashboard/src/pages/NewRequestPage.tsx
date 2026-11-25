@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AccountRequestForm } from "@/components/AccountRequestForm";
+import { MyAccountsBudgetTab } from "@/components/MyAccountsBudgetTab";
 import { useAccountRequests } from "@/lib/useAccountRequests";
 import { useAuth } from "@/lib/auth";
 import {
@@ -13,15 +14,22 @@ import {
   AlertCircle,
   PlusCircle,
   ListOrdered,
+  Wallet,
 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
+
+type RequestPageTab = "form" | "my-accounts" | "my-requests";
 
 export function NewRequestPage() {
   const { records, addRecord } = useAccountRequests();
   const { user, logout, isAdmin } = useAuth();
   const navigate = useNavigate();
-  const [activeView, setActiveView] = useState<"form" | "my-requests">("form");
+  const [searchParams] = useSearchParams();
+  const initialTabParam = searchParams.get("tab");
+  const initialView: RequestPageTab =
+    initialTabParam === "my-accounts" || initialTabParam === "my-requests" ? initialTabParam : "form";
+  const [activeView, setActiveView] = useState<RequestPageTab>(initialView);
 
   const myRequests = useMemo(() => {
     if (!user) return [];
@@ -67,17 +75,19 @@ export function NewRequestPage() {
                 </Badge>
               </div>
               <p className="text-sm text-muted-foreground">
-                AWS Account Provisioning & Approval Center
+                {isAdmin
+                  ? "AWS Account Provisioning & Approval Center"
+                  : "Self-Service Cloud Accounts, Budgets & Provisioning"}
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-3">
-            {/* View Switcher: Submit Form vs My Requests */}
+            {/* View Switcher: Submit Form vs My Accounts & Budgets vs My Requests */}
             <div className="flex rounded-xl bg-muted/60 p-1 border border-border">
               <button
                 onClick={() => setActiveView("form")}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                   activeView === "form"
                     ? "bg-background text-foreground shadow-sm"
                     : "text-muted-foreground hover:text-foreground"
@@ -88,8 +98,20 @@ export function NewRequestPage() {
               </button>
 
               <button
+                onClick={() => setActiveView("my-accounts")}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                  activeView === "my-accounts"
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <Wallet size={14} />
+                <span>My Accounts &amp; Budgets</span>
+              </button>
+
+              <button
                 onClick={() => setActiveView("my-requests")}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                   activeView === "my-requests"
                     ? "bg-background text-foreground shadow-sm"
                     : "text-muted-foreground hover:text-foreground"
@@ -134,9 +156,11 @@ export function NewRequestPage() {
         </header>
 
         {/* Main Body */}
-        <main className="mx-auto max-w-4xl space-y-8 p-6">
+        <main className={`mx-auto space-y-8 p-6 ${activeView === "my-accounts" ? "max-w-6xl" : "max-w-4xl"}`}>
           {activeView === "form" ? (
             <AccountRequestForm onSubmit={addRecord} />
+          ) : activeView === "my-accounts" ? (
+            <MyAccountsBudgetTab />
           ) : (
             <div className="space-y-4">
               <div className="flex items-center justify-between">

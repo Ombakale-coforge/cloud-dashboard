@@ -4,6 +4,7 @@ import { ClientSecretCredential } from '@azure/identity';
 import { ResourceGraphClient } from '@azure/arm-resourcegraph';
 import { EC2Client, DescribeInstancesCommand } from '@aws-sdk/client-ec2';
 import { getBigQueryClient, resolveBillingTable } from './gcp.ts';
+import { convertAzureInrToUsd } from '../../utils/azureCurrency.ts';
 
 const router = Router();
 
@@ -304,7 +305,7 @@ router.get('/', async (req: Request, res: Response) => {
               accountOrSubscription: defaultSubName,
               accountOrSubscriptionId: defaultSubName,
               month: r.month,
-              cost: Number(r.cost),
+              cost: Number(convertAzureInrToUsd(Number(r.cost), 'INR').toFixed(2)),
               status: liveMatch?.powerState || 'ACTIVE',
               category: getCategory(r.service),
               privateIp: liveMatch?.privateIp || null,

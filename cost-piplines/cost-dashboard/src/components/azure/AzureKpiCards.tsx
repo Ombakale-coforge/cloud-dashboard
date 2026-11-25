@@ -11,10 +11,11 @@ import {
     Lock,
     ArrowUpRight,
     ArrowDownRight,
-    IndianRupee,
+    DollarSign,
     Calendar,
     TrendingUp,
 } from "lucide-react";
+import { formatAzureUsd } from "@/lib/azureCurrency";
 
 interface AzureGovernanceSummary {
     rootAccount?: {
@@ -32,11 +33,10 @@ interface AzureGovernanceSummary {
     currency?: string;
 }
 
-const fmt = (n: number) =>
-    `₹${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const fmt = (n: number) => formatAzureUsd(n, "INR");
 
 const fmtInt = (n: number) =>
-    `₹${Math.round(n).toLocaleString()}`;
+    formatAzureUsd(n, "INR", { maximumFractionDigits: 0, minimumFractionDigits: 0 });
 
 const formatMonthName = (mStr: string) => {
     if (!mStr) return "Current Month";
@@ -165,7 +165,7 @@ export function AzureKpiCards({ selectedMonth, basePath = "/data/azure" }: Azure
                                 {displayMonth.toUpperCase()} SPEND
                             </p>
                             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-sky-50 text-sky-600 dark:bg-sky-950/50 dark:text-sky-400">
-                                <IndianRupee className="h-4 w-4" />
+                                <DollarSign className="h-4 w-4" />
                             </div>
                         </div>
                         <h3 className="mt-2 text-2xl font-extrabold text-slate-900 dark:text-white tracking-tight">

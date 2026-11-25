@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/card";
 
 import { useCsv } from "@/lib/useCsv";
+import { azureInrToUsd, formatUsd, formatUsdCompact } from "@/lib/azureCurrency";
 
 /*
  * CSV data types
@@ -102,51 +103,9 @@ const AZURE_CATEGORY_COLORS = [
  * Currency formatting
  */
 
-const inrFormatter = new Intl.NumberFormat("en-IN", {
-    style: "currency",
-    currency: "INR",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-});
+const formatFullCurrency = (value: unknown) => formatUsd(value);
 
-const formatFullCurrency = (value: unknown) => {
-    const amount = Number(value ?? 0);
-
-    return inrFormatter.format(
-        Number.isFinite(amount) ? amount : 0
-    );
-};
-
-const formatCompactCurrency = (value: unknown) => {
-    const amount = Number(value ?? 0);
-
-    if (!Number.isFinite(amount)) {
-        return "₹0";
-    }
-
-    const absoluteAmount = Math.abs(amount);
-    const sign = amount < 0 ? "-" : "";
-
-    if (absoluteAmount >= 10_000_000) {
-        return `${sign}₹${(
-            absoluteAmount / 10_000_000
-        ).toFixed(1)}Cr`;
-    }
-
-    if (absoluteAmount >= 100_000) {
-        return `${sign}₹${(
-            absoluteAmount / 100_000
-        ).toFixed(1)}L`;
-    }
-
-    if (absoluteAmount >= 1_000) {
-        return `${sign}₹${(
-            absoluteAmount / 1_000
-        ).toFixed(1)}K`;
-    }
-
-    return `${sign}₹${absoluteAmount.toFixed(0)}`;
-};
+const formatCompactCurrency = (value: unknown) => formatUsdCompact(value);
 
 /*
  * Display formatting
@@ -164,7 +123,7 @@ const formatMonthName = (monthValue: string) => {
     }
 
     return new Date(year, month - 1, 1).toLocaleString(
-        "en-IN",
+        "en-US",
         {
             month: "long",
             year: "numeric",
@@ -282,7 +241,7 @@ export function AzureCharts({
             )
             .map((row) => ({
                 Month: row.Month,
-                Cost: Number(row["Total Cost"]),
+                Cost: azureInrToUsd(row["Total Cost"], "INR"),
             }));
     }, [monthlyTotals]);
 
@@ -301,7 +260,7 @@ export function AzureCharts({
                 name:
                     row.ConsumedService ||
                     "Unknown Service",
-                cost: Number(row.Cost),
+                cost: azureInrToUsd(row.Cost, "INR"),
             }))
             .sort((a, b) => b.cost - a.cost)
             .slice(0, 10);
@@ -322,7 +281,7 @@ export function AzureCharts({
                 name:
                     row.Subscription ||
                     "Unknown Subscription",
-                cost: Number(row.Cost),
+                cost: azureInrToUsd(row.Cost, "INR"),
             }))
             .sort((a, b) => b.cost - a.cost)
             .slice(0, 10);
@@ -351,7 +310,7 @@ export function AzureCharts({
                 service:
                     row.Service ||
                     "Unknown Service",
-                cost: Number(row.Cost),
+                cost: azureInrToUsd(row.Cost, "INR"),
             }))
             .sort((a, b) => b.cost - a.cost)
             .slice(0, 10);
@@ -372,7 +331,7 @@ export function AzureCharts({
                 continue;
             }
 
-            const cost = Number(row.Cost);
+            const cost = azureInrToUsd(row.Cost, "INR");
 
             if (!Number.isFinite(cost) || cost <= 0) {
                 continue;
@@ -412,7 +371,7 @@ export function AzureCharts({
                 continue;
             }
 
-            const cost = Number(row.Cost);
+            const cost = azureInrToUsd(row.Cost, "INR");
             if (!Number.isFinite(cost) || cost <= 0) {
                 continue;
             }
