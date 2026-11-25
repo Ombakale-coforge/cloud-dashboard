@@ -1,6 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { prisma } from '../db.ts';
 import { verifyPassword } from '../auth/password.ts';
+import { signToken } from '../auth/jwt.ts';
+import { setSessionCookie, clearSessionCookie, requireAuth } from '../auth/middleware.ts';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -128,17 +130,30 @@ router.post('/login', async (req: Request, res: Response) => {
           },
         }).catch(() => {});
 
+        const adminUser = {
+          id: dbUser?.id || 'admin-01',
+          name: dbUser?.name || 'Dashboard Administrator',
+          email: normalizedEmail,
+          role: 'admin' as const,
+          department: dbUser?.department || 'Cloud Governance & FinOps',
+          provider: 'credentials' as const,
+          loginTime: new Date().toISOString(),
+        };
+        setSessionCookie(
+          res,
+          signToken({
+            sub: String(adminUser.id),
+            email: adminUser.email,
+            name: adminUser.name,
+            role: adminUser.role,
+            department: adminUser.department,
+          }),
+          req
+        );
+
         return res.json({
           success: true,
-          user: {
-            id: dbUser?.id || 'admin-01',
-            name: dbUser?.name || 'Dashboard Administrator',
-            email: normalizedEmail,
-            role: 'admin',
-            department: dbUser?.department || 'Cloud Governance & FinOps',
-            provider: 'credentials',
-            loginTime: new Date().toISOString(),
-          },
+          user: adminUser,
         });
       } else {
         await prisma.userLoginEvent.create({
@@ -209,17 +224,31 @@ router.post('/login', async (req: Request, res: Response) => {
       },
     }).catch(() => {});
 
+    const role: 'admin' | 'basic' = user.role === 'admin' ? 'admin' : 'basic';
+    const loggedInUser = {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role,
+      department: user.department || 'Engineering',
+      provider: user.provider || 'credentials',
+      loginTime: new Date().toISOString(),
+    };
+    setSessionCookie(
+      res,
+      signToken({
+        sub: String(loggedInUser.id),
+        email: loggedInUser.email,
+        name: loggedInUser.name,
+        role: loggedInUser.role,
+        department: loggedInUser.department,
+      }),
+      req
+    );
+
     return res.json({
       success: true,
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role || 'basic',
-        department: user.department || 'Engineering',
-        provider: user.provider || 'credentials',
-        loginTime: new Date().toISOString(),
-      },
+      user: loggedInUser,
     });
   } catch (err: any) {
     console.error('Login error:', err.message);
@@ -275,17 +304,31 @@ router.post('/signup', async (req: Request, res: Response) => {
       },
     });
 
+    const signupRole: 'admin' | 'basic' = newUser.role === 'admin' ? 'admin' : 'basic';
+    const signedUpUser = {
+      id: newUser.id,
+      name: newUser.name,
+      email: newUser.email,
+      role: signupRole,
+      department: newUser.department,
+      provider: 'credentials' as const,
+      loginTime: new Date().toISOString(),
+    };
+    setSessionCookie(
+      res,
+      signToken({
+        sub: String(signedUpUser.id),
+        email: signedUpUser.email,
+        name: signedUpUser.name,
+        role: signedUpUser.role,
+        department: signedUpUser.department,
+      }),
+      req
+    );
+
     return res.status(201).json({
       success: true,
-      user: {
-        id: newUser.id,
-        name: newUser.name,
-        email: newUser.email,
-        role: newUser.role,
-        department: newUser.department,
-        provider: 'credentials',
-        loginTime: new Date().toISOString(),
-      },
+      user: signedUpUser,
     });
   } catch (err: any) {
     console.error('Signup error:', err.message);
@@ -482,15 +525,28 @@ router.get('/azure/callback', async (req: Request, res: Response) => {
       }
     }
 
+    const authRole: 'admin' | 'basic' = isSystemAdmin ? 'admin' : 'basic';
     const authPayload = {
       id: userRecord?.id || `sso-${Date.now()}`,
       name: userRecord?.name || displayName,
       email: normalizedEmail,
-      role: isSystemAdmin ? 'admin' : 'basic',
+      role: authRole,
       department: userRecord?.department || department,
       provider: 'azure-ad',
       loginTime: new Date().toISOString(),
     };
+
+    setSessionCookie(
+      res,
+      signToken({
+        sub: String(authPayload.id),
+        email: authPayload.email,
+        name: authPayload.name,
+        role: authPayload.role,
+        department: authPayload.department,
+      }),
+      req
+    );
 
     const targetUrl = new URL(returnUrl, baseUrl);
     targetUrl.searchParams.set('sso_user', JSON.stringify(authPayload));
@@ -501,6 +557,15 @@ router.get('/azure/callback', async (req: Request, res: Response) => {
     targetUrl.searchParams.set('sso_error', err.message || 'SSO authentication error');
     return res.redirect(targetUrl.toString());
   }
+});
+
+router.post('/logout', (req: Request, res: Response) => {
+  clearSessionCookie(res, req);
+  return res.json({ success: true });
+});
+
+router.get('/me', requireAuth, (req: Request, res: Response) => {
+  return res.json({ user: req.user });
 });
 
 export default router;
