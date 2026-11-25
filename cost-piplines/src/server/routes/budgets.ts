@@ -248,10 +248,6 @@ router.post('/my-accounts/budget', requireAuth, async (req: Request, res: Respon
     const currency: 'USD' | 'INR' =
       String(billingCurrency || '').toUpperCase() === 'INR'
         ? 'INR'
-        : String(billingCurrency || '').toUpperCase() === 'USD'
-        ? 'USD'
-        : provider === 'azure'
-        ? 'INR'
         : 'USD';
 
     const canonicalId = owned?.accountId || accountId.trim();
@@ -386,10 +382,6 @@ router.post('/', async (req: Request, res: Response) => {
 
     const currency =
       String(billingCurrency || '').toUpperCase() === 'INR'
-        ? 'INR'
-        : String(billingCurrency || '').toUpperCase() === 'USD'
-        ? 'USD'
-        : provider === 'azure'
         ? 'INR'
         : 'USD';
 
@@ -547,7 +539,7 @@ router.post('/send-account-email', async (req: Request, res: Response) => {
         ? 'INR'
         : String(billingCurrency || '').toUpperCase() === 'USD'
         ? 'USD'
-        : saved?.billingCurrency || matchedUsage?.billingCurrency || (provider === 'azure' ? 'INR' : 'USD');
+        : saved?.billingCurrency || (provider === 'azure' ? 'USD' : matchedUsage?.billingCurrency || 'USD');
 
     const nowIso = new Date().toISOString();
     const pseudoStored = {

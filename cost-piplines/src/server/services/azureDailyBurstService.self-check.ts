@@ -126,8 +126,11 @@ const PREV_MONTH = '2026-10'; // 31 days
     usedFallback: true,
   });
   assert.ok(subject.includes('AI Lab') && subject.includes('25.0%') && subject.includes(PREV_MONTH));
+  assert.ok(subject.includes('$') && !subject.includes('₹'), 'Burst email subject must render USD without ₹');
   assert.ok(html.includes('Fallback Routing') && html.includes('OpenAI') && html.includes('Share of Prev Month'));
+  assert.ok(html.includes('$') && !html.includes('₹'), 'Burst email HTML must render USD without ₹');
   assert.ok(text.includes('OpenAI') && text.includes('25.0% of 2026-10'));
+  assert.ok(text.includes('$') && !text.includes('₹'), 'Burst email text must render USD without ₹');
 }
 
 console.log('✅ azureDailyBurstService self-check passed all assertions.');

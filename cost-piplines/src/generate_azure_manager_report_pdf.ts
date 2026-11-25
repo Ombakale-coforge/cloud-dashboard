@@ -10,6 +10,7 @@ import {
   buildAzureAiUsage,
   type AiToolUsageSummary,
 } from './report_charts_and_ai_helper.ts';
+import { convertAzureInrToUsd, round2 } from './utils/azureCurrency.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -17,7 +18,7 @@ const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
 const fmtCurrency = (n: number) =>
-  `₹${Number(n || 0).toLocaleString('en-IN', {
+  `$${Number(n || 0).toLocaleString('en-US', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
@@ -112,7 +113,7 @@ async function fetchReportDataFromDb(): Promise<AzureReportData> {
     } catch {}
   }
 
-  const [momRows, budgets, subRecords, monthlyTotals] = await Promise.all([
+  const [momRows, budgets, subRecords, monthlyTotals, serviceRecords] = await Promise.all([
     prisma.azureReportMomChange.findMany({
       where: { reportRunId },
       orderBy: { id: 'asc' },
@@ -126,15 +127,21 @@ async function fetchReportDataFromDb(): Promise<AzureReportData> {
       where: { reportRunId },
       orderBy: { month: 'asc' },
     }),
+    prisma.azureReportByService.findMany({
+      where: { reportRunId },
+    }),
   ]);
 
+  const targetMomIdx = momRows.findIndex((r) => r.month === reportMonth);
   const targetMom =
-    momRows.find((r) => r.month === reportMonth) ||
+    (targetMomIdx >= 0 ? momRows[targetMomIdx] : undefined) ||
     momRows[momRows.length - 1];
 
   if (targetMom?.month) {
     reportMonth = targetMom.month;
   }
+  const prevMonthIdx = momRows.findIndex((r) => r.month === reportMonth) - 1;
+  const prevMonth = prevMonthIdx >= 0 ? momRows[prevMonthIdx].month : '';
 
   const currentMonthSpend = Number(targetMom?.totalCost || 0);
   const previousMonthSpend = Number(targetMom?.previousMonthCost || 0);
@@ -222,10 +229,16 @@ async function fetchReportDataFromDb(): Promise<AzureReportData> {
       : momRows.map((m) => ({ month: m.month, spend: Number(m.totalCost || 0) }))
   ).slice(-6);
 
+  const mappedServices = serviceRecords.map((r) => ({
+    month: r.month,
+    service: r.consumedService,
+    cost: Number(r.cost || 0),
+  }));
+
   return {
     billingScopeName: 'Azure Subscriptions (Consolidated)',
     reportMonth,
-    generatedAt: new Date().toLocaleString('en-IN', {
+    generatedAt: new Date().toLocaleString('en-US', {
       dateStyle: 'long',
       timeStyle: 'short',
     }),
@@ -242,6 +255,12 @@ async function fetchReportDataFromDb(): Promise<AzureReportData> {
     last6MonthsSpend,
     top5OverBudget,
     top5MostSpend,
+    aiUsage: buildAzureAiUsage(
+      mappedServices,
+      reportMonth,
+      prevMonth,
+      currentMonthSpend
+    ),
   };
 }
 
@@ -311,7 +330,7 @@ async function fetchReportDataFromCsv(): Promise<AzureReportData> {
   return {
     billingScopeName: 'Azure Subscriptions (Consolidated)',
     reportMonth,
-    generatedAt: new Date().toLocaleString('en-IN', {
+    generatedAt: new Date().toLocaleString('en-US', {
       dateStyle: 'long',
       timeStyle: 'short',
     }),
@@ -337,9 +356,51 @@ async function fetchReportDataFromCsv(): Promise<AzureReportData> {
   };
 }
 
+function convertAzureReportDataToUsd(data: AzureReportData): AzureReportData {
+  const toUsd = (n: number) => round2(convertAzureInrToUsd(n, 'INR'));
+  return {
+    ...data,
+    currentMonthSpend: toUsd(data.currentMonthSpend),
+    previousMonthSpend: toUsd(data.previousMonthSpend),
+    totalBudget: toUsd(data.totalBudget),
+    remainingBudget: toUsd(data.remainingBudget),
+    netVariance: toUsd(data.netVariance),
+    totalOverSpend: toUsd(data.totalOverSpend),
+    last6MonthsSpend: data.last6MonthsSpend.map((p) => ({
+      ...p,
+      spend: toUsd(p.spend),
+    })),
+    top5OverBudget: data.top5OverBudget.map((r) => ({
+      ...r,
+      limit: toUsd(r.limit),
+      actualSpend: toUsd(r.actualSpend),
+      overSpend: toUsd(r.overSpend),
+    })),
+    top5MostSpend: data.top5MostSpend.map((r) => ({
+      ...r,
+      spend: toUsd(r.spend),
+    })),
+    aiUsage: data.aiUsage
+      ? {
+          ...data.aiUsage,
+          totalAiSpend: toUsd(data.aiUsage.totalAiSpend),
+          previousAiSpend: toUsd(data.aiUsage.previousAiSpend),
+          sanctionedSpend: toUsd(data.aiUsage.sanctionedSpend),
+          monitoredSpend: toUsd(data.aiUsage.monitoredSpend),
+          rows: data.aiUsage.rows.map((r) => ({
+            ...r,
+            currentSpend: toUsd(r.currentSpend),
+            previousSpend: toUsd(r.previousSpend),
+          })),
+        }
+      : undefined,
+  };
+}
+
 export async function fetchReportData(): Promise<AzureReportData> {
+  let rawData: AzureReportData;
   try {
-    return await fetchReportDataFromDb();
+    rawData = await fetchReportDataFromDb();
   } catch (dbErr: any) {
     if (dbErr.message?.includes('No Azure report run found')) {
       console.warn(
@@ -350,13 +411,14 @@ export async function fetchReportData(): Promise<AzureReportData> {
         `⚠️  Could not query SQL Server (${dbErr.message?.split('\n')[0]}). Falling back to local AzureUsageReports CSVs...`
       );
     }
-    return await fetchReportDataFromCsv();
+    rawData = await fetchReportDataFromCsv();
   }
+  return convertAzureReportDataToUsd(rawData);
 }
 
 function renderRechartsSpendChart(
   points: MonthlySpendPoint[],
-  currencySymbol: string = '₹',
+  currencySymbol: string = '$',
   brandColor: string = '#0078d4',
   accentColor: string = '#bae6fd'
 ): string {
@@ -383,8 +445,7 @@ function renderRechartsSpendChart(
   const yTicks = [0, yMax * 0.5, yMax];
 
   const formatShortCurrency = (val: number) => {
-    if (val >= 10000000) return `${currencySymbol}${(val / 10000000).toFixed(1)}Cr`;
-    if (val >= 100000) return `${currencySymbol}${(val / 100000).toFixed(1)}L`;
+    if (val >= 1000000) return `${currencySymbol}${(val / 1000000).toFixed(1)}M`;
     if (val >= 1000) return `${currencySymbol}${(val / 1000).toFixed(1)}k`;
     return `${currencySymbol}${Math.round(val)}`;
   };
@@ -810,7 +871,7 @@ export function buildAzureReportHtml(data: AzureReportData): string {
     </table>
     <div style="width: 100%; padding: 2px 0;">
       ${renderEmailSafeSpendGraph(data.last6MonthsSpend, {
-        currencySymbol: '₹',
+        currencySymbol: '$',
         brandColor: '#0078d4',
         accentColor: '#7dd3fc',
         budgetLimit: data.totalBudget,
@@ -835,7 +896,7 @@ export function buildAzureReportHtml(data: AzureReportData): string {
           <th>Subscription ID</th>
           <th class="right">Monthly Budget</th>
           <th class="right">Current Spend</th>
-          <th class="right">Variance (INR)</th>
+          <th class="right">Variance (USD)</th>
           <th class="right">Utilization</th>
         </tr>
       </thead>
@@ -919,7 +980,7 @@ export function buildAzureReportHtml(data: AzureReportData): string {
     {
       sectionNumber: 5,
       cloudName: 'Azure',
-      currencySymbol: '₹',
+      currencySymbol: '$',
       brandColor: '#0078d4',
     }
   )}

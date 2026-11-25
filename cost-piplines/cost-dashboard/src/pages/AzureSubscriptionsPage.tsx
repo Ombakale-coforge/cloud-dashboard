@@ -27,7 +27,7 @@ import {
   Copy,
   Check,
   RefreshCw,
-  IndianRupee,
+  DollarSign,
   PieChart,
   ChevronLeft,
   ChevronRight,
@@ -40,6 +40,7 @@ import {
   type EnrichedAccountBudget,
   type ExternalBudgetTrigger,
 } from "@/components/ManualBudgetAlertsSection";
+import { formatAzureUsd } from "@/lib/azureCurrency";
 
 interface AzureSubscriptionItem {
   linkedAccountId: string;
@@ -70,8 +71,7 @@ interface AzureApiResponse {
   accounts: AzureSubscriptionItem[];
 }
 
-const fmt = (n: number) =>
-  `₹${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const fmt = (n: number) => formatAzureUsd(n, "INR");
 
 export function AzureSubscriptionsPage() {
   const [data, setData] = useState<AzureApiResponse | null>(null);
@@ -356,7 +356,7 @@ export function AzureSubscriptionsPage() {
                   </p>
                 </div>
                 <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600 dark:bg-emerald-950/50 dark:text-emerald-400">
-                  <IndianRupee className="h-5 w-5" />
+                  <DollarSign className="h-5 w-5" />
                 </div>
               </div>
             </Card>

@@ -4,6 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/lib/auth";
+import { azureInrToUsd, formatAzureUsd } from "@/lib/azureCurrency";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -129,7 +130,7 @@ export function MyAccountsBudgetTab() {
   // Modal state
   const [editingAccount, setEditingAccount] = useState<OwnedAccountItem | null>(null);
   const [budgetAmount, setBudgetAmount] = useState("");
-  const [budgetCurrency, setBudgetCurrency] = useState<"INR" | "USD">("INR");
+  const [budgetCurrency, setBudgetCurrency] = useState<"INR" | "USD">("USD");
   const [contactName, setContactName] = useState("");
   const [emailChips, setEmailChips] = useState<string[]>([]);
   const [emailInput, setEmailInput] = useState("");
@@ -195,13 +196,26 @@ export function MyAccountsBudgetTab() {
     let alertCount = 0;
 
     for (const acc of accounts) {
-      if (acc.billingCurrency === "INR") totalInrSpend += acc.currentSpend;
-      else totalUsdSpend += acc.currentSpend;
+      if (acc.cloudProvider === "azure") {
+        totalUsdSpend += azureInrToUsd(acc.currentSpend, acc.billingCurrency);
+      } else if (acc.billingCurrency === "INR") {
+        totalInrSpend += acc.currentSpend;
+      } else {
+        totalUsdSpend += acc.currentSpend;
+      }
 
       if (acc.manualBudget) {
         configuredCount++;
-        if (acc.manualBudget.billingCurrency === "INR") totalInrBudget += acc.manualBudget.monthlyBudget;
-        else totalUsdBudget += acc.manualBudget.monthlyBudget;
+        if (acc.cloudProvider === "azure") {
+          totalUsdBudget += azureInrToUsd(
+            acc.manualBudget.monthlyBudget,
+            acc.manualBudget.billingCurrency
+          );
+        } else if (acc.manualBudget.billingCurrency === "INR") {
+          totalInrBudget += acc.manualBudget.monthlyBudget;
+        } else {
+          totalUsdBudget += acc.manualBudget.monthlyBudget;
+        }
 
         if (["NEAR_75", "AT_100", "OVER_BUDGET"].includes(acc.manualBudget.status)) {
           alertCount++;
@@ -225,8 +239,18 @@ export function MyAccountsBudgetTab() {
   const openBudgetModal = (acc: OwnedAccountItem) => {
     const b = acc.manualBudget;
     setEditingAccount(acc);
-    setBudgetAmount(b ? String(b.monthlyBudget) : "");
-    setBudgetCurrency(b?.billingCurrency || acc.billingCurrency || (acc.cloudProvider === "azure" ? "INR" : "USD"));
+    if (acc.cloudProvider === "azure") {
+      const prefill = b
+        ? b.billingCurrency === "INR"
+          ? Math.round(azureInrToUsd(b.monthlyBudget, "INR") * 100) / 100
+          : b.monthlyBudget
+        : null;
+      setBudgetAmount(prefill !== null ? String(prefill) : "");
+      setBudgetCurrency("USD");
+    } else {
+      setBudgetAmount(b ? String(b.monthlyBudget) : "");
+      setBudgetCurrency(b?.billingCurrency || acc.billingCurrency || "USD");
+    }
     setContactName(b?.contactName || user?.name || "");
     const initialEmails =
       b?.alertEmails && b.alertEmails.length > 0
@@ -611,7 +635,9 @@ export function MyAccountsBudgetTab() {
                         Spend ({acc.evaluationMonth})
                       </span>
                       <span className="text-sm font-bold text-foreground">
-                        {formatCurrency(acc.currentSpend, acc.billingCurrency)}
+                        {acc.cloudProvider === "azure"
+                          ? formatAzureUsd(acc.currentSpend, acc.billingCurrency)
+                          : formatCurrency(acc.currentSpend, acc.billingCurrency)}
                       </span>
                     </div>
                     <div>
@@ -648,14 +674,24 @@ export function MyAccountsBudgetTab() {
                         <span className="text-muted-foreground">
                           Monthly Limit:{" "}
                           <span className="font-semibold text-foreground">
-                            {formatCurrency(b.monthlyBudget, b.billingCurrency)}
+                            {acc.cloudProvider === "azure"
+                              ? formatAzureUsd(b.monthlyBudget, b.billingCurrency)
+                              : formatCurrency(b.monthlyBudget, b.billingCurrency)}
                           </span>
                           {!b.isActive && <span className="ml-1.5 text-[10px] text-amber-500">(Paused)</span>}
                         </span>
                         <span className="text-muted-foreground">
                           {b.overBudgetAmount > 0
-                            ? `Over by ${formatCurrency(b.overBudgetAmount, b.billingCurrency)}`
-                            : `${formatCurrency(b.remainingBudget, b.billingCurrency)} left`}
+                            ? `Over by ${
+                                acc.cloudProvider === "azure"
+                                  ? formatAzureUsd(b.overBudgetAmount, b.billingCurrency)
+                                  : formatCurrency(b.overBudgetAmount, b.billingCurrency)
+                              }`
+                            : `${
+                                acc.cloudProvider === "azure"
+                                  ? formatAzureUsd(b.remainingBudget, b.billingCurrency)
+                                  : formatCurrency(b.remainingBudget, b.billingCurrency)
+                              } left`}
                         </span>
                       </div>
                       <div className="h-2 w-full rounded-full bg-muted overflow-hidden">

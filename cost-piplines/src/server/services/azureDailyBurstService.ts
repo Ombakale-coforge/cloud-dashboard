@@ -8,6 +8,7 @@ import {
   listRawBudgets,
   normalizeEmailList,
 } from './accountBudgetService.ts';
+import { convertAzureInrToUsd } from '../../utils/azureCurrency.ts';
 
 export interface ServiceUsageRow {
   subscriptionId: string;
@@ -334,12 +335,19 @@ export function buildDailyBurstEmailContent(
   burst: AzureDailyBurst,
   recipientInfo: BurstRecipientResolution
 ): { subject: string; html: string; text: string } {
-  const cur = burst.billingCurrency;
+  const cur = 'USD' as const;
+  const toUsd = (amount: number) => round2(convertAzureInrToUsd(amount, burst.billingCurrency));
+  const currentDayCostUsd = toUsd(burst.currentDayCost);
+  const previousMonthCostUsd = toUsd(burst.previousMonthCost);
+  const previousMonthDailyAvgUsd = toUsd(burst.previousMonthDailyAvg);
+  const thresholdAmountUsd = toUsd(burst.thresholdAmount);
+  const minCostFloorUsd = toUsd(burst.minCostFloorApplied);
+
   const pctStr = `${burst.percentOfPrevMonth.toFixed(1)}%`;
-  const currStr = formatCurrency(burst.currentDayCost, cur);
-  const prevMonthStr = formatCurrency(burst.previousMonthCost, cur);
-  const prevDailyAvgStr = formatCurrency(burst.previousMonthDailyAvg, cur);
-  const thresholdAmtStr = formatCurrency(burst.thresholdAmount, cur);
+  const currStr = formatCurrency(currentDayCostUsd, cur);
+  const prevMonthStr = formatCurrency(previousMonthCostUsd, cur);
+  const prevDailyAvgStr = formatCurrency(previousMonthDailyAvgUsd, cur);
+  const thresholdAmtStr = formatCurrency(thresholdAmountUsd, cur);
 
   const subject = `[Azure Cost Burst] ${burst.subscriptionName} burned ${pctStr} of ${burst.previousMonth} spend (${currStr}) on ${burst.evaluationDate}`;
 
@@ -349,12 +357,15 @@ export function buildDailyBurstEmailContent(
           .map((d) => {
             const multStr =
               d.multipleOfDailyAvg !== null ? `${d.multipleOfDailyAvg.toFixed(1)}x avg` : 'New';
+            const prevAvgUsd = toUsd(d.prevMonthDailyAvg);
+            const currDayUsd = toUsd(d.currentDayCost);
+            const deltaUsd = toUsd(d.deltaOverDailyAvg);
             return `
               <tr style="border-bottom:1px solid #e2e8f0;">
                 <td style="padding:8px 10px;color:#0f172a;font-size:13px;">${escapeHtml(d.service)}</td>
-                <td style="padding:8px 10px;color:#475569;font-size:13px;text-align:right;">${escapeHtml(formatCurrency(d.prevMonthDailyAvg, cur))}/day</td>
-                <td style="padding:8px 10px;color:#0f172a;font-size:13px;font-weight:600;text-align:right;">${escapeHtml(formatCurrency(d.currentDayCost, cur))}</td>
-                <td style="padding:8px 10px;color:#dc2626;font-size:13px;font-weight:600;text-align:right;">+${escapeHtml(formatCurrency(d.deltaOverDailyAvg, cur))} (${multStr})</td>
+                <td style="padding:8px 10px;color:#475569;font-size:13px;text-align:right;">${escapeHtml(formatCurrency(prevAvgUsd, cur))}/day</td>
+                <td style="padding:8px 10px;color:#0f172a;font-size:13px;font-weight:600;text-align:right;">${escapeHtml(formatCurrency(currDayUsd, cur))}</td>
+                <td style="padding:8px 10px;color:#dc2626;font-size:13px;font-weight:600;text-align:right;">+${escapeHtml(formatCurrency(deltaUsd, cur))} (${multStr})</td>
               </tr>`;
           })
           .join('')
@@ -401,7 +412,7 @@ export function buildDailyBurstEmailContent(
       </table>
 
       <p style="margin:0 0 16px;font-size:13px;color:#334155;line-height:1.5;">
-        ${recipientInfo.contactName ? `Hi ${escapeHtml(recipientInfo.contactName)}, ` : ''}On <strong>${escapeHtml(burst.evaluationDate)}</strong>, Azure subscription <strong>${escapeHtml(burst.subscriptionName)}</strong> spent <strong>${escapeHtml(currStr)}</strong> — which is <strong>${escapeHtml(pctStr)}</strong> of its entire <strong>${escapeHtml(burst.previousMonth)}</strong> spend (${escapeHtml(prevMonthStr)}), exceeding the alert rule (<strong>&ge; ${burst.thresholdPercent}% of previous month</strong> and <strong>&ge; ${escapeHtml(formatCurrency(burst.minCostFloorApplied, cur))}</strong>).
+        ${recipientInfo.contactName ? `Hi ${escapeHtml(recipientInfo.contactName)}, ` : ''}On <strong>${escapeHtml(burst.evaluationDate)}</strong>, Azure subscription <strong>${escapeHtml(burst.subscriptionName)}</strong> spent <strong>${escapeHtml(currStr)}</strong> — which is <strong>${escapeHtml(pctStr)}</strong> of its entire <strong>${escapeHtml(burst.previousMonth)}</strong> spend (${escapeHtml(prevMonthStr)}), exceeding the alert rule (<strong>&ge; ${burst.thresholdPercent}% of previous month</strong> and <strong>&ge; ${escapeHtml(formatCurrency(minCostFloorUsd, cur))}</strong>).
       </p>
 
       <h2 style="margin:0 0 8px;font-size:14px;color:#0f172a;">Top Services Driving the Burst</h2>
@@ -428,7 +439,7 @@ export function buildDailyBurstEmailContent(
   const driversText = burst.topDrivers
     .map(
       (d) =>
-        `  - ${d.service}: avg ${formatCurrency(d.prevMonthDailyAvg, cur)}/day -> ${formatCurrency(d.currentDayCost, cur)} (+${formatCurrency(d.deltaOverDailyAvg, cur)})`
+        `  - ${d.service}: avg ${formatCurrency(toUsd(d.prevMonthDailyAvg), cur)}/day -> ${formatCurrency(toUsd(d.currentDayCost), cur)} (+${formatCurrency(toUsd(d.deltaOverDailyAvg), cur)})`
     )
     .join('\n');
 
@@ -437,7 +448,7 @@ export function buildDailyBurstEmailContent(
     `Subscription: ${burst.subscriptionName} (${burst.subscriptionId})`,
     `Previous Month (${burst.previousMonth}): ${prevMonthStr} (avg ${prevDailyAvgStr}/day)`,
     `Evaluation Day (${burst.evaluationDate}): ${currStr} (${pctStr} of ${burst.previousMonth})`,
-    `Rule: >= ${burst.thresholdPercent}% of prev month (${thresholdAmtStr}) AND >= ${formatCurrency(burst.minCostFloorApplied, cur)}`,
+    `Rule: >= ${burst.thresholdPercent}% of prev month (${thresholdAmtStr}) AND >= ${formatCurrency(minCostFloorUsd, cur)}`,
     recipientInfo.usedFallback ? 'Note: Routed via fallback email (no owner mapped in cloud_account_budgets).' : '',
     driversText ? `Top Drivers:\n${driversText}` : '',
   ]

@@ -11,7 +11,7 @@ import {
   RefreshCw,
   Globe,
   Server,
-  IndianRupee,
+  DollarSign,
   Sparkles,
   Layers,
 } from "lucide-react";
@@ -37,6 +37,7 @@ import {
   Pie,
   Cell,
 } from "recharts";
+import { azureInrToUsd, formatAzureUsd, formatUsd, formatUsdCompact } from "@/lib/azureCurrency";
 
 interface AzureAccountDetailResponse {
   account: {
@@ -78,16 +79,9 @@ interface AzureAccountDetailResponse {
   };
 }
 
-const fmt = (n: number) =>
-  `₹${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const fmt = (n: number) => formatAzureUsd(n, "INR");
 
-const formatCompactCurrency = (value: unknown) => {
-  const num = typeof value === "number" ? value : Number(value ?? 0);
-  if (num >= 10000000) return `₹${(num / 10000000).toFixed(1)}Cr`;
-  if (num >= 100000) return `₹${(num / 100000).toFixed(1)}L`;
-  if (num >= 1000) return `₹${(num / 1000).toFixed(0)}k`;
-  return `₹${num}`;
-};
+const formatCompactCurrency = (value: unknown) => formatUsdCompact(value);
 
 const PROFESSIONAL_COLORS = [
   "#0284c7", // Sky 700
@@ -201,9 +195,14 @@ export function AzureSubscriptionDetailPage() {
   const isPositiveMoM = financials.momChangePercent > 0;
   const isNegativeMoM = financials.momChangePercent < 0;
 
+  const historicalMonthlySpendUsd = financials.historicalMonthlySpend.map((h) => ({
+    ...h,
+    cost: azureInrToUsd(h.cost, "INR"),
+  }));
+
   const pieData = (liveAzure?.services || []).slice(0, 5).map((s) => ({
     name: s.service,
-    value: s.cost,
+    value: azureInrToUsd(s.cost, "INR"),
   }));
 
   return (
@@ -351,7 +350,7 @@ export function AzureSubscriptionDetailPage() {
                 </p>
               </div>
               <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-sky-50 text-sky-600 dark:bg-sky-950/50 dark:text-sky-400">
-                <IndianRupee className="h-5 w-5" />
+                <DollarSign className="h-5 w-5" />
               </div>
             </div>
           </Card>
@@ -458,7 +457,7 @@ export function AzureSubscriptionDetailPage() {
                 <div className="h-[280px] w-full pt-2">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart
-                      data={financials.historicalMonthlySpend}
+                      data={historicalMonthlySpendUsd}
                       margin={{ top: 10, right: 20, left: 10, bottom: 5 }}
                     >
                       <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
@@ -479,7 +478,7 @@ export function AzureSubscriptionDetailPage() {
                       />
                       <Tooltip
                         formatter={(val: any) => [
-                          `₹${Number(val).toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
+                          formatUsd(val),
                           "Total Spend",
                         ]}
                         contentStyle={{
@@ -547,7 +546,7 @@ export function AzureSubscriptionDetailPage() {
                         </Pie>
                         <Tooltip
                           formatter={(val: any) => [
-                            `₹${Number(val).toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
+                            formatUsd(val),
                             "Cost",
                           ]}
                           contentStyle={{
@@ -579,7 +578,7 @@ export function AzureSubscriptionDetailPage() {
                           </span>
                         </div>
                         <span className="font-mono font-semibold text-foreground shrink-0">
-                          {fmt(s.value)}
+                          {formatUsd(s.value)}
                         </span>
                       </div>
                     ))}

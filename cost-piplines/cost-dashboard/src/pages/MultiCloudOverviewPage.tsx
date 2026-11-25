@@ -7,6 +7,7 @@ import { ManualBudgetAlertsSection } from "@/components/ManualBudgetAlertsSectio
 import { useAccountRequests } from "@/lib/useAccountRequests";
 import { useAuth } from "@/lib/auth";
 import { useCsv } from "@/lib/useCsv";
+import { formatAzureUsd } from "@/lib/azureCurrency";
 import type { AccountOption } from "@/components/Navbar";
 import type {
   MonthTotal,
@@ -1116,7 +1117,7 @@ export function MultiCloudOverviewPage() {
                         <span className="truncate">Total Budget Allocated</span>
                       </div>
                       <div className="text-lg xl:text-xl font-extrabold text-slate-900 dark:text-white mt-0.5 truncate">
-                        ₹{(azureSummary?.totalBudgetedSpend || 0).toLocaleString()}
+                        {formatAzureUsd(azureSummary?.totalBudgetedSpend || 0, "INR", { maximumFractionDigits: 0 })}
                       </div>
                       <div className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold mt-0.5 truncate">
                         Configured across {azureBudgetedAccounts} subs
@@ -1129,10 +1130,7 @@ export function MultiCloudOverviewPage() {
                         <span className="truncate">Active Month Spend</span>
                       </div>
                       <div className="text-lg xl:text-xl font-extrabold text-slate-900 dark:text-white mt-0.5 truncate">
-                        ₹
-                        {(azureSummary?.activeSpend || 0).toLocaleString(undefined, {
-                          maximumFractionDigits: 0,
-                        })}
+                        {formatAzureUsd(azureSummary?.activeSpend || 0, "INR", { maximumFractionDigits: 0 })}
                       </div>
                       <div className="text-[10px] text-slate-400 mt-0.5 truncate">
                         Live consumption across org
@@ -1191,12 +1189,9 @@ export function MultiCloudOverviewPage() {
 
                           <div className="text-right shrink-0 w-36">
                             <div className="text-xs font-bold text-slate-800 dark:text-slate-100 leading-tight">
-                              ₹
-                              {(b["Actual Spend"] || 0).toLocaleString(undefined, {
-                                maximumFractionDigits: 0,
-                              })}{" "}
+                              {formatAzureUsd(b["Actual Spend"] || 0, "INR", { maximumFractionDigits: 0 })}{" "}
                               <span className="text-[10px] font-normal text-slate-400">
-                                / ₹{(b["Budget Limit"] || 0).toLocaleString()}
+                                / {formatAzureUsd(b["Budget Limit"] || 0, "INR", { maximumFractionDigits: 0 })}
                               </span>
                             </div>
                             <div className="flex items-center gap-1.5 mt-1">

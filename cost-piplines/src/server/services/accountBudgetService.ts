@@ -8,14 +8,13 @@ import { prisma } from '../db.ts';
 import { ensureAlertTablesExist } from '../db-alert-tables.ts';
 import { DEMO_GCP_PROJECTS, getBigQueryClient, resolveBillingTable } from '../routes/gcp.ts';
 import { recordEmailAudit } from '../../logging/auditLogger.ts';
+import { convertAzureInrToUsd, getAzureUsdToInrRate } from '../../utils/azureCurrency.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT_DIR = path.resolve(__dirname, '../../..');
 const LOG_DIR = path.resolve(__dirname, '../../alerts/logs');
 const FALLBACK_JSON_PATH = path.resolve(ROOT_DIR, 'data', 'cloud_account_budgets.json');
-
-const DEFAULT_USD_TO_INR = 85;
 
 export type CloudProvider = 'aws' | 'azure' | 'gcp';
 export type AccountBudgetThreshold = '50%' | '75%' | '100%' | 'OVER_BUDGET';
@@ -197,10 +196,10 @@ function convertAmountToTargetCurrency(
   amount: number,
   sourceCurrency: 'USD' | 'INR',
   targetCurrency: 'USD' | 'INR',
-  conversionRate = DEFAULT_USD_TO_INR
+  conversionRate = getAzureUsdToInrRate()
 ): number {
   if (sourceCurrency === targetCurrency) return round2(amount);
-  const rate = conversionRate > 1 ? conversionRate : DEFAULT_USD_TO_INR;
+  const rate = conversionRate > 1 ? conversionRate : getAzureUsdToInrRate();
   if (sourceCurrency === 'INR' && targetCurrency === 'USD') {
     return round2(amount / rate);
   }
@@ -307,7 +306,7 @@ async function resolveAwsAccountsUsage(targetMonth?: string): Promise<CloudAccou
             previousSpend,
             momChangePercent,
             billingCurrency: 'USD',
-            conversionRate: DEFAULT_USD_TO_INR,
+            conversionRate: getAzureUsdToInrRate(),
             currentSpendUsd: currentSpend,
             topCostDriver: topDriver,
             topServices: [],
@@ -348,7 +347,7 @@ async function resolveAwsAccountsUsage(targetMonth?: string): Promise<CloudAccou
             previousSpend: 0,
             momChangePercent: 0,
             billingCurrency: 'USD',
-            conversionRate: DEFAULT_USD_TO_INR,
+            conversionRate: getAzureUsdToInrRate(),
             currentSpendUsd: round2(cost),
             topCostDriver: 'Cloud Infrastructure',
             topServices: [],
@@ -448,8 +447,8 @@ async function resolveAzureAccountsUsage(targetMonth?: string): Promise<CloudAcc
       previousSpend,
       momChangePercent,
       billingCurrency: 'INR',
-      conversionRate: DEFAULT_USD_TO_INR,
-      currentSpendUsd: round2(currentSpend / DEFAULT_USD_TO_INR),
+      conversionRate: getAzureUsdToInrRate(),
+      currentSpendUsd: round2(currentSpend / getAzureUsdToInrRate()),
       topCostDriver: currentSpend === 0 ? 'No usage recorded' : 'Azure Infrastructure',
       topServices: [],
     };
@@ -759,8 +758,7 @@ export async function upsertBudget(input: UpsertAccountBudgetInput): Promise<Sto
   const accountName = input.accountName.trim();
   const parentAccountId = input.parentAccountId ? String(input.parentAccountId).trim() : null;
   const monthlyBudget = round2(Number(input.monthlyBudget));
-  const billingCurrency =
-    input.billingCurrency || (provider === 'azure' ? 'INR' : 'USD');
+  const billingCurrency = input.billingCurrency || 'USD';
   const alertEmails = normalizeEmailList(input.alertEmail);
   const alertEmail = alertEmails.join(', ');
   const contactName = input.contactName ? input.contactName.trim() : null;
@@ -992,7 +990,7 @@ export function enrichBudgetWithUsage(
 ): EnrichedAccountBudget {
   const nativeCurrency: 'USD' | 'INR' =
     usage?.billingCurrency || (budget.billingCurrency === 'INR' ? 'INR' : 'USD');
-  const convRate = usage?.conversionRate || DEFAULT_USD_TO_INR;
+  const convRate = usage?.conversionRate || getAzureUsdToInrRate();
 
   const rawCurrentSpend = usage ? usage.currentSpend : 0;
   const rawPreviousSpend = usage ? usage.previousSpend : 0;
@@ -1395,7 +1393,21 @@ export function buildAccountBudgetEmailContent(
   const providerMeta = getProviderMeta(item.cloudProvider);
   const thresholdMeta = getThresholdMeta(item.status);
   const hasLimit = item.monthlyBudget > 0;
-  const currency = item.billingCurrency;
+  const shouldConvertAzureInr =
+    item.cloudProvider === 'azure' && item.billingCurrency === 'INR';
+  const currency: 'USD' | 'INR' = shouldConvertAzureInr ? 'USD' : item.billingCurrency;
+  const toDisplay = (v: number) =>
+    shouldConvertAzureInr ? round2(convertAzureInrToUsd(v, 'INR')) : v;
+
+  const currentSpend = toDisplay(item.currentSpend);
+  const previousSpend = toDisplay(item.previousSpend);
+  const monthlyBudget = toDisplay(item.monthlyBudget);
+  const remainingBudget = toDisplay(item.remainingBudget);
+  const overBudgetAmount = toDisplay(item.overBudgetAmount);
+  const topServices = item.topServices.map((s) => ({
+    service: s.service,
+    cost: toDisplay(s.cost),
+  }));
 
   const thresholdLabel =
     item.thresholdCrossed === 'OVER_BUDGET'
@@ -1416,8 +1428,8 @@ export function buildAccountBudgetEmailContent(
       ? `The ${providerMeta.label} account <strong>${escapeHtml(item.accountName)}</strong> has crossed the <strong>${escapeHtml(thresholdLabel)}</strong> monthly budget threshold.`
       : `Here is the latest cloud cost &amp; budget usage report for ${providerMeta.label} account <strong>${escapeHtml(item.accountName)}</strong> for billing period <strong>${escapeHtml(item.evaluationMonth)}</strong>.`;
 
-  const projectedEom = getProjectedMonthEnd(item.currentSpend, item.evaluationMonth);
-  const momDelta = round2(item.currentSpend - item.previousSpend);
+  const projectedEom = getProjectedMonthEnd(currentSpend, item.evaluationMonth);
+  const momDelta = round2(currentSpend - previousSpend);
   const momSign = item.momChangePercent > 0 ? '+' : '';
   const progressWidth = Math.min(100, Math.max(0, item.percentUsed));
 
@@ -1444,8 +1456,8 @@ export function buildAccountBudgetEmailContent(
     .join('');
 
   const topServicesRows =
-    item.topServices.length > 0
-      ? item.topServices
+    topServices.length > 0
+      ? topServices
           .map(
             (s, i) => `
           <tr style="border-bottom:1px solid #f1f5f9;">
@@ -1455,7 +1467,7 @@ export function buildAccountBudgetEmailContent(
           )
           .join('')
       : `<tr><td colspan="2" style="padding:10px;color:#64748b;font-style:italic;">${
-          item.currentSpend <= 0
+          currentSpend <= 0
             ? `No service usage recorded for this account in ${escapeHtml(item.evaluationMonth)}.`
             : `Detailed per-service cost breakdown is unavailable for this account (Primary Cost Driver: <strong>${escapeHtml(item.topCostDriver)}</strong>).`
         }</td></tr>`;
@@ -1482,17 +1494,17 @@ export function buildAccountBudgetEmailContent(
         <tr>
           <td style="padding:14px 16px;width:50%;border-right:1px solid #e2e8f0;">
             <div style="font-size:11px;text-transform:uppercase;color:#64748b;font-weight:700;">Current Month Spend</div>
-            <div style="font-size:22px;font-weight:800;color:#0f172a;margin-top:4px;">${escapeHtml(formatCurrency(item.currentSpend, currency))}</div>
-            <div style="font-size:11px;color:#64748b;margin-top:3px;">Prior Month: ${escapeHtml(formatCurrency(item.previousSpend, currency))} (${momSign}${item.momChangePercent}% MoM)</div>
+            <div style="font-size:22px;font-weight:800;color:#0f172a;margin-top:4px;">${escapeHtml(formatCurrency(currentSpend, currency))}</div>
+            <div style="font-size:11px;color:#64748b;margin-top:3px;">Prior Month: ${escapeHtml(formatCurrency(previousSpend, currency))} (${momSign}${item.momChangePercent}% MoM)</div>
           </td>
           <td style="padding:14px 16px;width:50%;">
             <div style="font-size:11px;text-transform:uppercase;color:#64748b;font-weight:700;">Manual Monthly Budget</div>
-            <div style="font-size:22px;font-weight:800;color:${hasLimit ? thresholdMeta.accentColor : '#475569'};margin-top:4px;">${hasLimit ? escapeHtml(formatCurrency(item.monthlyBudget, currency)) : 'Not Configured'}</div>
+            <div style="font-size:22px;font-weight:800;color:${hasLimit ? thresholdMeta.accentColor : '#475569'};margin-top:4px;">${hasLimit ? escapeHtml(formatCurrency(monthlyBudget, currency)) : 'Not Configured'}</div>
             <div style="font-size:11px;color:#64748b;margin-top:3px;">${
               hasLimit
-                ? item.overBudgetAmount > 0
-                  ? `Exceeded by <strong style="color:#b91c1c;">${escapeHtml(formatCurrency(item.overBudgetAmount, currency))}</strong>`
-                  : `Remaining: <strong>${escapeHtml(formatCurrency(item.remainingBudget, currency))}</strong>`
+                ? overBudgetAmount > 0
+                  ? `Exceeded by <strong style="color:#b91c1c;">${escapeHtml(formatCurrency(overBudgetAmount, currency))}</strong>`
+                  : `Remaining: <strong>${escapeHtml(formatCurrency(remainingBudget, currency))}</strong>`
                 : 'Manual budget limit not yet assigned'
             }</div>
           </td>
@@ -1569,9 +1581,9 @@ export function buildAccountBudgetEmailContent(
     subject,
     `Account: ${item.accountName} (${item.accountId})`,
     `Cloud: ${providerMeta.label} | Billing Month: ${item.evaluationMonth}`,
-    `Current Spend: ${formatCurrency(item.currentSpend, currency)}`,
-    hasLimit ? `Monthly Budget: ${formatCurrency(item.monthlyBudget, currency)} (${item.percentUsed.toFixed(1)}%)` : '',
-    `Prior Spend: ${formatCurrency(item.previousSpend, currency)} (${momSign}${item.momChangePercent}% MoM)`,
+    `Current Spend: ${formatCurrency(currentSpend, currency)}`,
+    hasLimit ? `Monthly Budget: ${formatCurrency(monthlyBudget, currency)} (${item.percentUsed.toFixed(1)}%)` : '',
+    `Prior Spend: ${formatCurrency(previousSpend, currency)} (${momSign}${item.momChangePercent}% MoM)`,
     `Primary Cost Driver: ${item.topCostDriver}`,
     `Concerned Person: ${item.contactName || 'N/A'} <${item.alertEmail}>`,
   ]

@@ -11,6 +11,7 @@ import {
     buildAzureAiUsage,
     type MonthlySpendPoint,
 } from '../report_charts_and_ai_helper.ts';
+import { convertAzureInrToUsd, round2 } from '../utils/azureCurrency.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -65,15 +66,25 @@ function loadAzureMonthlyAndAiForAlertEmail(): {
         }
     } catch {}
 
-    const aiSummary = buildAzureAiUsage(svcRows, reportMonth, prevMonth, currentSpend);
+    const usdMonthlyPoints = monthlyPoints.map((p) => ({
+        month: p.month,
+        spend: round2(convertAzureInrToUsd(p.spend, 'INR')),
+    }));
+    const usdCurrentSpend = round2(convertAzureInrToUsd(currentSpend, 'INR'));
+    const usdSvcRows = svcRows.map((r) => ({
+        ...r,
+        cost: round2(convertAzureInrToUsd(r.cost, 'INR')),
+    }));
+
+    const aiSummary = buildAzureAiUsage(usdSvcRows, reportMonth, prevMonth, usdCurrentSpend);
     const aiSectionHtml = renderAiToolUsageSection(aiSummary, {
         sectionNumber: 2,
         cloudName: 'Azure',
-        currencySymbol: '₹',
+        currencySymbol: '$',
         brandColor: '#0078d4',
     });
 
-    return { monthlyPoints, aiSectionHtml };
+    return { monthlyPoints: usdMonthlyPoints, aiSectionHtml };
 }
 
 function escapeHtml(value: string | number | null | undefined): string {
@@ -87,12 +98,13 @@ function escapeHtml(value: string | number | null | undefined): string {
 
 function formatCurrency(value: number | undefined | null, currency = 'INR'): string {
     if (value == null || !Number.isFinite(value)) return 'N/A';
-    return new Intl.NumberFormat('en-IN', { style: 'currency', currency, maximumFractionDigits: 2 }).format(value);
+    const usdValue = convertAzureInrToUsd(value, currency);
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(usdValue);
 }
 
 function formatNumber(value: number | undefined | null): string {
     if (value == null || !Number.isFinite(value)) return 'N/A';
-    return new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }).format(value);
+    return new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value);
 }
 
 function formatPercent(value: number | undefined | null): string {
@@ -205,7 +217,7 @@ export function createEmailHtml(report: AlertReport): string {
     const cards = alerts.map(renderAlertCard).join('');
     const { monthlyPoints, aiSectionHtml } = loadAzureMonthlyAndAiForAlertEmail();
     const spendGraphHtml = renderEmailSafeSpendGraph(monthlyPoints, {
-        currencySymbol: '₹',
+        currencySymbol: '$',
         brandColor: '#0078d4',
         accentColor: '#7dd3fc',
     });

@@ -2,10 +2,10 @@ import { useMemo } from "react";
 import { Card } from "@/components/ui/card";
 import { useCsv } from "@/lib/useCsv";
 import type { AzureKpiMonth, AzureMomChange } from "@/lib/types";
-import { Users, Package, Layers, ArrowUpRight, ArrowDownRight, IndianRupee, Calendar, TrendingUp } from "lucide-react";
+import { Users, Package, Layers, ArrowUpRight, ArrowDownRight, DollarSign, Calendar, TrendingUp } from "lucide-react";
+import { formatAzureUsd } from "../../lib/azureCurrency";
 
-const fmt = (n: number) =>
-    `₹${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const fmt = (n: number) => formatAzureUsd(n, "INR");
 
 const formatMonthName = (mStr: string) => {
     if (!mStr) return "Current Month";
@@ -90,7 +90,7 @@ export function AzureKpiCards({ selectedMonth, basePath = "/data/azure" }: Azure
                         <p className="text-xs text-slate-500 dark:text-slate-400">Total Azure spend, pro-rated</p>
                     </div>
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-sky-50 text-sky-600 dark:bg-sky-950/50 dark:text-sky-400">
-                        <IndianRupee className="h-5 w-5" />
+                        <DollarSign className="h-5 w-5" />
                     </div>
                 </div>
             </Card>
