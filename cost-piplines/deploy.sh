@@ -60,7 +60,7 @@ pm2 startOrReload ecosystem.config.cjs --only cost-dashboard --update-env
 
 if [ "$INIT_CRONS" = true ]; then
   echo "=== 5b. Registering PM2 cron jobs (--init-crons) ==="
-  pm2 start ecosystem.config.cjs --only daily-data-refresh,daily-cost-report-email,azure-daily-cost-burst-alerts --update-env
+  pm2 start ecosystem.config.cjs --only daily-data-refresh,daily-cost-report-email,azure-daily-cost-burst-alerts,daily-ops-log-digest --update-env
 fi
 
 pm2 save

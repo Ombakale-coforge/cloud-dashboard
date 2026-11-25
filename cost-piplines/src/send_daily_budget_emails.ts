@@ -20,6 +20,7 @@ import {
   sendAccountUsageEmail,
   shouldSendThresholdAlert,
 } from './server/services/accountBudgetService.ts';
+import { startPipelineRunCapture } from './logging/auditLogger.ts';
 
 const VALID_PROVIDERS = new Set(['all', 'aws', 'azure', 'gcp']);
 
@@ -136,9 +137,15 @@ async function runDailyInstantMode(provider: string, month: string | undefined, 
 }
 
 async function main() {
+  const runCapture = startPipelineRunCapture('daily-budget-emails', {
+    command: `src/send_daily_budget_emails.ts ${process.argv.slice(2).join(' ')}`.trim(),
+  });
   let exitCode = 0;
+  let dryRun = false;
   try {
-    const { thresholdsOnly, dryRun, provider, month } = parseCliArgs();
+    const parsed = parseCliArgs();
+    dryRun = parsed.dryRun;
+    const { thresholdsOnly, provider, month } = parsed;
     console.log(
       `[DailyBudgetEmails] Started (${new Date().toISOString()}) | mode=${
         thresholdsOnly ? 'thresholds' : 'daily-instant'
@@ -152,6 +159,7 @@ async function main() {
     console.error('[DailyBudgetEmails] Fatal error:', err?.message || err);
     exitCode = 1;
   } finally {
+    runCapture.finish({ exitCode, dryRun });
     if (typeof prisma?.$disconnect === 'function') {
       await prisma.$disconnect().catch(() => {});
     }

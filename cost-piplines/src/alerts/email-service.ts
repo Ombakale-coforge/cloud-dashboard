@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { AlertReport, Alert, EmailResult, AlertSeverity, MeterBudgetAlert } from './types.ts';
 import { EMAIL_MODE, LOG_DIR_PATH, validateEmailEnvironment, logger } from './config.ts';
+import { recordEmailAudit } from '../logging/auditLogger.ts';
 import {
     renderEmailSafeSpendGraph,
     renderAiToolUsageSection,
@@ -300,11 +301,27 @@ export async function sendAlertEmail(alertReport: AlertReport, options?: { mode?
 
     const mode = options?.mode || EMAIL_MODE;
 
+    const highestSeverity = getHighestSeverity(alertReport.alerts);
+    const subject = `[${highestSeverity}] Azure Cost Alerts: ${alertReport.alerts.length} detected on ${alertReport.evaluationDate}`;
+    const toList = (process.env.ALERT_EMAIL_TO || '')
+        .split(',')
+        .map((e) => e.trim())
+        .filter(Boolean);
+
     if (mode === 'preview') {
         const previewHtml = createEmailHtml(alertReport);
         const previewPath = path.join(LOG_DIR_PATH, `alert-preview-${alertReport.evaluationDate}.html`);
         fs.writeFileSync(previewPath, previewHtml, 'utf8');
         logger.info(`Wrote email preview to ${previewPath}`);
+        recordEmailAudit({
+            category: 'azure-anomaly-alert',
+            source: 'alerts/email-service',
+            to: toList,
+            from: process.env.ALERT_EMAIL_FROM,
+            subject,
+            transport: 'preview',
+            status: 'dry-run',
+        });
         return { sent: false, previewed: true, previewPath };
     }
 
@@ -322,13 +339,20 @@ export async function sendAlertEmail(alertReport: AlertReport, options?: { mode?
 
     try {
         await transporter.verify();
-    } catch (err) {
+    } catch (err: any) {
         logger.error('Failed to verify SMTP connection', { error: err });
+        recordEmailAudit({
+            category: 'azure-anomaly-alert',
+            source: 'alerts/email-service',
+            to: toList,
+            from: process.env.ALERT_EMAIL_FROM,
+            subject,
+            transport: 'smtp',
+            status: 'failed',
+            error: err?.message || String(err),
+        });
         throw err;
     }
-
-    const highestSeverity = getHighestSeverity(alertReport.alerts);
-    const subject = `[${highestSeverity}] Azure Cost Alerts: ${alertReport.alerts.length} detected on ${alertReport.evaluationDate}`;
 
     const mailOptions = {
         from: process.env.ALERT_EMAIL_FROM,
@@ -340,6 +364,16 @@ export async function sendAlertEmail(alertReport: AlertReport, options?: { mode?
 
     try {
         const info = await transporter.sendMail(mailOptions);
+        recordEmailAudit({
+            category: 'azure-anomaly-alert',
+            source: 'alerts/email-service',
+            to: toList,
+            from: process.env.ALERT_EMAIL_FROM,
+            subject,
+            transport: 'smtp',
+            status: 'sent',
+            messageId: info.messageId,
+        });
         return {
             sent: true,
             messageId: info.messageId,
@@ -348,6 +382,16 @@ export async function sendAlertEmail(alertReport: AlertReport, options?: { mode?
         };
     } catch (err: any) {
         logger.error('Failed to send alert email', { error: err });
+        recordEmailAudit({
+            category: 'azure-anomaly-alert',
+            source: 'alerts/email-service',
+            to: toList,
+            from: process.env.ALERT_EMAIL_FROM,
+            subject,
+            transport: 'smtp',
+            status: 'failed',
+            error: err?.message || String(err),
+        });
         throw err;
     }
 }
@@ -391,11 +435,30 @@ export async function sendBudgetAlertEmail(budgetAlerts: MeterBudgetAlert[], opt
     const mode = options?.mode || EMAIL_MODE;
     const dateStr = budgetAlerts[0]?.evaluationDate || new Date().toISOString().slice(0, 10);
 
+    const recipientSet = new Set<string>();
+    for (const ba of budgetAlerts) {
+        if (ba.budget.alertEmail) recipientSet.add(ba.budget.alertEmail);
+    }
+    const recipientsList = Array.from(recipientSet).length > 0
+        ? Array.from(recipientSet)
+        : (process.env.ALERT_EMAIL_TO || '').split(',').map((e) => e.trim()).filter(Boolean);
+    const recipients = recipientsList.join(',');
+    const subject = `[BUDGET ALERT] ${budgetAlerts.length} Azure Meter(s) reached budget thresholds (${dateStr})`;
+
     if (mode === 'preview') {
         const previewHtml = createBudgetAlertHtml(budgetAlerts);
         const previewPath = path.join(LOG_DIR_PATH, `budget-alert-preview-${dateStr}.html`);
         fs.writeFileSync(previewPath, previewHtml, 'utf8');
         logger.info(`Wrote budget alert preview to ${previewPath}`);
+        recordEmailAudit({
+            category: 'azure-meter-budget',
+            source: 'alerts/email-service',
+            to: recipientsList,
+            from: process.env.ALERT_EMAIL_FROM,
+            subject,
+            transport: 'preview',
+            status: 'dry-run',
+        });
         return { sent: false, previewed: true, previewPath };
     }
 
@@ -411,16 +474,6 @@ export async function sendBudgetAlertEmail(budgetAlerts: MeterBudgetAlert[], opt
         },
     });
 
-    const recipientSet = new Set<string>();
-    for (const ba of budgetAlerts) {
-        if (ba.budget.alertEmail) recipientSet.add(ba.budget.alertEmail);
-    }
-    const recipients = Array.from(recipientSet).length > 0
-        ? Array.from(recipientSet).join(',')
-        : (process.env.ALERT_EMAIL_TO || '');
-
-    const subject = `[BUDGET ALERT] ${budgetAlerts.length} Azure Meter(s) reached budget thresholds (${dateStr})`;
-
     const mailOptions = {
         from: process.env.ALERT_EMAIL_FROM,
         to: recipients,
@@ -430,6 +483,16 @@ export async function sendBudgetAlertEmail(budgetAlerts: MeterBudgetAlert[], opt
 
     try {
         const info = await transporter.sendMail(mailOptions);
+        recordEmailAudit({
+            category: 'azure-meter-budget',
+            source: 'alerts/email-service',
+            to: recipientsList,
+            from: process.env.ALERT_EMAIL_FROM,
+            subject,
+            transport: 'smtp',
+            status: 'sent',
+            messageId: info.messageId,
+        });
         return {
             sent: true,
             messageId: info.messageId,
@@ -438,6 +501,16 @@ export async function sendBudgetAlertEmail(budgetAlerts: MeterBudgetAlert[], opt
         };
     } catch (err: any) {
         logger.error('Failed to send budget alert email', { error: err });
+        recordEmailAudit({
+            category: 'azure-meter-budget',
+            source: 'alerts/email-service',
+            to: recipientsList,
+            from: process.env.ALERT_EMAIL_FROM,
+            subject,
+            transport: 'smtp',
+            status: 'failed',
+            error: err?.message || String(err),
+        });
         throw err;
     }
 }

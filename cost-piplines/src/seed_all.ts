@@ -1,9 +1,9 @@
 import 'dotenv/config';
 import assert from 'node:assert';
-import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { runChildWithCapture, startPipelineRunCapture } from './logging/auditLogger.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -202,19 +202,17 @@ async function runAuthStep(): Promise<{ skipped?: string }> {
   return {};
 }
 
-function runScriptStep(scriptPath: string, args: string[] = []): void {
+async function runScriptStep(scriptPath: string, args: string[] = []): Promise<void> {
   const fullPath = path.join(ROOT_DIR, scriptPath);
   if (fs.existsSync(TSX_CLI)) {
-    execFileSync(process.execPath, [TSX_CLI, fullPath, ...args], {
+    await runChildWithCapture(process.execPath, [TSX_CLI, fullPath, ...args], {
       cwd: ROOT_DIR,
-      stdio: 'inherit',
     });
     return;
   }
 
-  execFileSync('npx', ['tsx', fullPath, ...args], {
+  await runChildWithCapture('npx', ['tsx', fullPath, ...args], {
     cwd: ROOT_DIR,
-    stdio: 'inherit',
   });
 }
 
@@ -293,12 +291,11 @@ async function main(): Promise<void> {
 
   const plan = buildSeedPlan(opts);
 
-  console.log('============================================================');
-  console.log(`🌱 Unified Seeder (${opts.dryRun ? 'DRY RUN' : 'LIVE EXECUTION'})`);
-  console.log(`📅 Started: ${new Date().toISOString()}`);
-  console.log('============================================================');
-
   if (opts.dryRun) {
+    console.log('============================================================');
+    console.log('🌱 Unified Seeder (DRY RUN)');
+    console.log(`📅 Started: ${new Date().toISOString()}`);
+    console.log('============================================================');
     plan.forEach((step, idx) => {
       const missing = getMissingEnv(step.requiredEnv);
       const cmd =
@@ -313,70 +310,94 @@ async function main(): Promise<void> {
     return;
   }
 
+  const runCapture = startPipelineRunCapture('daily-data-refresh', {
+    command: `src/seed_all.ts ${process.argv.slice(2).join(' ')}`.trim(),
+  });
+
   const runStart = Date.now();
   const results: StepResult[] = [];
   let hasFailure = false;
+  let exitCode = 0;
 
-  for (let i = 0; i < plan.length; i++) {
-    const step = plan[i];
-    const stepStart = Date.now();
-    console.log(`\n▶ [${i + 1}/${plan.length}] ${step.label}...`);
+  try {
+    console.log('============================================================');
+    console.log('🌱 Unified Seeder (LIVE EXECUTION)');
+    console.log(`📅 Started: ${new Date().toISOString()}`);
+    console.log('============================================================');
 
-    const missing = getMissingEnv(step.requiredEnv);
-    if (missing.length > 0) {
-      const msg = `Missing required env: ${missing.join(', ')}`;
-      console.error(`❌ [${step.id}] ${msg}`);
-      results.push({
-        label: step.label,
-        status: 'FAIL',
-        durationSec: '0.0',
-        detail: msg,
-      });
-      hasFailure = true;
-      if (!opts.continueOnError) break;
-      continue;
-    }
+    for (let i = 0; i < plan.length; i++) {
+      const step = plan[i];
+      const stepStart = Date.now();
+      console.log(`\n▶ [${i + 1}/${plan.length}] ${step.label}...`);
 
-    try {
-      if (step.kind === 'auth') {
-        const res = await runAuthStep();
-        if (res.skipped) {
-          console.log(`⏭️  Skipped: ${res.skipped}`);
-          results.push({
-            label: step.label,
-            status: 'SKIPPED',
-            durationSec: ((Date.now() - stepStart) / 1000).toFixed(1),
-            detail: res.skipped,
-          });
-          continue;
-        }
-      } else if (step.scriptPath) {
-        runScriptStep(step.scriptPath, step.args);
+      const missing = getMissingEnv(step.requiredEnv);
+      if (missing.length > 0) {
+        const msg = `Missing required env: ${missing.join(', ')}`;
+        console.error(`❌ [${step.id}] ${msg}`);
+        results.push({
+          label: step.label,
+          status: 'FAIL',
+          durationSec: '0.0',
+          detail: msg,
+        });
+        hasFailure = true;
+        if (!opts.continueOnError) break;
+        continue;
       }
 
-      results.push({
-        label: step.label,
-        status: 'PASS',
-        durationSec: ((Date.now() - stepStart) / 1000).toFixed(1),
-      });
-    } catch (err: any) {
-      const msg = err?.message || String(err);
-      console.error(`❌ [${step.id}] Failed: ${msg}`);
-      results.push({
-        label: step.label,
-        status: 'FAIL',
-        durationSec: ((Date.now() - stepStart) / 1000).toFixed(1),
-        detail: msg.split('\n')[0],
-      });
-      hasFailure = true;
-      if (!opts.continueOnError) break;
+      try {
+        if (step.kind === 'auth') {
+          const res = await runAuthStep();
+          if (res.skipped) {
+            console.log(`⏭️  Skipped: ${res.skipped}`);
+            results.push({
+              label: step.label,
+              status: 'SKIPPED',
+              durationSec: ((Date.now() - stepStart) / 1000).toFixed(1),
+              detail: res.skipped,
+            });
+            continue;
+          }
+        } else if (step.scriptPath) {
+          await runScriptStep(step.scriptPath, step.args);
+        }
+
+        results.push({
+          label: step.label,
+          status: 'PASS',
+          durationSec: ((Date.now() - stepStart) / 1000).toFixed(1),
+        });
+      } catch (err: any) {
+        const msg = err?.message || String(err);
+        console.error(`❌ [${step.id}] Failed: ${msg}`);
+        results.push({
+          label: step.label,
+          status: 'FAIL',
+          durationSec: ((Date.now() - stepStart) / 1000).toFixed(1),
+          detail: msg.split('\n')[0],
+        });
+        hasFailure = true;
+        if (!opts.continueOnError) break;
+      }
     }
+
+    printSummary(results, ((Date.now() - runStart) / 1000).toFixed(1));
+
+    if (hasFailure) {
+      exitCode = 1;
+    }
+  } catch (err: any) {
+    exitCode = 1;
+    console.error('❌ Fatal seeder error:', err?.message || err);
+  } finally {
+    runCapture.finish({
+      exitCode,
+      steps: results,
+    });
   }
 
-  printSummary(results, ((Date.now() - runStart) / 1000).toFixed(1));
-
-  if (hasFailure) {
-    process.exit(1);
+  if (exitCode !== 0) {
+    process.exit(exitCode);
   }
 }
 

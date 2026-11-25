@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import nodemailer from 'nodemailer';
 import { ClientSecretCredential } from '@azure/identity';
+import { recordEmailAudit } from './logging/auditLogger.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -419,6 +420,8 @@ Generated: ${new Date().toLocaleString('en-US', { dateStyle: 'long', timeStyle: 
   console.log(`   - Attachments: ${attachments.length > 0 ? attachments.map((a) => a.filename).join(', ') : 'None (In-body report)'}`);
   console.log(`   - Local Preview: ${previewPath}`);
 
+  const attachmentNames = attachments.map((a) => a.filename);
+
   if (flags.dryRun || (!useGraph && !smtpReady)) {
     console.log(`\n⚠️ ${flags.dryRun ? 'DRY RUN' : 'No email transport configured'} (transport: ${transport})`);
     console.log(`   From:    ${useGraph ? senderEmail : smtpFrom}`);
@@ -430,14 +433,50 @@ Generated: ${new Date().toLocaleString('en-US', { dateStyle: 'long', timeStyle: 
         '💡 Set SENDER_EMAIL + AZURE_TENANT_ID/CLIENT_ID/CLIENT_SECRET for Microsoft Graph, or SMTP_HOST/SMTP_USER/SMTP_PASSWORD for SMTP.'
       );
     }
+    recordEmailAudit({
+      category: 'executive-report',
+      source: 'send_manager_report_email',
+      to: recipients,
+      from: useGraph ? senderEmail : smtpFrom,
+      subject,
+      transport: 'preview',
+      status: flags.dryRun ? 'dry-run' : 'skipped',
+      attachments: attachmentNames,
+      ...(!flags.dryRun ? { error: 'No email transport configured' } : {}),
+    });
     process.exit(0);
   }
 
   if (useGraph) {
     console.log(`📧 Sending as ${senderEmail} via Microsoft Graph to ${recipients.join(', ')}...`);
-    await sendViaGraph(senderEmail as string, recipients, subject, consolidatedHtml, attachments);
-    console.log('✅ Email accepted by Microsoft Graph (202). It will appear in the sender\'s Sent Items.');
-    return;
+    try {
+      await sendViaGraph(senderEmail as string, recipients, subject, consolidatedHtml, attachments);
+      recordEmailAudit({
+        category: 'executive-report',
+        source: 'send_manager_report_email',
+        to: recipients,
+        from: senderEmail,
+        subject,
+        transport: 'graph',
+        status: 'sent',
+        attachments: attachmentNames,
+      });
+      console.log('✅ Email accepted by Microsoft Graph (202). It will appear in the sender\'s Sent Items.');
+      return;
+    } catch (err: any) {
+      recordEmailAudit({
+        category: 'executive-report',
+        source: 'send_manager_report_email',
+        to: recipients,
+        from: senderEmail,
+        subject,
+        transport: 'graph',
+        status: 'failed',
+        attachments: attachmentNames,
+        error: err?.message || String(err),
+      });
+      throw err;
+    }
   }
 
   console.log(`📧 Sending email via ${smtpHost}:${smtpPort} to ${recipients.join(', ')}...`);
@@ -452,19 +491,45 @@ Generated: ${new Date().toLocaleString('en-US', { dateStyle: 'long', timeStyle: 
     },
   });
 
-  const info = await transporter.sendMail({
-    from: smtpFrom,
-    to: recipients,
-    subject,
-    text: textBody,
-    html: consolidatedHtml,
-    attachments: attachments.map((a) => ({
-      filename: a.filename,
-      path: a.path,
-    })),
-  });
+  try {
+    const info = await transporter.sendMail({
+      from: smtpFrom,
+      to: recipients,
+      subject,
+      text: textBody,
+      html: consolidatedHtml,
+      attachments: attachments.map((a) => ({
+        filename: a.filename,
+        path: a.path,
+      })),
+    });
 
-  console.log(`✅ Email successfully sent! Message ID: ${info.messageId}`);
+    recordEmailAudit({
+      category: 'executive-report',
+      source: 'send_manager_report_email',
+      to: recipients,
+      from: smtpFrom,
+      subject,
+      transport: 'smtp',
+      status: 'sent',
+      attachments: attachmentNames,
+      messageId: info.messageId,
+    });
+    console.log(`✅ Email successfully sent! Message ID: ${info.messageId}`);
+  } catch (err: any) {
+    recordEmailAudit({
+      category: 'executive-report',
+      source: 'send_manager_report_email',
+      to: recipients,
+      from: smtpFrom,
+      subject,
+      transport: 'smtp',
+      status: 'failed',
+      attachments: attachmentNames,
+      error: err?.message || String(err),
+    });
+    throw err;
+  }
 }
 
 main().catch((err) => {

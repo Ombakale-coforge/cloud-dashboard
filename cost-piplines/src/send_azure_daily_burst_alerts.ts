@@ -21,6 +21,7 @@ import {
   DEFAULT_BURST_CONFIG,
   evaluateAndNotifyAzureDailyBursts,
 } from './server/services/azureDailyBurstService.ts';
+import { startPipelineRunCapture } from './logging/auditLogger.ts';
 
 function readFlagValue(args: string[], prefix: string): string | undefined {
   const inline = args.find((a) => a.startsWith(`${prefix}=`));
@@ -60,9 +61,16 @@ function parseCliArgs() {
 }
 
 async function main() {
+  const runCapture = startPipelineRunCapture('azure-daily-cost-burst-alerts', {
+    command: `src/send_azure_daily_burst_alerts.ts ${process.argv.slice(2).join(' ')}`.trim(),
+  });
   let exitCode = 0;
+  let dryRun = false;
+  let summaryNote: string | undefined;
+
   try {
     const opts = parseCliArgs();
+    dryRun = opts.dryRun;
     const threshold = opts.thresholdPercent ?? DEFAULT_BURST_CONFIG.thresholdPercent;
     console.log(
       `[AzureDailyBurst] Started (${new Date().toISOString()}) | date=${opts.date || 'auto-latest'} | ` +
@@ -90,6 +98,10 @@ async function main() {
       );
     }
 
+    summaryNote =
+      `evaluated=${summary.subscriptionsEvaluated}, bursts=${summary.burstsDetected}, ` +
+      `sent=${summary.emailsSent}, skippedAlreadySent=${summary.skippedAlreadySent}, ` +
+      `skippedNoRecipients=${summary.skippedNoRecipients}, failed=${summary.failedCount}`;
     console.log(
       `[AzureDailyBurst] Summary: sent=${summary.emailsSent}, skippedAlreadySent=${summary.skippedAlreadySent}, ` +
         `skippedNoRecipients=${summary.skippedNoRecipients}, failed=${summary.failedCount}`
@@ -102,6 +114,7 @@ async function main() {
     console.error('[AzureDailyBurst] Fatal error:', err?.message || err);
     exitCode = 1;
   } finally {
+    runCapture.finish({ exitCode, dryRun, summaryNote });
     if (typeof prisma?.$disconnect === 'function') {
       await prisma.$disconnect().catch(() => {});
     }

@@ -7,6 +7,7 @@ import { CostExplorerClient, GetCostAndUsageCommand } from '@aws-sdk/client-cost
 import { prisma } from '../db.ts';
 import { ensureAlertTablesExist } from '../db-alert-tables.ts';
 import { DEMO_GCP_PROJECTS, getBigQueryClient, resolveBillingTable } from '../routes/gcp.ts';
+import { recordEmailAudit } from '../../logging/auditLogger.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1588,6 +1589,9 @@ export async function deliverHtmlEmail(options: {
   text: string;
   previewFilename: string;
   dryRun?: boolean;
+  attachments?: Array<{ filename: string; content: Buffer | string; contentType?: string }>;
+  auditCategory?: string;
+  auditSource?: string;
 }): Promise<EmailDeliveryResult> {
   const recipients = normalizeEmailList(options.recipients);
   const cc = normalizeEmailList(options.cc || []).filter((e) => !recipients.includes(e));
@@ -1595,11 +1599,25 @@ export async function deliverHtmlEmail(options: {
     throw new Error('At least one valid recipient email address is required.');
   }
 
+  const auditCategory = options.auditCategory || 'budget-email';
+  const auditSource = options.auditSource || 'accountBudgetService';
+  const attachmentNames = options.attachments?.map((a) => a.filename);
+
   if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
   const previewPath = path.join(LOG_DIR, options.previewFilename);
   fs.writeFileSync(previewPath, options.html, 'utf-8');
 
   if (options.dryRun) {
+    recordEmailAudit({
+      category: auditCategory,
+      source: auditSource,
+      to: recipients,
+      cc,
+      subject: options.subject,
+      transport: 'preview',
+      status: 'dry-run',
+      attachments: attachmentNames,
+    });
     return {
       sent: false,
       previewed: true,
@@ -1630,6 +1648,14 @@ export async function deliverHtmlEmail(options: {
       if (cc.length > 0) {
         graphMessage.ccRecipients = cc.map((address) => ({ emailAddress: { address } }));
       }
+      if (options.attachments && options.attachments.length > 0) {
+        graphMessage.attachments = options.attachments.map((a) => ({
+          '@odata.type': '#microsoft.graph.fileAttachment',
+          name: a.filename,
+          contentType: a.contentType || 'application/octet-stream',
+          contentBytes: (Buffer.isBuffer(a.content) ? a.content : Buffer.from(a.content, 'utf8')).toString('base64'),
+        }));
+      }
       const res = await fetch(
         `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(senderEmail)}/sendMail`,
         {
@@ -1646,6 +1672,17 @@ export async function deliverHtmlEmail(options: {
       );
 
       if (res.status === 202) {
+        recordEmailAudit({
+          category: auditCategory,
+          source: auditSource,
+          to: recipients,
+          cc,
+          from: senderEmail,
+          subject: options.subject,
+          transport: 'graph',
+          status: 'sent',
+          attachments: attachmentNames,
+        });
         return {
           sent: true,
           previewed: true,
@@ -1689,8 +1726,29 @@ export async function deliverHtmlEmail(options: {
         subject: options.subject,
         text: options.text,
         html: options.html,
+        ...(options.attachments && options.attachments.length > 0
+          ? {
+              attachments: options.attachments.map((a) => ({
+                filename: a.filename,
+                content: a.content,
+                contentType: a.contentType,
+              })),
+            }
+          : {}),
       });
 
+      recordEmailAudit({
+        category: auditCategory,
+        source: auditSource,
+        to: recipients,
+        cc,
+        from: smtpFrom,
+        subject: options.subject,
+        transport: 'smtp',
+        status: 'sent',
+        attachments: attachmentNames,
+        messageId: info.messageId,
+      });
       return {
         sent: true,
         previewed: true,
@@ -1706,6 +1764,20 @@ export async function deliverHtmlEmail(options: {
     }
   }
 
+  const finalError = lastError || 'No external mail transport succeeded; HTML preview generated locally.';
+  recordEmailAudit({
+    category: auditCategory,
+    source: auditSource,
+    to: recipients,
+    cc,
+    from: senderEmail || smtpFrom,
+    subject: options.subject,
+    transport: 'preview',
+    status: 'failed',
+    attachments: attachmentNames,
+    error: finalError,
+  });
+
   // 3. Fallback: Saved HTML preview only
   return {
     sent: false,
@@ -1714,7 +1786,7 @@ export async function deliverHtmlEmail(options: {
     recipients,
     subject: options.subject,
     previewPath,
-    error: lastError || 'No external mail transport succeeded; HTML preview generated locally.',
+    error: finalError,
   };
 }
 
@@ -1739,6 +1811,8 @@ export async function sendAccountUsageEmail(
     html,
     text,
     previewFilename: `account-budget-${mode}-${item.cloudProvider}-${safeId}-${Date.now()}.html`,
+    auditCategory: mode === 'threshold' ? 'budget-threshold' : 'budget-instant',
+    auditSource: 'accountBudgetService',
   });
 }
 

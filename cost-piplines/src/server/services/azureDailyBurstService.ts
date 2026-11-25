@@ -778,6 +778,8 @@ export async function evaluateAndNotifyAzureDailyBursts(options?: {
         text,
         previewFilename: `azure-daily-burst-${burst.evaluationDate}-${safeSub}-${Date.now()}.html`,
         dryRun,
+        auditCategory: 'azure-daily-burst',
+        auditSource: 'azureDailyBurstService',
       });
 
       if (!dryRun) {
