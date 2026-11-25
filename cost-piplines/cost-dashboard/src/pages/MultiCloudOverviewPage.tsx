@@ -160,6 +160,230 @@ function CoverageGauge({
   );
 }
 
+interface SpendItem {
+  name: string;
+  id?: string;
+  budgetName?: string;
+  spend: number;
+  budgetLimit?: number | null;
+}
+
+interface ExceededItem {
+  name: string;
+  id?: string;
+  spend: number;
+  budgetLimit?: number | null;
+  utilizationPct: number;
+}
+
+function TopSpendTable({
+  title,
+  items,
+  currency = "$",
+  page,
+  onPageChange,
+  emptyText = "No spending accounts found",
+}: {
+  title: string;
+  items: SpendItem[];
+  currency?: string;
+  page: number;
+  onPageChange: (p: number) => void;
+  emptyText?: string;
+}) {
+  const ITEMS_PER_PAGE = 5;
+  const totalPages = Math.max(1, Math.ceil(items.length / ITEMS_PER_PAGE));
+  const paginated = items.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE);
+
+  return (
+    <div className="flex flex-col min-h-0 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-800/20 p-3.5 overflow-hidden">
+      <div className="shrink-0 flex items-center justify-between mb-2 gap-2">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <TrendingUp className="h-4 w-4 text-blue-500 shrink-0" />
+          <span className="text-xs font-bold text-slate-900 dark:text-white truncate">
+            {title}
+          </span>
+        </div>
+        <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 shrink-0">
+          Top {items.length}
+        </span>
+      </div>
+
+      <div className="flex-1 min-h-0 flex flex-col justify-start divide-y divide-slate-200/60 dark:divide-slate-800 overflow-hidden">
+        {paginated.length > 0 ? (
+          paginated.map((acc, i) => (
+            <div key={i} className="py-1.5 flex items-center justify-between gap-2">
+              <div className="min-w-0 flex-1">
+                <div
+                  className="text-xs font-semibold text-slate-800 dark:text-slate-100 truncate leading-tight"
+                  title={acc.name}
+                >
+                  {acc.name}
+                </div>
+                <div className="text-[10px] text-slate-400 font-mono leading-tight mt-0.5 truncate">
+                  {acc.id || acc.budgetName || "—"}
+                </div>
+              </div>
+              <div className="text-right shrink-0">
+                <div className="text-xs font-bold text-slate-900 dark:text-white leading-tight">
+                  {currency}{Number(acc.spend || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                </div>
+                <div className="text-[10px] text-slate-400 mt-0.5">
+                  {acc.budgetLimit && Number(acc.budgetLimit) > 0
+                    ? `Limit: ${currency}${Number(acc.budgetLimit).toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+                    : <span className="text-amber-600 dark:text-amber-400 font-medium">No budget</span>}
+                </div>
+              </div>
+            </div>
+          ))
+        ) : (
+          <div className="flex-1 flex items-center justify-center text-xs text-slate-400 py-6">
+            {emptyText}
+          </div>
+        )}
+      </div>
+
+      {/* Pagination Footer */}
+      <div className="shrink-0 pt-2 mt-auto border-t border-slate-200/60 dark:border-slate-800 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
+        <span>
+          Page {page} of {totalPages}
+        </span>
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => onPageChange(Math.max(1, page - 1))}
+            disabled={page <= 1}
+            className="p-1 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 transition-colors cursor-pointer disabled:cursor-default"
+            title="Previous Page"
+          >
+            <ChevronLeft className="h-3.5 w-3.5" />
+          </button>
+          <span className="font-semibold text-slate-700 dark:text-slate-300 px-1">
+            {page} / {totalPages}
+          </span>
+          <button
+            type="button"
+            onClick={() => onPageChange(Math.min(totalPages, page + 1))}
+            disabled={page >= totalPages}
+            className="p-1 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 transition-colors cursor-pointer disabled:cursor-default"
+            title="Next Page"
+          >
+            <ChevronRight className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TopExceededTable({
+  title,
+  items,
+  currency = "$",
+  page,
+  onPageChange,
+  emptyText = "No accounts exceeding budget limits",
+}: {
+  title: string;
+  items: ExceededItem[];
+  currency?: string;
+  page: number;
+  onPageChange: (p: number) => void;
+  emptyText?: string;
+}) {
+  const ITEMS_PER_PAGE = 5;
+  const totalPages = Math.max(1, Math.ceil(items.length / ITEMS_PER_PAGE));
+  const paginated = items.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE);
+
+  return (
+    <div className="flex flex-col min-h-0 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-800/20 p-3.5 overflow-hidden">
+      <div className="shrink-0 flex items-center justify-between mb-2 gap-2">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <AlertCircle className="h-4 w-4 text-rose-500 shrink-0" />
+          <span className="text-xs font-bold text-slate-900 dark:text-white truncate">
+            {title}
+          </span>
+        </div>
+        <Badge variant="outline" className="text-[10px] font-semibold text-rose-600 bg-rose-50 dark:bg-rose-950/40 border-rose-300 dark:border-rose-800 shrink-0">
+          {items.length} exceeded
+        </Badge>
+      </div>
+
+      <div className="flex-1 min-h-0 flex flex-col justify-start divide-y divide-slate-200/60 dark:divide-slate-800 overflow-hidden">
+        {paginated.length > 0 ? (
+          paginated.map((b, i) => {
+            const limit = Number(b.budgetLimit || 0);
+            const used = Number(b.spend || 0);
+            const pct = b.utilizationPct;
+
+            return (
+              <div key={i} className="py-1.5 flex flex-col justify-center space-y-1">
+                <div className="flex items-center justify-between gap-2">
+                  <span
+                    className="text-xs font-semibold text-slate-800 dark:text-slate-100 truncate leading-tight"
+                    title={b.name}
+                  >
+                    {b.name}
+                  </span>
+                  <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 shrink-0 leading-tight">
+                    {currency}{used.toLocaleString(undefined, { maximumFractionDigits: 0 })} / {currency}{limit.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 h-1.5 bg-slate-200/70 dark:bg-slate-700 rounded-full overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-rose-500"
+                      style={{ width: `${Math.min(100, pct)}%` }}
+                    />
+                  </div>
+                  <span className="text-[10px] font-mono font-bold text-rose-600 dark:text-rose-400 w-10 text-right leading-none">
+                    {pct}%
+                  </span>
+                </div>
+              </div>
+            );
+          })
+        ) : (
+          <div className="flex-1 flex flex-col items-center justify-center text-xs text-emerald-600 dark:text-emerald-400 gap-1.5 py-6">
+            <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+            <span className="font-medium text-slate-600 dark:text-slate-300">{emptyText}</span>
+          </div>
+        )}
+      </div>
+
+      {/* Pagination Footer */}
+      <div className="shrink-0 pt-2 mt-auto border-t border-slate-200/60 dark:border-slate-800 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
+        <span>
+          Page {page} of {totalPages}
+        </span>
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => onPageChange(Math.max(1, page - 1))}
+            disabled={page <= 1}
+            className="p-1 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 transition-colors cursor-pointer disabled:cursor-default"
+            title="Previous Page"
+          >
+            <ChevronLeft className="h-3.5 w-3.5" />
+          </button>
+          <span className="font-semibold text-slate-700 dark:text-slate-300 px-1">
+            {page} / {totalPages}
+          </span>
+          <button
+            type="button"
+            onClick={() => onPageChange(Math.min(totalPages, page + 1))}
+            disabled={page >= totalPages}
+            className="p-1 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 transition-colors cursor-pointer disabled:cursor-default"
+            title="Next Page"
+          >
+            <ChevronRight className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function MultiCloudOverviewPage() {
   const navigate = useNavigate();
   const { user, logout, isAdmin } = useAuth();
@@ -223,6 +447,11 @@ export function MultiCloudOverviewPage() {
     return sorted.length > 0 ? sorted[sorted.length - 1] : "";
   }, [azureMonthly]);
 
+  // Governance Summary States
+  const [awsSummary, setAwsSummary] = useState<GovernanceSummary | null>(null);
+  const [azureSummary, setAzureSummary] = useState<AzureGovernanceSummary | null>(null);
+  const [gcpSummary, setGcpSummary] = useState<any>(null);
+
   const formatMonthName = (mStr: string) => {
     if (!mStr) return "Current";
     const parts = mStr.split("-");
@@ -233,11 +462,12 @@ export function MultiCloudOverviewPage() {
   };
 
   const awsMonthLabel = formatMonthName(awsLatestMonth);
+  const azureMonthLabel = formatMonthName(azureLatestMonth) || awsMonthLabel;
+  const gcpMonthLabel = gcpSummary?.monthLabel || awsMonthLabel || "November";
 
   // =========================================================================
   // AWS Governance Data
   // =========================================================================
-  const [awsSummary, setAwsSummary] = useState<GovernanceSummary | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -280,91 +510,83 @@ export function MultiCloudOverviewPage() {
     : `${awsBasePath}/budgets_overview.csv`;
   const { data: awsBudgets } = useCsv<BudgetOverviewRow>(budgetsPath);
 
-  const awsListRef = useRef<HTMLDivElement | null>(null);
-  const azureListRef = useRef<HTMLDivElement | null>(null);
-  const [awsItemsPerPage, setAwsItemsPerPage] = useState(5);
-  const [azureItemsPerPage, setAzureItemsPerPage] = useState(5);
-
-  const [pageAwsUnbudgeted, setPageAwsUnbudgeted] = useState(1);
-  const [pageAwsBudgets, setPageAwsBudgets] = useState(1);
-  const [pageAzureBudgets, setPageAzureBudgets] = useState(1);
-
-  // Dynamically compute how many rows fit cleanly whenever window/card resizes or zooms
-  useEffect(() => {
-    const ROW_HEIGHT = 50; // comfortable height in px per row without overlapping
-    const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        const height = entry.contentRect.height;
-        if (height > 0) {
-          const fitCount = Math.max(3, Math.floor(height / ROW_HEIGHT));
-          if (entry.target === awsListRef.current) {
-            setAwsItemsPerPage(fitCount);
-          } else if (entry.target === azureListRef.current) {
-            setAzureItemsPerPage(fitCount);
-          }
-        }
-      }
-    });
-
-    if (awsListRef.current) observer.observe(awsListRef.current);
-    if (azureListRef.current) observer.observe(azureListRef.current);
-
-    return () => observer.disconnect();
-  }, []);
+  const [pageAwsSpend, setPageAwsSpend] = useState(1);
+  const [pageAwsExceeded, setPageAwsExceeded] = useState(1);
+  const [pageAzureSpend, setPageAzureSpend] = useState(1);
+  const [pageAzureExceeded, setPageAzureExceeded] = useState(1);
+  const [pageGcpSpend, setPageGcpSpend] = useState(1);
+  const [pageGcpExceeded, setPageGcpExceeded] = useState(1);
 
   useEffect(() => {
-    setPageAwsUnbudgeted(1);
-    setPageAwsBudgets(1);
+    setPageAwsSpend(1);
+    setPageAwsExceeded(1);
   }, [selectedAwsAccount]);
 
-  const validAwsUnbudgeted = useMemo(
-    () => (awsUnbudgeted || []).filter((a) => a && a["Account Name"]),
-    [awsUnbudgeted]
-  );
-  const totalPagesAwsUnbudgeted = Math.max(
-    1,
-    Math.ceil(validAwsUnbudgeted.length / awsItemsPerPage)
-  );
-  useEffect(() => {
-    setPageAwsUnbudgeted((p) => Math.min(p, totalPagesAwsUnbudgeted));
-  }, [totalPagesAwsUnbudgeted]);
+  // Top 10 Accounts for AWS
+  const top10AwsSpend: SpendItem[] = useMemo(() => {
+    const list: SpendItem[] = [];
+    const seen = new Set<string>();
 
-  const paginatedAwsUnbudgeted = useMemo(
-    () =>
-      validAwsUnbudgeted.slice(
-        (pageAwsUnbudgeted - 1) * awsItemsPerPage,
-        pageAwsUnbudgeted * awsItemsPerPage
-      ),
-    [validAwsUnbudgeted, pageAwsUnbudgeted, awsItemsPerPage]
-  );
+    (awsBudgets || []).forEach((b) => {
+      if (!b || !b["Budget Name"]) return;
+      const name = b["Budget Name"];
+      const id = b["Account ID"] || "";
+      const spend = Number(b["Current Used"] ?? b["Current Spend"] ?? 0);
+      const limit = Number(b.Limit ?? b["Budget Limit"] ?? 0);
+      seen.add(id || name);
+      list.push({
+        name,
+        id,
+        spend,
+        budgetLimit: limit > 0 ? limit : null,
+      });
+    });
 
-  const validAwsBudgets = useMemo(
-    () => (awsBudgets || []).filter((b) => b && b["Budget Name"]),
-    [awsBudgets]
-  );
-  const totalPagesAwsBudgets = Math.max(
-    1,
-    Math.ceil(validAwsBudgets.length / awsItemsPerPage)
-  );
-  useEffect(() => {
-    setPageAwsBudgets((p) => Math.min(p, totalPagesAwsBudgets));
-  }, [totalPagesAwsBudgets]);
+    (awsUnbudgeted || []).forEach((u) => {
+      if (!u || !u["Account Name"]) return;
+      const name = u["Account Name"];
+      const id = u["Account ID"] || "";
+      if (seen.has(id || name)) return;
+      const spend = Number(u["Current Month Spend"] || 0);
+      list.push({
+        name,
+        id,
+        spend,
+        budgetLimit: null,
+      });
+    });
 
-  const paginatedAwsBudgets = useMemo(
-    () =>
-      validAwsBudgets.slice(
-        (pageAwsBudgets - 1) * awsItemsPerPage,
-        pageAwsBudgets * awsItemsPerPage
-      ),
-    [validAwsBudgets, pageAwsBudgets, awsItemsPerPage]
-  );
+    return list.sort((a, b) => b.spend - a.spend).slice(0, 10);
+  }, [awsBudgets, awsUnbudgeted]);
+
+  const top10AwsExceeded: ExceededItem[] = useMemo(() => {
+    const list: ExceededItem[] = [];
+    (awsBudgets || []).forEach((b) => {
+      if (!b || !b["Budget Name"]) return;
+      const name = b["Budget Name"];
+      const id = b["Account ID"] || "";
+      const limit = Number(b.Limit ?? b["Budget Limit"] ?? 0);
+      const spend = Number(b["Current Used"] ?? b["Current Spend"] ?? 0);
+      const pct = limit > 0 ? Math.round((spend / limit) * 100) : 0;
+      const isExceeded = b["Threshold Status"]?.toLowerCase().includes("exceeded") || pct >= 100;
+      if (isExceeded) {
+        list.push({
+          name,
+          id,
+          spend,
+          budgetLimit: limit,
+          utilizationPct: pct,
+        });
+      }
+    });
+    return list.sort((a, b) => b.spend - a.spend).slice(0, 10);
+  }, [awsBudgets]);
 
   // =========================================================================
   // Azure Governance Data
   // =========================================================================
-  const [azureSummary, setAzureSummary] = useState<AzureGovernanceSummary | null>(null);
   const [azureBudgets, setAzureBudgets] = useState<AzureBudgetRow[]>([]);
-  const [azureUnbudgetedCount, setAzureUnbudgetedCount] = useState(0);
+  const [azureUnbudgeted, setAzureUnbudgeted] = useState<any[]>([]);
   const [syncingAzure, setSyncingAzure] = useState(false);
 
   const loadAzureData = () => {
@@ -385,7 +607,7 @@ export function MultiCloudOverviewPage() {
       .then(([summaryData, budgetsData, unbudgetedData]) => {
         if (summaryData) setAzureSummary(summaryData);
         if (Array.isArray(budgetsData)) setAzureBudgets(budgetsData);
-        if (Array.isArray(unbudgetedData)) setAzureUnbudgetedCount(unbudgetedData.length);
+        if (Array.isArray(unbudgetedData)) setAzureUnbudgeted(unbudgetedData);
       })
       .catch(() => {});
   };
@@ -394,22 +616,82 @@ export function MultiCloudOverviewPage() {
     loadAzureData();
   }, [azureLatestMonth]);
 
+  const top10AzureSpend: SpendItem[] = useMemo(() => {
+    const list: SpendItem[] = [];
+    const seen = new Set<string>();
+
+    (azureBudgets || []).forEach((b) => {
+      if (!b) return;
+      const name = b["Linked Account"] || b["Account ID"] || "Subscription";
+      const id = b["Account ID"] || "";
+      const spend = Number(b["Actual Spend"] || 0);
+      const limit = Number(b["Budget Limit"] || 0);
+      seen.add(id || name);
+      list.push({
+        name,
+        id,
+        budgetName: b["Budget Name"] || "",
+        spend,
+        budgetLimit: limit > 0 ? limit : null,
+      });
+    });
+
+    (azureUnbudgeted || []).forEach((u) => {
+      if (!u) return;
+      const name = u["Linked Account"] || u["Account ID"] || "Subscription";
+      const id = u["Account ID"] || "";
+      if (seen.has(id || name)) return;
+      const spend = Number(u.Cost || u["Actual Spend"] || 0);
+      list.push({
+        name,
+        id,
+        spend,
+        budgetLimit: null,
+      });
+    });
+
+    return list.sort((a, b) => b.spend - a.spend).slice(0, 10);
+  }, [azureBudgets, azureUnbudgeted]);
+
+  const top10AzureExceeded: ExceededItem[] = useMemo(() => {
+    const list: ExceededItem[] = [];
+    (azureBudgets || []).forEach((b) => {
+      if (!b) return;
+      const name = b["Linked Account"] || b["Account ID"] || "Subscription";
+      const id = b["Account ID"] || "";
+      const spend = Number(b["Actual Spend"] || 0);
+      const limit = Number(b["Budget Limit"] || 0);
+      const pct = Number(b["% Utilized"] || (limit > 0 ? Math.round((spend / limit) * 100) : 0));
+      const isExceeded = b.Status === "Exceeded" || pct >= 100;
+      if (isExceeded) {
+        list.push({
+          name,
+          id,
+          spend,
+          budgetLimit: limit,
+          utilizationPct: pct,
+        });
+      }
+    });
+    return list.sort((a, b) => b.spend - a.spend).slice(0, 10);
+  }, [azureBudgets]);
+
   // =========================================================================
   // GCP Governance Data
   // =========================================================================
-  const [gcpSummary, setGcpSummary] = useState<any>(null);
   const [gcpBudgets, setGcpBudgets] = useState<any[]>([]);
-  const [pageGcpBudgets, setPageGcpBudgets] = useState(1);
-  const gcpItemsPerPage = 4;
+  const [gcpProjects, setGcpProjects] = useState<any[]>([]);
 
   const loadGcpData = () => {
     Promise.all([
       fetch("/api/gcp/summary").then((r) => (r.ok ? r.json() : null)),
       fetch("/api/gcp/budgets").then((r) => (r.ok ? r.json() : [])),
+      fetch("/api/gcp/projects").then((r) => (r.ok ? r.json() : [])),
     ])
-      .then(([summaryData, budgetsData]) => {
+      .then(([summaryData, budgetsData, projectsData]) => {
         if (summaryData) setGcpSummary(summaryData);
         if (Array.isArray(budgetsData)) setGcpBudgets(budgetsData);
+        if (Array.isArray(projectsData)) setGcpProjects(projectsData);
       })
       .catch(() => {});
   };
@@ -418,19 +700,85 @@ export function MultiCloudOverviewPage() {
     loadGcpData();
   }, []);
 
-  const totalPagesGcpBudgets = Math.max(
-    1,
-    Math.ceil(gcpBudgets.length / gcpItemsPerPage)
-  );
+  const top10GcpSpend: SpendItem[] = useMemo(() => {
+    const list: SpendItem[] = [];
+    const seen = new Set<string>();
 
-  const paginatedGcpBudgets = useMemo(
-    () =>
-      gcpBudgets.slice(
-        (pageGcpBudgets - 1) * gcpItemsPerPage,
-        pageGcpBudgets * gcpItemsPerPage
-      ),
-    [gcpBudgets, pageGcpBudgets, gcpItemsPerPage]
-  );
+    (gcpProjects || []).forEach((p: any) => {
+      const name = p.name || p.projectName || p.projectId || "GCP Project";
+      const id = p.projectId || p.id || "";
+      const spend = Number(p.currentSpend || p.cost || 0);
+      const limit = Number(p.budgetLimit || 0);
+      seen.add(id || name);
+      list.push({
+        name,
+        id,
+        spend,
+        budgetLimit: limit > 0 ? limit : null,
+      });
+    });
+
+    (gcpBudgets || []).forEach((b: any) => {
+      const name = b["Linked Account"] || b.name || "GCP Project";
+      const id = b["Account ID"] || b.id || "";
+      if (seen.has(id || name)) return;
+      const spend = Number(b["Actual Spend"] || b.currentSpend || 0);
+      const limit = Number(b["Budget Limit"] || b.budgetLimit || 0);
+      list.push({
+        name,
+        id,
+        spend,
+        budgetLimit: limit > 0 ? limit : null,
+      });
+    });
+
+    return list.sort((a, b) => b.spend - a.spend).slice(0, 10);
+  }, [gcpProjects, gcpBudgets]);
+
+  const top10GcpExceeded: ExceededItem[] = useMemo(() => {
+    const list: ExceededItem[] = [];
+    const seen = new Set<string>();
+
+    (gcpProjects || []).forEach((p: any) => {
+      const name = p.name || p.projectName || p.projectId || "GCP Project";
+      const id = p.projectId || p.id || "";
+      const spend = Number(p.currentSpend || p.cost || 0);
+      const limit = Number(p.budgetLimit || 0);
+      const pct = Number(p.utilizationPct || (limit > 0 ? Math.round((spend / limit) * 100) : 0));
+      const isExceeded = p.status === "Exceeded" || pct >= 100;
+      if (isExceeded && limit > 0) {
+        seen.add(id || name);
+        list.push({
+          name,
+          id,
+          spend,
+          budgetLimit: limit,
+          utilizationPct: pct,
+        });
+      }
+    });
+
+    (gcpBudgets || []).forEach((b: any) => {
+      const name = b["Linked Account"] || b.name || "GCP Project";
+      const id = b["Account ID"] || b.id || "";
+      if (seen.has(id || name)) return;
+      const spend = Number(b["Actual Spend"] || b.currentSpend || 0);
+      const limit = Number(b["Budget Limit"] || b.budgetLimit || 0);
+      const pct = Number(b["% Utilized"] || (limit > 0 ? Math.round((spend / limit) * 100) : 0));
+      const isExceeded = b.Status === "Exceeded" || pct >= 100;
+      if (isExceeded && limit > 0) {
+        list.push({
+          name,
+          id,
+          spend,
+          budgetLimit: limit,
+          utilizationPct: pct,
+        });
+      }
+    });
+
+    return list.sort((a, b) => b.spend - a.spend).slice(0, 10);
+  }, [gcpProjects, gcpBudgets]);
 
   const handleSyncAzureBudgets = async () => {
     setSyncingAzure(true);
@@ -444,32 +792,8 @@ export function MultiCloudOverviewPage() {
     }
   };
 
-  const activeAzureBudgets = useMemo(
-    () =>
-      azureBudgets.filter(
-        (b) => b.Status !== "Permission Denied" && b.Status !== "Unbudgeted"
-      ),
-    [azureBudgets]
-  );
-  const totalPagesAzureBudgets = Math.max(
-    1,
-    Math.ceil(activeAzureBudgets.length / azureItemsPerPage)
-  );
-  useEffect(() => {
-    setPageAzureBudgets((p) => Math.min(p, totalPagesAzureBudgets));
-  }, [totalPagesAzureBudgets]);
-
-  const paginatedAzureBudgets = useMemo(
-    () =>
-      activeAzureBudgets.slice(
-        (pageAzureBudgets - 1) * azureItemsPerPage,
-        pageAzureBudgets * azureItemsPerPage
-      ),
-    [activeAzureBudgets, pageAzureBudgets, azureItemsPerPage]
-  );
-
   const azureTotalAccounts =
-    azureSummary?.totalAccounts || azureBudgets.length || azureUnbudgetedCount || 0;
+    azureSummary?.totalAccounts || azureBudgets.length || azureUnbudgeted.length || 0;
   const azureBudgetedAccounts =
     azureSummary?.budgetedAccounts ||
     azureBudgets.filter(
@@ -575,10 +899,11 @@ export function MultiCloudOverviewPage() {
         <main className="flex-1 p-4 sm:p-5 space-y-5">
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
           {/* =============================================================== */}
-          {/* LEFT PORTAL CARD: AWS ORGANIZATION & BUDGET GOVERNANCE          */}
+          {/* =============================================================== */}
+          {/* LEFT PORTAL CARD: AWS                                           */}
           {/* =============================================================== */}
           <div className="flex flex-col min-h-[560px] rounded-2xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-hidden">
-            {/* Portal Top Banner: 2-Row Non-Colliding Layout */}
+            {/* Portal Top Banner: 2-Row Layout */}
             <div className="shrink-0 px-4 py-3 border-b border-slate-100 dark:border-slate-800 bg-gradient-to-r from-indigo-50/60 via-white to-amber-50/40 dark:from-indigo-950/30 dark:via-slate-900 dark:to-slate-900 flex flex-col gap-2.5">
               {/* Row 1: Brand & Primary Action */}
               <div className="flex items-center justify-between gap-2">
@@ -588,7 +913,7 @@ export function MultiCloudOverviewPage() {
                   </div>
                   <div className="flex items-center gap-2 min-w-0">
                     <h2 className="text-sm font-bold text-slate-900 dark:text-white truncate">
-                      AWS Governance
+                      AWS
                     </h2>
                     <Badge
                       variant="outline"
@@ -610,48 +935,41 @@ export function MultiCloudOverviewPage() {
                 </button>
               </div>
 
-              {/* Row 2: Subtitle & Account Controls */}
-              <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
-                <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate max-w-[200px] sm:max-w-none">
-                  Organization inventory &amp; budgets
-                </p>
+              {/* Row 2: Account Controls */}
+              <div className="flex items-center justify-end gap-1.5 pt-0.5">
+                {awsAccounts.length > 1 && (
+                  <div className="inline-flex items-center rounded-lg bg-slate-100 dark:bg-slate-800 p-0.5 border border-slate-200/80 dark:border-slate-700">
+                    {awsAccounts.map((acc) => {
+                      const active = acc.id === selectedAwsAccount;
+                      const label =
+                        acc.accountName?.replace(/^AWS-?/i, "") ||
+                        (acc.id === "account-2" ? "Coforge" : "Encora");
+                      return (
+                        <button
+                          key={acc.id}
+                          type="button"
+                          onClick={() => setSelectedAwsAccount(acc.id)}
+                          className={`px-2 py-0.5 text-[10px] font-semibold rounded-md transition-all cursor-pointer whitespace-nowrap ${
+                            active
+                              ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs"
+                              : "text-slate-500 hover:text-slate-900 dark:hover:text-slate-200"
+                          }`}
+                          title={acc.name}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
 
-                <div className="flex items-center gap-1.5 shrink-0">
-                  {/* AWS Account Pill Switcher */}
-                  {awsAccounts.length > 1 && (
-                    <div className="inline-flex items-center rounded-lg bg-slate-100 dark:bg-slate-800 p-0.5 border border-slate-200/80 dark:border-slate-700">
-                      {awsAccounts.map((acc) => {
-                        const active = acc.id === selectedAwsAccount;
-                        const label =
-                          acc.accountName?.replace(/^AWS-?/i, "") ||
-                          (acc.id === "account-2" ? "Coforge" : "Encora");
-                        return (
-                          <button
-                            key={acc.id}
-                            type="button"
-                            onClick={() => setSelectedAwsAccount(acc.id)}
-                            className={`px-2 py-0.5 text-[10px] font-semibold rounded-md transition-all cursor-pointer whitespace-nowrap ${
-                              active
-                                ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs"
-                                : "text-slate-500 hover:text-slate-900 dark:hover:text-slate-200"
-                            }`}
-                            title={acc.name}
-                          >
-                            {label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-
-                  <button
-                    onClick={() => navigate("/linked-accounts")}
-                    className="inline-flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1 text-[11px] font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 transition-colors cursor-pointer whitespace-nowrap"
-                  >
-                    <Layers className="w-3 h-3 text-indigo-500" />
-                    <span>Accounts</span>
-                  </button>
-                </div>
+                <button
+                  onClick={() => navigate("/linked-accounts")}
+                  className="inline-flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1 text-[11px] font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  <Layers className="w-3 h-3 text-indigo-500" />
+                  <span>Accounts</span>
+                </button>
               </div>
             </div>
 
@@ -660,370 +978,89 @@ export function MultiCloudOverviewPage() {
               {/* Visual Gauges & Key KPIs Strip */}
               <div className="shrink-0 grid grid-cols-12 gap-3">
                 {/* Gauge Card: Budget Coverage + Org Accounts */}
-                <div className="col-span-5 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 p-2.5 flex items-center gap-2.5 min-w-0">
+                <div className="col-span-12 sm:col-span-5 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 p-3 flex items-center gap-3 min-w-0">
                   <CoverageGauge
                     percentage={awsSummary?.budgetCoveragePct || 0}
                     colorClass="text-emerald-500"
-                    size={50}
+                    size={48}
                   />
                   <div className="min-w-0 flex-1 space-y-1">
-                    <div className="flex items-center justify-between gap-1">
-                      <span className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate">
-                        Coverage
-                      </span>
-                      <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 shrink-0">
-                        {awsSummary ? awsSummary.totalAccounts : "--"} Accs
-                      </span>
+                    <div className="flex items-center justify-between gap-1 text-xs font-bold text-slate-800 dark:text-slate-100">
+                      <span>Coverage</span>
+                      <span className="text-emerald-600 dark:text-emerald-400 font-bold">{awsSummary?.budgetCoveragePct || 0}%</span>
                     </div>
-
-                    {/* Budgeted vs Unbudgeted */}
-                    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] font-semibold leading-tight">
-                      <span className="text-emerald-600 dark:text-emerald-400 whitespace-nowrap">
-                        {awsSummary ? awsSummary.accountsWithBudget : "--"} budgeted
-                      </span>
-                      <span className="text-amber-600 dark:text-amber-500 whitespace-nowrap">
-                        {awsSummary ? awsSummary.accountsWithNoBudget : "--"} unbudgeted
-                      </span>
+                    <div className="text-[11px] text-slate-600 dark:text-slate-300 flex items-center justify-between">
+                      <span className="text-slate-500 dark:text-slate-400">Total accounts:</span>
+                      <strong className="font-bold text-slate-800 dark:text-slate-200">{awsSummary ? awsSummary.totalAccounts : "--"}</strong>
                     </div>
-
-                    {/* Active vs Closed */}
-                    <div className="flex items-center gap-1.5 text-[10px] text-slate-500 dark:text-slate-400 font-medium leading-tight">
-                      <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
-                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 shrink-0" />
-                        {awsSummary ? awsSummary.activeAccounts : "--"} active
-                      </span>
-                      <span className="text-slate-300 dark:text-slate-700">•</span>
-                      <span>{awsSummary ? awsSummary.suspendedAccounts : "--"} closed</span>
+                    <div className="text-[11px] text-slate-600 dark:text-slate-300 flex items-center justify-between">
+                      <span className="text-slate-500 dark:text-slate-400">Budgets defined:</span>
+                      <strong className="font-bold text-emerald-600 dark:text-emerald-400">{awsSummary ? awsSummary.accountsWithBudget : "--"}</strong>
                     </div>
-
-                    {/* New Accounts Created This Week */}
-                    <button
-                      type="button"
-                      onClick={() =>
-                        navigate(
-                          `/linked-accounts?account=${selectedAwsAccount}&filter=new-this-week`
-                        )
-                      }
-                      title={
-                        awsSummary?.currentWeekLabel
-                          ? `Week: ${awsSummary.currentWeekLabel}. Click to view new accounts.`
-                          : "Click to view accounts created this week"
-                      }
-                      className="inline-flex items-center gap-1.5 text-[10px] font-semibold text-sky-600 dark:text-sky-400 hover:text-sky-700 dark:hover:text-sky-300 transition-colors cursor-pointer group leading-tight pt-0.5"
-                    >
-                      <UserPlus className="w-3 h-3 text-sky-500 group-hover:scale-110 transition-transform" />
-                      <span>
-                        <strong className="font-bold">
-                          {awsSummary?.newAccountsCurrentWeekCount ?? 0}
-                        </strong>{" "}
-                        {awsSummary?.newAccountsCurrentWeekCount === 1
-                          ? "new account added this week"
-                          : "new accounts added this week"}
-                      </span>
-                      {Boolean(awsSummary?.newAccountsCurrentWeekCount) && (
-                        <span className="h-1.5 w-1.5 rounded-full bg-sky-500 animate-pulse" />
-                      )}
-                    </button>
                   </div>
                 </div>
 
-                {/* Spend & Limits Visual Card */}
-                <div className="col-span-7 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 p-3 flex flex-col justify-between">
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="min-w-0">
-                      <div className="text-[11px] font-medium text-slate-500 flex items-center gap-1 truncate">
-                        <TrendingUp className="w-3 h-3 text-blue-500 shrink-0" />
-                        <span className="truncate">{awsMonthLabel} Spend</span>
-                      </div>
-                      <div className="text-base xl:text-lg font-extrabold text-slate-900 dark:text-white mt-0.5 truncate">
-                        $
-                        {awsSummary
-                          ? awsSummary.activeSpendTotal.toLocaleString(undefined, {
-                              maximumFractionDigits: 0,
-                            })
-                          : "--"}
-                      </div>
+                {/* Spend & Limits Card */}
+                <div className="col-span-12 sm:col-span-7 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 p-3 flex flex-col justify-between min-w-0">
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-slate-500 dark:text-slate-400 font-medium">Total spend:</span>
+                      <span className="font-extrabold text-sm text-slate-900 dark:text-white">
+                        ${awsSummary ? awsSummary.activeSpendTotal.toLocaleString(undefined, { maximumFractionDigits: 0 }) : "--"}
+                      </span>
                     </div>
-
-                    <div className="min-w-0">
-                      <div className="text-[11px] font-medium text-slate-500 flex items-center gap-1 truncate">
-                        <Wallet className="w-3 h-3 text-purple-500 shrink-0" />
-                        <span className="truncate">Budget Limits</span>
-                      </div>
-                      <div className="text-base xl:text-lg font-extrabold text-slate-900 dark:text-white mt-0.5 truncate">
-                        $
-                        {awsSummary
-                          ? awsSummary.sumBudgetLimits.toLocaleString(undefined, {
-                              maximumFractionDigits: 0,
-                            })
-                          : "--"}
-                      </div>
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-slate-500 dark:text-slate-400 font-medium">Total budget:</span>
+                      <span className="font-extrabold text-sm text-slate-900 dark:text-white">
+                        ${awsSummary ? awsSummary.sumBudgetLimits.toLocaleString(undefined, { maximumFractionDigits: 0 }) : "--"}
+                      </span>
                     </div>
                   </div>
 
-                  {/* Suspended Leaks notice */}
-                  <div className="mt-1 flex items-center justify-between text-[11px] bg-amber-500/10 dark:bg-amber-500/15 border border-amber-500/20 px-2 py-0.5 rounded-md">
-                    <span className="text-amber-700 dark:text-amber-400 font-medium flex items-center gap-1 truncate">
-                      <AlertTriangle className="w-3 h-3 shrink-0 text-amber-500" />
-                      <span className="truncate">Suspended Leaks</span>
-                    </span>
-                    <span className="font-bold text-amber-700 dark:text-amber-300 whitespace-nowrap ml-1">
-                      {awsSummary ? awsSummary.suspendedAccountsChargingCount : 0}{" "}
-                      <span className="text-rose-600 dark:text-rose-400 font-semibold">
-                        (${awsSummary ? awsSummary.suspendedAccountsSpendTotal.toLocaleString(undefined, { maximumFractionDigits: 0 }) : "0"})
-                      </span>
-                    </span>
-                  </div>
-
-                  {/* Segmented Spend Bar: Under Budget vs Unbudgeted */}
-                  <div className="mt-1.5 pt-1.5 border-t border-slate-200/60 dark:border-slate-700/60">
-                    <div className="flex items-center justify-between text-[11px] mb-1 gap-2">
-                      <span className="text-emerald-600 dark:text-emerald-400 font-semibold truncate">
-                        $
-                        {awsSummary
-                          ? awsSummary.spendUnderBudget.toLocaleString(undefined, {
-                              maximumFractionDigits: 0,
-                            })
-                          : 0}{" "}
-                        under budget
-                      </span>
-                      <span className="text-rose-600 dark:text-rose-400 font-semibold truncate">
-                        $
-                        {awsSummary
-                          ? awsSummary.spendWithNoBudget.toLocaleString(undefined, {
-                              maximumFractionDigits: 0,
-                            })
-                          : 0}{" "}
-                        unbudgeted ({awsSummary ? `${awsSummary.shareSpendUncoveredPct}%` : "0%"})
+                  <div className="mt-2 pt-1.5 border-t border-slate-200/60 dark:border-slate-700/60">
+                    <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400 mb-1">
+                      <span>{awsSummary && awsSummary.sumBudgetLimits > 0 ? Math.round((awsSummary.activeSpendTotal / awsSummary.sumBudgetLimits) * 100) : 0}% of budget utilized</span>
+                      <span className={awsSummary && awsSummary.activeSpendTotal > awsSummary.sumBudgetLimits ? "text-rose-600 font-semibold" : "text-emerald-600 font-semibold"}>
+                        {awsSummary && awsSummary.activeSpendTotal > awsSummary.sumBudgetLimits ? "Exceeded" : "Under limit"}
                       </span>
                     </div>
-                    <div className="h-1.5 w-full rounded-full bg-rose-500/20 overflow-hidden flex">
+                    <div className="h-1.5 w-full rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
                       <div
-                        className="h-full bg-emerald-500 rounded-l-full"
-                        style={{ width: `${awsBudgetedSpendPct}%` }}
-                      />
-                      <div
-                        className="h-full bg-rose-500 rounded-r-full"
-                        style={{ width: `${100 - awsBudgetedSpendPct}%` }}
+                        className={`h-full rounded-full ${awsSummary && awsSummary.activeSpendTotal > awsSummary.sumBudgetLimits ? "bg-rose-500" : "bg-emerald-500"}`}
+                        style={{ width: `${Math.min(100, awsSummary && awsSummary.sumBudgetLimits > 0 ? Math.round((awsSummary.activeSpendTotal / awsSummary.sumBudgetLimits) * 100) : 0)}%` }}
                       />
                     </div>
                   </div>
                 </div>
               </div>
 
-              {/* Paginated Cards (Side-by-Side: Unbudgeted Accounts & AWS Budgets) */}
+              {/* Side-by-Side: Top 10 by Spend & Top 10 Exceeded */}
               <div className="flex-1 min-h-0 grid grid-cols-1 sm:grid-cols-2 gap-3.5 overflow-hidden">
-                {/* Card 1: Largest Accounts with No Budget */}
-                <div className="flex flex-col min-h-0 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-800/20 p-3.5 overflow-hidden">
-                  <div className="shrink-0 flex items-center justify-between mb-1.5 gap-2">
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      <AlertCircle className="h-4 w-4 text-amber-500 shrink-0" />
-                      <span className="text-xs font-bold text-slate-900 dark:text-white truncate">
-                        Largest Accounts with No Budget
-                      </span>
-                    </div>
-                    <span className="text-[11px] font-semibold text-amber-600 dark:text-amber-400 shrink-0">
-                      {validAwsUnbudgeted.length} total
-                    </span>
-                  </div>
-
-                  <div
-                    ref={awsListRef}
-                    className="flex-1 min-h-0 flex flex-col justify-start divide-y divide-slate-200/60 dark:divide-slate-800 overflow-hidden"
-                  >
-                    {paginatedAwsUnbudgeted.length > 0 ? (
-                      paginatedAwsUnbudgeted.map((acc, i) => (
-                        <div
-                          key={i}
-                          className={`${
-                            paginatedAwsUnbudgeted.length === awsItemsPerPage ? "flex-1" : ""
-                          } py-1.5 flex items-center justify-between gap-2`}
-                        >
-                          <div className="min-w-0">
-                            <div
-                              className="text-xs font-semibold text-slate-800 dark:text-slate-100 truncate leading-tight"
-                              title={acc["Account Name"]}
-                            >
-                              {acc["Account Name"]}
-                            </div>
-                            <div className="text-[10px] text-slate-400 font-mono leading-tight mt-0.5">
-                              {acc["Account ID"]}
-                            </div>
-                          </div>
-                          <div className="text-right shrink-0">
-                            <span className="text-xs font-bold text-rose-600 dark:text-rose-400">
-                              $
-                              {Number(acc["Current Month Spend"] || 0).toLocaleString(
-                                undefined,
-                                { minimumFractionDigits: 2, maximumFractionDigits: 2 }
-                              )}
-                            </span>
-                          </div>
-                        </div>
-                      ))
-                    ) : (
-                      <div className="flex-1 flex items-center justify-center text-xs text-slate-400">
-                        No unbudgeted accounts
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Pagination Footer */}
-                  <div className="shrink-0 pt-2 mt-1 border-t border-slate-200/60 dark:border-slate-800 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
-                    <span>
-                      {validAwsUnbudgeted.length > 0
-                        ? `${(pageAwsUnbudgeted - 1) * awsItemsPerPage + 1}–${Math.min(
-                            pageAwsUnbudgeted * awsItemsPerPage,
-                            validAwsUnbudgeted.length
-                          )} of ${validAwsUnbudgeted.length}`
-                        : "0 of 0"}
-                    </span>
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => setPageAwsUnbudgeted((p) => Math.max(1, p - 1))}
-                        disabled={pageAwsUnbudgeted <= 1}
-                        className="p-1 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 transition-colors cursor-pointer disabled:cursor-default"
-                        title="Previous Page"
-                      >
-                        <ChevronLeft className="h-3.5 w-3.5" />
-                      </button>
-                      <span className="font-semibold text-slate-700 dark:text-slate-300 px-1">
-                        {pageAwsUnbudgeted} / {totalPagesAwsUnbudgeted}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setPageAwsUnbudgeted((p) =>
-                            Math.min(totalPagesAwsUnbudgeted, p + 1)
-                          )
-                        }
-                        disabled={pageAwsUnbudgeted >= totalPagesAwsUnbudgeted}
-                        className="p-1 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 transition-colors cursor-pointer disabled:cursor-default"
-                        title="Next Page"
-                      >
-                        <ChevronRight className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Card 2: AWS Budgets Overview */}
-                <div className="flex flex-col min-h-0 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-800/20 p-3.5 overflow-hidden">
-                  <div className="shrink-0 flex items-center justify-between mb-1.5 gap-2">
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
-                      <span className="text-xs font-bold text-slate-900 dark:text-white truncate">
-                        AWS Budgets Overview
-                      </span>
-                    </div>
-                    <span className="text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 shrink-0">
-                      {validAwsBudgets.length} active
-                    </span>
-                  </div>
-
-                  <div className="flex-1 min-h-0 flex flex-col justify-start divide-y divide-slate-200/60 dark:divide-slate-800 overflow-hidden">
-                    {paginatedAwsBudgets.length > 0 ? (
-                      paginatedAwsBudgets.map((b, i) => {
-                        const limit = Number(b.Limit ?? b["Budget Limit"] ?? 0);
-                        const used = Number(b["Current Used"] ?? b["Current Spend"] ?? 0);
-                        const pct = limit > 0 ? Math.round((used / limit) * 100) : 0;
-                        const isExceeded =
-                          b["Threshold Status"]?.toLowerCase().includes("exceeded") ||
-                          pct >= 100;
-
-                        return (
-                          <div
-                            key={i}
-                            className={`${
-                              paginatedAwsBudgets.length === awsItemsPerPage ? "flex-1" : ""
-                            } py-1.5 flex flex-col justify-center space-y-1`}
-                          >
-                            <div className="flex items-center justify-between gap-2">
-                              <span
-                                className="text-xs font-semibold text-slate-800 dark:text-slate-100 truncate leading-tight"
-                                title={b["Budget Name"]}
-                              >
-                                {b["Budget Name"]}
-                              </span>
-                              <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 shrink-0 leading-tight">
-                                ${used.toLocaleString(undefined, { maximumFractionDigits: 0 })} / $
-                                {limit.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <div className="flex-1 h-1.5 bg-slate-200/70 dark:bg-slate-700 rounded-full overflow-hidden">
-                                <div
-                                  className={`h-full rounded-full ${
-                                    isExceeded
-                                      ? "bg-rose-500"
-                                      : pct >= 80
-                                      ? "bg-amber-500"
-                                      : "bg-emerald-500"
-                                  }`}
-                                  style={{ width: `${Math.min(100, pct)}%` }}
-                                />
-                              </div>
-                              <span className="text-[10px] font-mono font-bold text-slate-500 w-8 text-right leading-none">
-                                {pct}%
-                              </span>
-                            </div>
-                          </div>
-                        );
-                      })
-                    ) : (
-                      <div className="flex-1 flex items-center justify-center text-xs text-slate-400">
-                        No active budgets
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Pagination Footer */}
-                  <div className="shrink-0 pt-2 mt-1 border-t border-slate-200/60 dark:border-slate-800 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
-                    <span>
-                      {validAwsBudgets.length > 0
-                        ? `${(pageAwsBudgets - 1) * awsItemsPerPage + 1}–${Math.min(
-                            pageAwsBudgets * awsItemsPerPage,
-                            validAwsBudgets.length
-                          )} of ${validAwsBudgets.length}`
-                        : "0 of 0"}
-                    </span>
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => setPageAwsBudgets((p) => Math.max(1, p - 1))}
-                        disabled={pageAwsBudgets <= 1}
-                        className="p-1 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 transition-colors cursor-pointer disabled:cursor-default"
-                        title="Previous Page"
-                      >
-                        <ChevronLeft className="h-3.5 w-3.5" />
-                      </button>
-                      <span className="font-semibold text-slate-700 dark:text-slate-300 px-1">
-                        {pageAwsBudgets} / {totalPagesAwsBudgets}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setPageAwsBudgets((p) => Math.min(totalPagesAwsBudgets, p + 1))
-                        }
-                        disabled={pageAwsBudgets >= totalPagesAwsBudgets}
-                        className="p-1 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 transition-colors cursor-pointer disabled:cursor-default"
-                        title="Next Page"
-                      >
-                        <ChevronRight className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                </div>
+                <TopSpendTable
+                  title="Top 10 Accounts by Spend"
+                  items={top10AwsSpend}
+                  currency="$"
+                  page={pageAwsSpend}
+                  onPageChange={setPageAwsSpend}
+                  emptyText="No spending accounts found"
+                />
+                <TopExceededTable
+                  title="Top 10 Accounts Exceeding Budget"
+                  items={top10AwsExceeded}
+                  currency="$"
+                  page={pageAwsExceeded}
+                  onPageChange={setPageAwsExceeded}
+                  emptyText="No accounts exceeding budget limits"
+                />
               </div>
             </div>
           </div>
 
           {/* =============================================================== */}
-          {/* RIGHT PORTAL CARD: AZURE BUDGETS & GOVERNANCE                   */}
+          {/* MIDDLE PORTAL CARD: AZURE                                       */}
           {/* =============================================================== */}
-          <div className="flex flex-col min-h-[540px] lg:min-h-0 rounded-2xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-hidden">
-            {/* Portal Top Banner: 2-Row Non-Colliding Layout */}
+          <div className="flex flex-col min-h-[560px] rounded-2xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-hidden">
+            {/* Portal Top Banner: 2-Row Layout */}
             <div className="shrink-0 px-4 py-3 border-b border-slate-100 dark:border-slate-800 bg-gradient-to-r from-sky-50/70 via-white to-blue-50/40 dark:from-sky-950/30 dark:via-slate-900 dark:to-slate-900 flex flex-col gap-2.5">
               {/* Row 1: Brand & Primary Action */}
               <div className="flex items-center justify-between gap-2">
@@ -1031,16 +1068,16 @@ export function MultiCloudOverviewPage() {
                   <div className="h-9 w-9 shrink-0 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-600 dark:text-sky-400 font-extrabold text-xs shadow-2xs">
                     AZ
                   </div>
-                  <div className="min-w-0">
+                  <div className="flex items-center gap-2 min-w-0">
                     <h2 className="text-sm font-bold text-slate-900 dark:text-white truncate">
-                      Azure Budgets & Governance
+                      Azure
                     </h2>
-                    <p
-                      className="text-[11px] font-medium text-sky-700 dark:text-sky-400 truncate"
-                      title="Tenant: Coforge Limited (EnterpriseMaster-PROD-GBL)"
+                    <Badge
+                      variant="outline"
+                      className="text-[10px] font-semibold px-2 py-0 bg-white dark:bg-slate-800 text-sky-600 dark:text-sky-400 border-sky-200 dark:border-sky-800 shrink-0"
                     >
-                      Tenant: Coforge Limited (EnterpriseMaster-PROD-GBL)
-                    </p>
+                      {azureMonthLabel}
+                    </Badge>
                   </div>
                 </div>
 
@@ -1053,32 +1090,26 @@ export function MultiCloudOverviewPage() {
                 </button>
               </div>
 
-              {/* Row 2: Subtitle & Secondary Action Controls */}
-              <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
-                <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate max-w-[200px] sm:max-w-none">
-                  Management-configured budgets & thresholds
-                </p>
+              {/* Row 2: Secondary Action Controls */}
+              <div className="flex items-center justify-end gap-1.5 pt-0.5">
+                <button
+                  onClick={handleSyncAzureBudgets}
+                  disabled={syncingAzure}
+                  className="inline-flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1 text-[11px] font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
+                >
+                  <RefreshCw
+                    className={`w-3 h-3 ${syncingAzure ? "animate-spin text-sky-600" : ""}`}
+                  />
+                  <span>{syncingAzure ? "Syncing..." : "Sync"}</span>
+                </button>
 
-                <div className="flex items-center gap-1.5 shrink-0">
-                  <button
-                    onClick={handleSyncAzureBudgets}
-                    disabled={syncingAzure}
-                    className="inline-flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1 text-[11px] font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
-                  >
-                    <RefreshCw
-                      className={`w-3 h-3 ${syncingAzure ? "animate-spin text-sky-600" : ""}`}
-                    />
-                    <span>{syncingAzure ? "Syncing..." : "Sync"}</span>
-                  </button>
-
-                  <button
-                    onClick={() => navigate("/azure/subscriptions")}
-                    className="inline-flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1 text-[11px] font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 transition-colors cursor-pointer whitespace-nowrap"
-                  >
-                    <Layers className="w-3 h-3 text-sky-500" />
-                    <span>Subscriptions</span>
-                  </button>
-                </div>
+                <button
+                  onClick={() => navigate("/azure/subscriptions")}
+                  className="inline-flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1 text-[11px] font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  <Layers className="w-3 h-3 text-sky-500" />
+                  <span>Subscriptions</span>
+                </button>
               </div>
             </div>
 
@@ -1086,212 +1117,92 @@ export function MultiCloudOverviewPage() {
             <div className="flex-1 min-h-0 p-4 flex flex-col justify-between gap-3.5 overflow-hidden">
               {/* Visual Gauges & Key KPIs Strip */}
               <div className="shrink-0 grid grid-cols-12 gap-3">
-                {/* Gauge Card: Azure Coverage + Permission Restricted */}
-                <div className="col-span-5 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 p-3 flex items-center gap-3">
+                {/* Gauge Card: Azure Coverage */}
+                <div className="col-span-12 sm:col-span-5 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 p-3 flex items-center gap-3 min-w-0">
                   <CoverageGauge
                     percentage={azureCoveragePct}
                     colorClass="text-sky-500"
-                    size={56}
+                    size={48}
                   />
-                  <div className="min-w-0 flex-1 space-y-0.5">
-                    <div className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate">
-                      Budget Coverage
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <div className="flex items-center justify-between gap-1 text-xs font-bold text-slate-800 dark:text-slate-100">
+                      <span>Coverage</span>
+                      <span className="text-sky-600 dark:text-sky-400 font-bold">{azureCoveragePct}%</span>
                     </div>
-                    <div className="text-[11px] text-slate-500 font-medium truncate">
-                      {azureBudgetedAccounts} of {azureTotalAccounts} subscriptions
+                    <div className="text-[11px] text-slate-600 dark:text-slate-300 flex items-center justify-between">
+                      <span className="text-slate-500 dark:text-slate-400">Total accounts:</span>
+                      <strong className="font-bold text-slate-800 dark:text-slate-200">{azureTotalAccounts}</strong>
                     </div>
-                    <div className="text-[11px] flex items-center gap-1 pt-0.5 text-purple-600 dark:text-purple-400 font-semibold truncate">
-                      <Lock className="w-3 h-3 shrink-0" />
-                      <span className="truncate">{azurePermissionDenied} subs missing RBAC</span>
+                    <div className="text-[11px] text-slate-600 dark:text-slate-300 flex items-center justify-between">
+                      <span className="text-slate-500 dark:text-slate-400">Budgets defined:</span>
+                      <strong className="font-bold text-emerald-600 dark:text-emerald-400">{azureBudgetedAccounts}</strong>
                     </div>
                   </div>
                 </div>
 
-                {/* Spend & Allocation Summary Card */}
-                <div className="col-span-7 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 p-3 flex flex-col justify-center">
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="min-w-0">
-                      <div className="text-[11px] font-medium text-slate-500 flex items-center gap-1 truncate">
-                        <Wallet className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                        <span className="truncate">Total Budget Allocated</span>
-                      </div>
-                      <div className="text-lg xl:text-xl font-extrabold text-slate-900 dark:text-white mt-0.5 truncate">
-                        ₹{(azureSummary?.totalBudgetedSpend || 0).toLocaleString()}
-                      </div>
-                      <div className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold mt-0.5 truncate">
-                        Configured across {azureBudgetedAccounts} subs
-                      </div>
+                {/* Spend & Limits Card */}
+                <div className="col-span-12 sm:col-span-7 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 p-3 flex flex-col justify-between min-w-0">
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-slate-500 dark:text-slate-400 font-medium">Total spend:</span>
+                      <span className="font-extrabold text-sm text-slate-900 dark:text-white">
+                        ₹{(azureSummary?.activeSpend || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                      </span>
                     </div>
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-slate-500 dark:text-slate-400 font-medium">Total budget:</span>
+                      <span className="font-extrabold text-sm text-slate-900 dark:text-white">
+                        ₹{(azureSummary?.totalBudgetedSpend || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                      </span>
+                    </div>
+                  </div>
 
-                    <div className="border-l border-slate-200/70 dark:border-slate-700/70 pl-3 min-w-0">
-                      <div className="text-[11px] font-medium text-slate-500 flex items-center gap-1 truncate">
-                        <Building2 className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                        <span className="truncate">Active Month Spend</span>
-                      </div>
-                      <div className="text-lg xl:text-xl font-extrabold text-slate-900 dark:text-white mt-0.5 truncate">
-                        ₹
-                        {(azureSummary?.activeSpend || 0).toLocaleString(undefined, {
-                          maximumFractionDigits: 0,
-                        })}
-                      </div>
-                      <div className="text-[10px] text-slate-400 mt-0.5 truncate">
-                        Live consumption across org
-                      </div>
+                  <div className="mt-2 pt-1.5 border-t border-slate-200/60 dark:border-slate-700/60">
+                    <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400 mb-1">
+                      <span>{azureSummary && azureSummary.totalBudgetedSpend && azureSummary.totalBudgetedSpend > 0 ? Math.round(((azureSummary.activeSpend || 0) / azureSummary.totalBudgetedSpend) * 100) : 0}% of budget utilized</span>
+                      <span className={azureSummary && (azureSummary.activeSpend || 0) > (azureSummary.totalBudgetedSpend || 0) ? "text-rose-600 font-semibold" : "text-emerald-600 font-semibold"}>
+                        {azureSummary && (azureSummary.activeSpend || 0) > (azureSummary.totalBudgetedSpend || 0) ? "Exceeded" : "Under limit"}
+                      </span>
+                    </div>
+                    <div className="h-1.5 w-full rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
+                      <div
+                        className={`h-full rounded-full ${azureSummary && (azureSummary.activeSpend || 0) > (azureSummary.totalBudgetedSpend || 0) ? "bg-rose-500" : "bg-emerald-500"}`}
+                        style={{ width: `${Math.min(100, azureSummary && azureSummary.totalBudgetedSpend && azureSummary.totalBudgetedSpend > 0 ? Math.round(((azureSummary.activeSpend || 0) / azureSummary.totalBudgetedSpend) * 100) : 0)}%` }}
+                      />
                     </div>
                   </div>
                 </div>
               </div>
 
-              {/* Paginated Azure Subscriptions Budget Tracking Card */}
-              <div className="flex-1 min-h-0 flex flex-col rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-800/20 p-3.5 overflow-hidden">
-                <div className="shrink-0 flex items-center justify-between mb-1.5 gap-2">
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <Wallet className="h-4 w-4 text-sky-600 shrink-0" />
-                    <span className="text-xs font-bold text-slate-900 dark:text-white truncate">
-                      Azure Subscriptions Budget Tracking
-                    </span>
-                  </div>
-                  <span className="text-[11px] font-semibold text-sky-600 dark:text-sky-400 shrink-0">
-                    {activeAzureBudgets.length} budgets
-                  </span>
-                </div>
-
-                <div
-                  ref={azureListRef}
-                  className="flex-1 min-h-0 flex flex-col justify-start divide-y divide-slate-200/60 dark:divide-slate-800 overflow-hidden"
-                >
-                  {paginatedAzureBudgets.length > 0 ? (
-                    paginatedAzureBudgets.map((b, idx) => {
-                      const isExceeded = b.Status === "Exceeded";
-                      const isWarning = b.Status === "Warning";
-
-                      return (
-                        <div
-                          key={idx}
-                          className={`${
-                            paginatedAzureBudgets.length === azureItemsPerPage ? "flex-1" : ""
-                          } py-1.5 flex items-center justify-between gap-4`}
-                        >
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-2">
-                              <span
-                                className="text-xs font-semibold text-slate-800 dark:text-slate-100 truncate leading-tight"
-                                title={b["Linked Account"]}
-                              >
-                                {b["Linked Account"]}
-                              </span>
-                              <span className="text-[10px] text-slate-400 truncate max-w-[160px] leading-tight">
-                                ({b["Budget Name"]})
-                              </span>
-                            </div>
-                            <div className="text-[10px] text-slate-400 font-mono truncate leading-tight mt-0.5">
-                              {b["Account ID"]}
-                            </div>
-                          </div>
-
-                          <div className="text-right shrink-0 w-36">
-                            <div className="text-xs font-bold text-slate-800 dark:text-slate-100 leading-tight">
-                              ₹
-                              {(b["Actual Spend"] || 0).toLocaleString(undefined, {
-                                maximumFractionDigits: 0,
-                              })}{" "}
-                              <span className="text-[10px] font-normal text-slate-400">
-                                / ₹{(b["Budget Limit"] || 0).toLocaleString()}
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-1.5 mt-1">
-                              <div className="flex-1 h-1.5 bg-slate-200/70 dark:bg-slate-700 rounded-full overflow-hidden">
-                                <div
-                                  className={`h-full rounded-full ${
-                                    isExceeded
-                                      ? "bg-rose-500"
-                                      : isWarning
-                                      ? "bg-amber-500"
-                                      : "bg-emerald-500"
-                                  }`}
-                                  style={{
-                                    width: `${Math.min(100, b["% Utilized"] || 0)}%`,
-                                  }}
-                                />
-                              </div>
-                              <span className="text-[10px] font-mono font-bold text-slate-600 dark:text-slate-300 leading-none">
-                                {b["% Utilized"]}%
-                              </span>
-                            </div>
-                          </div>
-
-                          <div className="shrink-0 w-18 text-right">
-                            <Badge
-                              className={`text-[10px] px-2 py-0.5 border ${
-                                isExceeded
-                                  ? "bg-rose-500/10 text-rose-700 dark:text-rose-400 border-rose-500/20"
-                                  : isWarning
-                                  ? "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20"
-                                  : "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20"
-                              }`}
-                            >
-                              {b.Status || "On Track"}
-                            </Badge>
-                          </div>
-                        </div>
-                      );
-                    })
-                  ) : (
-                    <div className="flex-1 flex items-center justify-center text-xs text-slate-400">
-                      No Azure budgets found
-                    </div>
-                  )}
-                </div>
-
-                {/* Pagination Footer */}
-                <div className="shrink-0 pt-2 mt-1 border-t border-slate-200/60 dark:border-slate-800 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
-                  <span>
-                    {activeAzureBudgets.length > 0
-                      ? `Showing ${(pageAzureBudgets - 1) * azureItemsPerPage + 1}–${Math.min(
-                          pageAzureBudgets * azureItemsPerPage,
-                          activeAzureBudgets.length
-                        )} of ${activeAzureBudgets.length}`
-                      : "0 of 0"}
-                  </span>
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => setPageAzureBudgets((p) => Math.max(1, p - 1))}
-                      disabled={pageAzureBudgets <= 1}
-                      className="p-1 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 transition-colors cursor-pointer disabled:cursor-default"
-                      title="Previous Page"
-                    >
-                      <ChevronLeft className="h-3.5 w-3.5" />
-                    </button>
-                    <span className="font-semibold text-slate-700 dark:text-slate-300 px-1">
-                      Page {pageAzureBudgets} of {totalPagesAzureBudgets}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setPageAzureBudgets((p) =>
-                          Math.min(totalPagesAzureBudgets, p + 1)
-                        )
-                      }
-                      disabled={pageAzureBudgets >= totalPagesAzureBudgets}
-                      className="p-1 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 transition-colors cursor-pointer disabled:cursor-default"
-                      title="Next Page"
-                    >
-                      <ChevronRight className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                </div>
+              {/* Side-by-Side: Top 10 by Spend & Top 10 Exceeded */}
+              <div className="flex-1 min-h-0 grid grid-cols-1 sm:grid-cols-2 gap-3.5 overflow-hidden">
+                <TopSpendTable
+                  title="Top 10 Subscriptions by Spend"
+                  items={top10AzureSpend}
+                  currency="₹"
+                  page={pageAzureSpend}
+                  onPageChange={setPageAzureSpend}
+                  emptyText="No Azure subscriptions found"
+                />
+                <TopExceededTable
+                  title="Top 10 Subscriptions Exceeding Budget"
+                  items={top10AzureExceeded}
+                  currency="₹"
+                  page={pageAzureExceeded}
+                  onPageChange={setPageAzureExceeded}
+                  emptyText="No subscriptions exceeding budget limits"
+                />
               </div>
             </div>
           </div>
 
           {/* =============================================================== */}
-          {/* RIGHT PORTAL CARD: GCP BUDGETS & BIGQUERY INTELLIGENCE          */}
+          {/* RIGHT PORTAL CARD: GCP                                          */}
           {/* =============================================================== */}
-          <div className="flex flex-col min-h-[540px] xl:min-h-0 rounded-2xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-hidden">
-            {/* Portal Top Banner: 2-Row Non-Colliding Layout */}
+          <div className="flex flex-col min-h-[560px] rounded-2xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-hidden">
+            {/* Portal Top Banner: 2-Row Layout */}
             <div className="shrink-0 px-4 py-3 border-b border-slate-100 dark:border-slate-800 bg-gradient-to-r from-blue-50/70 via-white to-indigo-50/40 dark:from-blue-950/30 dark:via-slate-900 dark:to-slate-900 flex flex-col gap-2.5">
-              {/* Row 1: Brand, Badge & Primary Action */}
+              {/* Row 1: Brand & Primary Action */}
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2.5 min-w-0">
                   <div className="h-9 w-9 shrink-0 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-600 dark:text-blue-400 font-extrabold text-xs shadow-2xs">
@@ -1299,13 +1210,13 @@ export function MultiCloudOverviewPage() {
                   </div>
                   <div className="flex items-center gap-2 min-w-0">
                     <h2 className="text-sm font-bold text-slate-900 dark:text-white truncate">
-                      GCP Governance
+                      GCP
                     </h2>
                     <Badge
                       variant="outline"
                       className="text-[10px] font-semibold px-2 py-0 bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800 shrink-0"
                     >
-                      BigQuery
+                      {gcpMonthLabel}
                     </Badge>
                   </div>
                 </div>
@@ -1319,21 +1230,15 @@ export function MultiCloudOverviewPage() {
                 </button>
               </div>
 
-              {/* Row 2: Subtitle & Secondary Action Controls */}
-              <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
-                <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate max-w-[200px] sm:max-w-none">
-                  Multi-project cost intelligence &amp; budgets
-                </p>
-
-                <div className="flex items-center gap-1.5 shrink-0">
-                  <button
-                    onClick={() => navigate("/gcp/projects")}
-                    className="inline-flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1 text-[11px] font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 transition-colors cursor-pointer whitespace-nowrap"
-                  >
-                    <Layers className="w-3 h-3 text-blue-500" />
-                    <span>Projects</span>
-                  </button>
-                </div>
+              {/* Row 2: Secondary Action Controls */}
+              <div className="flex items-center justify-end gap-1.5 pt-0.5">
+                <button
+                  onClick={() => navigate("/gcp/projects")}
+                  className="inline-flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1 text-[11px] font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  <Layers className="w-3 h-3 text-blue-500" />
+                  <span>Projects</span>
+                </button>
               </div>
             </div>
 
@@ -1342,154 +1247,115 @@ export function MultiCloudOverviewPage() {
               {/* Visual Gauges & Key KPIs Strip */}
               <div className="shrink-0 grid grid-cols-12 gap-3">
                 {/* Gauge Card: GCP Coverage */}
-                <div className="col-span-5 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 p-3 flex items-center gap-3">
+                <div className="col-span-12 sm:col-span-5 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 p-3 flex items-center gap-3 min-w-0">
                   <CoverageGauge
-                    percentage={gcpSummary?.budgetCoveragePct || 80}
+                    percentage={gcpSummary?.budgetCoveragePct || 95}
                     colorClass="text-blue-500"
-                    size={56}
+                    size={48}
                   />
-                  <div className="min-w-0 flex-1 space-y-0.5">
-                    <div className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate">
-                      Budget Coverage
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <div className="flex items-center justify-between gap-1 text-xs font-bold text-slate-800 dark:text-slate-100">
+                      <span>Coverage</span>
+                      <span className="text-blue-600 dark:text-blue-400 font-bold">{gcpSummary?.budgetCoveragePct || 95}%</span>
                     </div>
-                    <div className="text-[11px] text-slate-500 font-medium truncate">
-                      {gcpSummary?.budgetedAccounts || 4} of {gcpSummary?.totalAccounts || 5} projects
+                    <div className="text-[11px] text-slate-600 dark:text-slate-300 flex items-center justify-between">
+                      <span className="text-slate-500 dark:text-slate-400">Total accounts:</span>
+                      <strong className="font-bold text-slate-800 dark:text-slate-200">{gcpSummary?.totalAccounts || 22}</strong>
                     </div>
-                    <div className="text-[11px] flex items-center gap-1 pt-0.5 text-emerald-600 dark:text-emerald-400 font-semibold truncate">
-                      <CheckCircle2 className="w-3 h-3 shrink-0" />
-                      <span className="truncate">Active BigQuery sync</span>
+                    <div className="text-[11px] text-slate-600 dark:text-slate-300 flex items-center justify-between">
+                      <span className="text-slate-500 dark:text-slate-400">Budgets defined:</span>
+                      <strong className="font-bold text-emerald-600 dark:text-emerald-400">{gcpSummary?.budgetedAccounts || 21}</strong>
                     </div>
                   </div>
                 </div>
 
-                {/* Spend & Allocation Summary Card */}
-                <div className="col-span-7 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 p-3 flex flex-col justify-center">
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="min-w-0">
-                      <div className="text-[11px] font-medium text-slate-500 flex items-center gap-1 truncate">
-                        <TrendingUp className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-                        <span className="truncate">Monthly Spend</span>
-                      </div>
-                      <div className="text-lg xl:text-xl font-extrabold text-slate-900 dark:text-white mt-0.5 truncate">
-                        ${(gcpSummary?.activeSpendTotal || 50562).toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                      </div>
-                      <div className="text-[10px] text-blue-600 dark:text-blue-400 font-semibold mt-0.5 truncate">
-                        {gcpSummary?.monthLabel || "Active Cycle"}
-                      </div>
+                {/* Spend & Limits Card */}
+                <div className="col-span-12 sm:col-span-7 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 p-3 flex flex-col justify-between min-w-0">
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-slate-500 dark:text-slate-400 font-medium">Total spend:</span>
+                      <span className="font-extrabold text-sm text-slate-900 dark:text-white">
+                        ${(gcpSummary?.activeSpendTotal || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                      </span>
                     </div>
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-slate-500 dark:text-slate-400 font-medium">Total budget:</span>
+                      <span className="font-extrabold text-sm text-slate-900 dark:text-white">
+                        ${(gcpSummary?.sumBudgetLimits || gcpSummary?.spendUnderBudget || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                      </span>
+                    </div>
+                  </div>
 
-                    <div className="border-l border-slate-200/70 dark:border-slate-700/70 pl-3 min-w-0">
-                      <div className="text-[11px] font-medium text-slate-500 flex items-center gap-1 truncate">
-                        <Wallet className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                        <span className="truncate">Spend Controlled</span>
-                      </div>
-                      <div className="text-lg xl:text-xl font-extrabold text-slate-900 dark:text-white mt-0.5 truncate">
-                        ${(gcpSummary?.spendUnderBudget || 45000).toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                      </div>
-                      <div className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold mt-0.5 truncate">
-                        Under active limits
-                      </div>
+                  <div className="mt-2 pt-1.5 border-t border-slate-200/60 dark:border-slate-700/60">
+                    <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400 mb-1">
+                      <span>
+                        {gcpSummary && (gcpSummary.sumBudgetLimits || gcpSummary.spendUnderBudget) > 0
+                          ? Math.round(((gcpSummary.activeSpendTotal || 0) / (gcpSummary.sumBudgetLimits || gcpSummary.spendUnderBudget)) * 100)
+                          : 0}
+                        % of budget utilized
+                      </span>
+                      <span
+                        className={
+                          gcpSummary &&
+                          (gcpSummary.activeSpendTotal || 0) >
+                            (gcpSummary.sumBudgetLimits || gcpSummary.spendUnderBudget || 0)
+                            ? "text-rose-600 font-semibold"
+                            : "text-emerald-600 font-semibold"
+                        }
+                      >
+                        {gcpSummary &&
+                        (gcpSummary.activeSpendTotal || 0) >
+                          (gcpSummary.sumBudgetLimits || gcpSummary.spendUnderBudget || 0)
+                          ? "Exceeded"
+                          : "Under limit"}
+                      </span>
+                    </div>
+                    <div className="h-1.5 w-full rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
+                      <div
+                        className={`h-full rounded-full ${
+                          gcpSummary &&
+                          (gcpSummary.activeSpendTotal || 0) >
+                            (gcpSummary.sumBudgetLimits || gcpSummary.spendUnderBudget || 0)
+                            ? "bg-rose-500"
+                            : "bg-emerald-500"
+                        }`}
+                        style={{
+                          width: `${Math.min(
+                            100,
+                            gcpSummary &&
+                              (gcpSummary.sumBudgetLimits || gcpSummary.spendUnderBudget) > 0
+                              ? Math.round(
+                                  ((gcpSummary.activeSpendTotal || 0) /
+                                    (gcpSummary.sumBudgetLimits || gcpSummary.spendUnderBudget)) *
+                                    100
+                                )
+                              : 0
+                          )}%`,
+                        }}
+                      />
                     </div>
                   </div>
                 </div>
               </div>
 
-              {/* Budgets & Projects Overview Card */}
-              <div className="flex-1 min-h-0 flex flex-col justify-between gap-3 overflow-hidden">
-                <div className="flex flex-col min-h-0 flex-1 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-800/20 p-3.5 overflow-hidden">
-                  <div className="shrink-0 flex items-center justify-between mb-1.5 gap-2">
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      <CheckCircle2 className="h-4 w-4 text-blue-500 shrink-0" />
-                      <span className="text-xs font-bold text-slate-900 dark:text-white truncate">
-                        GCP Project Budgets
-                      </span>
-                    </div>
-                    <span className="text-[11px] font-semibold text-blue-600 dark:text-blue-400 shrink-0">
-                      {gcpBudgets.length} projects
-                    </span>
-                  </div>
-
-                  <div className="flex-1 min-h-0 flex flex-col justify-start divide-y divide-slate-200/60 dark:divide-slate-800 overflow-hidden">
-                    {paginatedGcpBudgets.length > 0 ? (
-                      paginatedGcpBudgets.map((b, i) => {
-                        const limit = Number(b['Budget Limit'] || 0);
-                        const used = Number(b['Actual Spend'] || 0);
-                        const pct = Number(b['% Utilized'] || 0);
-                        const isExceeded = b.Status === 'Exceeded' || pct >= 100;
-                        const isWarning = b.Status === 'Warning' || (pct >= 85 && pct < 100);
-
-                        return (
-                          <div key={i} className="py-1.5 flex flex-col justify-center space-y-1">
-                            <div className="flex items-center justify-between gap-2">
-                              <span
-                                className="text-xs font-semibold text-slate-800 dark:text-slate-100 truncate leading-tight"
-                                title={b['Linked Account']}
-                              >
-                                {b['Linked Account']}
-                              </span>
-                              <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 shrink-0 leading-tight">
-                                ${used.toLocaleString(undefined, { maximumFractionDigits: 0 })} / $
-                                {limit.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <div className="flex-1 h-1.5 bg-slate-200/70 dark:bg-slate-700 rounded-full overflow-hidden">
-                                <div
-                                  className={`h-full rounded-full ${
-                                    isExceeded
-                                      ? 'bg-rose-500'
-                                      : isWarning
-                                      ? 'bg-amber-500'
-                                      : 'bg-blue-500'
-                                  }`}
-                                  style={{ width: `${Math.min(100, pct)}%` }}
-                                />
-                              </div>
-                              <span className="text-[10px] font-mono font-bold text-slate-500 w-8 text-right leading-none">
-                                {pct}%
-                              </span>
-                            </div>
-                          </div>
-                        );
-                      })
-                    ) : (
-                      <div className="flex-1 flex items-center justify-center text-xs text-slate-400">
-                        No active GCP project budgets
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Pagination Footer */}
-                  <div className="shrink-0 pt-2 mt-1 border-t border-slate-200/60 dark:border-slate-800 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
-                    <span>
-                      Page {pageGcpBudgets} of {totalPagesGcpBudgets}
-                    </span>
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => setPageGcpBudgets((p) => Math.max(1, p - 1))}
-                        disabled={pageGcpBudgets <= 1}
-                        className="p-1 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 transition-colors cursor-pointer disabled:cursor-default"
-                        title="Previous Page"
-                      >
-                        <ChevronLeft className="h-3.5 w-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setPageGcpBudgets((p) =>
-                            Math.min(totalPagesGcpBudgets, p + 1)
-                          )
-                        }
-                        disabled={pageGcpBudgets >= totalPagesGcpBudgets}
-                        className="p-1 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 transition-colors cursor-pointer disabled:cursor-default"
-                        title="Next Page"
-                      >
-                        <ChevronRight className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                </div>
+              {/* Side-by-Side: Top 10 by Spend & Top 10 Exceeded */}
+              <div className="flex-1 min-h-0 grid grid-cols-1 sm:grid-cols-2 gap-3.5 overflow-hidden">
+                <TopSpendTable
+                  title="Top 10 Projects by Spend"
+                  items={top10GcpSpend}
+                  currency="$"
+                  page={pageGcpSpend}
+                  onPageChange={setPageGcpSpend}
+                  emptyText="No GCP projects found"
+                />
+                <TopExceededTable
+                  title="Top 10 Projects Exceeding Budget"
+                  items={top10GcpExceeded}
+                  currency="$"
+                  page={pageGcpExceeded}
+                  onPageChange={setPageGcpExceeded}
+                  emptyText="No projects exceeding budget limits"
+                />
               </div>
             </div>
           </div>

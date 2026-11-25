@@ -324,7 +324,7 @@ export function DataTables({ selectedMonth, basePath = "/data" }: DataTablesProp
                         {r.Service}
                       </TableCell>
                       <TableCell className="whitespace-nowrap w-[60px] py-2.5 text-muted-foreground font-medium">
-                        {(r["Months Active"] ?? (r as any)["Active Months"] ?? "-")}/{(r["Total Months"] ?? (r as any)["Months in Scope"] ?? (r as any)["Total Months in Run"] ?? "-")}
+                        {r["Months Active"] ?? (r as any)["Active Months"] ?? "-"}
                       </TableCell>
                       <TableCell className="w-[120px] py-2.5">
                         <Badge

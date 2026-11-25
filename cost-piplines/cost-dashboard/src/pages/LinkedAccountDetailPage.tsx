@@ -1,5 +1,6 @@
-import { useState, useEffect } from "react";
-import { useParams, useSearchParams, Link } from "react-router-dom";
+import { useState, useEffect, Component, type ReactNode } from "react";
+import { useParams, useSearchParams, Link, useNavigate } from "react-router-dom";
+import { Navbar, type AccountOption } from "@/components/Navbar";
 import {
   ArrowLeft,
   Building2,
@@ -32,6 +33,8 @@ import {
 } from "@/components/ui/table";
 import {
   ResponsiveContainer,
+  AreaChart,
+  Area,
   BarChart,
   Bar,
   XAxis,
@@ -41,6 +44,7 @@ import {
   PieChart,
   Pie,
   Cell,
+  ReferenceLine,
 } from "recharts";
 
 interface AccountDetailResponse {
@@ -106,6 +110,11 @@ const formatCompactCurrency = (value: unknown) => {
   return `$${num}`;
 };
 
+const formatFullCurrency = (value: unknown) => {
+  const num = typeof value === "number" ? value : Number(value ?? 0);
+  return `$${num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+};
+
 const PROFESSIONAL_COLORS = [
   "#4f46e5", // Indigo 600
   "#6366f1", // Indigo 500
@@ -117,11 +126,86 @@ const PROFESSIONAL_COLORS = [
   "#64748b", // Slate 500
 ];
 
-export function LinkedAccountDetailPage() {
+class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; error: Error | null }> {
+  constructor(props: { children: ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: any) {
+    console.error("LinkedAccountDetail caught error:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-[#f4f7fa] dark:bg-slate-950 flex flex-col items-center justify-center p-6 space-y-4 font-sans">
+          <div className="p-3 bg-rose-100 dark:bg-rose-950/40 rounded-full text-rose-600 dark:text-rose-400">
+            <AlertTriangle className="w-8 h-8" />
+          </div>
+          <h2 className="text-xl font-bold tracking-tight text-foreground">Something went wrong</h2>
+          <p className="text-xs text-rose-600 dark:text-rose-400 max-w-md text-center font-mono">
+            {this.state.error?.message || "An unexpected error occurred rendering this page."}
+          </p>
+          <div className="flex gap-2.5 pt-2">
+            <Link
+              to="/linked-accounts"
+              className="px-3 py-1.5 text-xs font-semibold rounded-md border border-input bg-background hover:bg-muted text-foreground transition-colors cursor-pointer"
+            >
+              ← Back to Accounts Directory
+            </Link>
+            <button
+              onClick={() => this.setState({ hasError: false, error: null })}
+              className="px-3 py-1.5 text-xs font-semibold rounded-md bg-indigo-600 text-white hover:bg-indigo-700 transition-colors cursor-pointer"
+            >
+              Try Again
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function LinkedAccountDetailContent() {
+  const navigate = useNavigate();
   const { linkedAccountId } = useParams<{ linkedAccountId: string }>();
   const [searchParams] = useSearchParams();
   const rootAccount = searchParams.get("account") || "account-1";
   const monthParam = searchParams.get("month") || "";
+
+  const [awsAccounts, setAwsAccounts] = useState<AccountOption[]>([
+    {
+      id: "account-1",
+      name: "AWS-Encora (5076-7238-5186)",
+      accountId: "5076-7238-5186",
+      accountName: "AWS-Encora",
+      path: "/data",
+    },
+    {
+      id: "account-2",
+      name: "AWS-Coforge (5131-6780-3309)",
+      accountId: "5131-6780-3309",
+      accountName: "AWS-Coforge",
+      path: "/data/accounts/account-2",
+    },
+  ]);
+
+  useEffect(() => {
+    fetch("/api/aws/accounts")
+      .then((res) => (res.ok ? res.json() : []))
+      .then((accs) => {
+        if (Array.isArray(accs) && accs.length > 0) {
+          setAwsAccounts(accs);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const [data, setData] = useState<AccountDetailResponse | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -210,39 +294,68 @@ export function LinkedAccountDetailPage() {
     );
   }
 
-  const { account, financials, variance, governance, liveAws } = data;
-  const isPositiveMoM = financials.momChangePercent > 0;
-  const isNegativeMoM = financials.momChangePercent < 0;
+  const account = data?.account || ({} as any);
+  const financials = data?.financials || {
+    currentMonth: "",
+    currentSpend: 0,
+    previousSpend: 0,
+    momChangePercent: 0,
+    historicalMonthlySpend: [],
+  };
+  const variance = data?.variance;
+  const governance = data?.governance || {
+    hasBudget: false,
+    status: "Unbudgeted" as const,
+    topCostDriver: "Cloud Infrastructure",
+  };
+  const liveAws = data?.liveAws;
 
-  const pieData = (liveAws?.services || []).slice(0, 5).map((s) => ({
+  const isPositiveMoM = (financials.momChangePercent || 0) > 0;
+  const isNegativeMoM = (financials.momChangePercent || 0) < 0;
+
+  const trendData = (financials.historicalMonthlySpend || []).map((m) => ({
+    Month: m.month,
+    "Total Cost": Number(m.cost) || 0,
+  }));
+
+  const isSelectedMonthInTrend = trendData.some(
+    (d) => d.Month === (financials.currentMonth || monthParam)
+  );
+
+  const normalizedTopServices = (liveAws?.services || [])
+    .slice(0, 10)
+    .map((s) => ({
+      Service: s.service,
+      Cost: Number(s.cost) || 0,
+    }));
+
+  const pieData = (liveAws?.services || []).slice(0, 8).map((s) => ({
     name: s.service,
-    value: s.cost,
+    value: Number(s.cost) || 0,
+    sharePct: s.sharePct ?? 0,
   }));
 
   return (
     <div className="min-h-screen bg-[#f4f7fa] dark:bg-slate-950 text-slate-900 dark:text-slate-100 font-sans antialiased pb-12">
-      {/* Top Breadcrumb Header Bar */}
-      <header className="sticky top-0 z-40 bg-white/95 dark:bg-slate-900/95 border-b border-slate-200 dark:border-slate-800 px-6 py-3 backdrop-blur shadow-xs flex items-center justify-between">
-        <div className="flex items-center gap-3">
+      {/* Top Global Navbar */}
+      <Navbar
+        activeProvider="aws"
+        awsAccounts={awsAccounts}
+        selectedAwsAccount={rootAccount}
+        onAwsAccountChange={(acc) => navigate(`/linked-accounts?account=${acc}`)}
+      />
+
+      <main className="mx-auto max-w-[1600px] space-y-6 px-4 py-6 sm:px-6 lg:px-8">
+        {/* Navigation Breadcrumb / Back Link */}
+        <div className="flex items-center justify-between">
           <Link
             to={`/linked-accounts?account=${rootAccount}`}
-            className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground px-2.5 py-1 rounded-md border border-input bg-background hover:bg-muted transition-colors cursor-pointer"
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors group cursor-pointer"
           >
-            <ArrowLeft className="w-3.5 h-3.5" />
-            <span>Accounts Directory</span>
+            <ArrowLeft className="w-3.5 h-3.5 transition-transform group-hover:-translate-x-0.5" />
+            <span>Back to Accounts Directory</span>
           </Link>
-          <span className="text-muted-foreground/40">/</span>
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-bold text-foreground">
-              {account.accountName}
-            </span>
-            <span className="font-mono text-xs text-muted-foreground bg-muted/40 px-2 py-0.5 rounded border border-muted/50">
-              {account.linkedAccountId}
-            </span>
-          </div>
-        </div>
 
-        <div className="flex items-center gap-2">
           <button
             onClick={fetchDetails}
             className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-md border border-input bg-background hover:bg-muted text-foreground transition-colors cursor-pointer"
@@ -251,15 +364,16 @@ export function LinkedAccountDetailPage() {
             <span>Refresh Live AWS</span>
           </button>
         </div>
-      </header>
 
-      <main className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6">
-        {/* Account Identity & Ownership Card */}
-        <Card className="border border-muted/40 shadow-sm bg-card/60 backdrop-blur-md">
-          <div className="p-5 flex flex-col md:flex-row md:items-start md:justify-between gap-4">
-            <div className="space-y-1.5">
-              <div className="flex flex-wrap items-center gap-2.5">
-                <h1 className="text-xl font-bold tracking-tight text-foreground">
+        {/* AWS Account Header Banner matching Image 2 */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-muted/30 pb-4">
+          <div className="flex items-start sm:items-center gap-3">
+            <div className="p-2.5 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20">
+              <ShieldCheck className="h-6 w-6" />
+            </div>
+            <div className="space-y-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground">
                   {account.accountName}
                 </h1>
                 {account.status === "ACTIVE" ? (
@@ -282,7 +396,6 @@ export function LinkedAccountDetailPage() {
                     variant="outline"
                     className="bg-sky-50 text-sky-700 dark:bg-sky-950/50 dark:text-sky-300 border-sky-300 dark:border-sky-800 text-[10px] font-semibold"
                   >
-                    <ShieldCheck className="w-3 h-3 mr-1" />
                     Budgeted
                   </Badge>
                 ) : (
@@ -290,23 +403,32 @@ export function LinkedAccountDetailPage() {
                     variant="outline"
                     className="bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-400 border-amber-300 dark:border-amber-800 text-[10px] font-semibold"
                   >
-                    <AlertTriangle className="w-3 h-3 mr-1" />
                     Unbudgeted
+                  </Badge>
+                )}
+                {liveAws?.available && (
+                  <Badge
+                    variant="outline"
+                    className="bg-emerald-50/50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800 text-[10px] font-medium flex items-center gap-1.5"
+                  >
+                    <span className="relative flex h-1.5 w-1.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                    </span>
+                    Live AWS Data Synced
                   </Badge>
                 )}
               </div>
 
-              <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground pt-1">
-                {/* 12-digit Account ID */}
-                <div className="flex items-center gap-1.5 font-mono bg-muted/40 px-2.5 py-0.5 rounded border border-muted/50">
+              {/* Subtitle with Account Metadata */}
+              <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                <div className="flex items-center gap-1 font-mono bg-muted/40 px-2 py-0.5 rounded border border-muted/50">
                   <span className="text-muted-foreground">ID:</span>
-                  <span className="font-semibold text-foreground">
-                    {account.linkedAccountId}
-                  </span>
+                  <span className="font-semibold text-foreground">{account.linkedAccountId}</span>
                   <button
                     onClick={() => copyToClipboard(account.linkedAccountId)}
                     title="Copy Account ID"
-                    className="hover:text-foreground transition-colors cursor-pointer"
+                    className="hover:text-foreground transition-colors cursor-pointer ml-0.5"
                   >
                     {copiedId === account.linkedAccountId ? (
                       <Check className="w-3 h-3 text-emerald-500" />
@@ -315,242 +437,261 @@ export function LinkedAccountDetailPage() {
                     )}
                   </button>
                 </div>
-
-                {/* Parent Root Payer */}
-                <div className="flex items-center gap-1.5">
-                  <span className="text-muted-foreground">Payer Org:</span>
-                  <span className="font-semibold text-foreground">
-                    {account.rootAccount.name}
-                  </span>
+                <span>•</span>
+                <div>
+                  <span className="text-muted-foreground">Payer: </span>
+                  <span className="font-semibold text-foreground">{account.rootAccount?.name || rootAccount}</span>
                 </div>
-
-                {/* Owner Name & Email from Organizations */}
                 {(liveAws?.orgDetails?.ownerName || liveAws?.orgDetails?.email) && (
-                  <div className="flex items-center gap-1.5">
-                    <User className="w-3.5 h-3.5 text-indigo-500" />
-                    <span className="text-muted-foreground">Owner:</span>
-                    <span className="font-medium text-foreground">
-                      {liveAws?.orgDetails?.ownerName || (liveAws?.orgDetails?.email ? liveAws.orgDetails.email.split("@")[0].replace(/[._-]/g, " ") : "Unassigned")}
-                    </span>
-                    {liveAws?.orgDetails?.email && (
-                      <span className="text-[11px] text-muted-foreground font-mono">
-                        ({liveAws.orgDetails.email})
+                  <>
+                    <span>•</span>
+                    <div>
+                      <span className="text-muted-foreground">Owner: </span>
+                      <span className="font-medium text-foreground">
+                        {liveAws?.orgDetails?.ownerName || (liveAws?.orgDetails?.email ? liveAws.orgDetails.email.split("@")[0].replace(/[._-]/g, " ") : "Unassigned")}
                       </span>
-                    )}
-                  </div>
+                      {liveAws?.orgDetails?.email && (
+                        <span className="text-[11px] text-muted-foreground font-mono ml-1">
+                          ({liveAws.orgDetails.email})
+                        </span>
+                      )}
+                    </div>
+                  </>
                 )}
-
-                {/* WBS Code */}
                 {liveAws?.orgDetails?.wbsCode && (
-                  <div className="flex items-center gap-1.5">
-                    <FileCode className="w-3.5 h-3.5 text-indigo-500" />
-                    <span className="text-muted-foreground">WBS Code:</span>
-                    <span className="font-mono font-semibold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/40 px-1.5 py-0.5 rounded border border-indigo-200/60 dark:border-indigo-900/60 text-xs">
-                      {liveAws.orgDetails.wbsCode}
-                    </span>
-                  </div>
+                  <>
+                    <span>•</span>
+                    <div>
+                      <span className="text-muted-foreground">WBS: </span>
+                      <span className="font-mono font-semibold text-indigo-600 dark:text-indigo-400">
+                        {liveAws.orgDetails.wbsCode}
+                      </span>
+                    </div>
+                  </>
                 )}
-
-                {/* Joined Date */}
                 {liveAws?.orgDetails?.joinedTimestamp && (
-                  <div className="flex items-center gap-1.5">
-                    <Calendar className="w-3.5 h-3.5 text-muted-foreground" />
-                    <span className="text-muted-foreground">Created:</span>
-                    <span className="font-medium text-foreground">
-                      {new Date(liveAws.orgDetails.joinedTimestamp).toLocaleDateString(undefined, {
-                        year: "numeric",
-                        month: "short",
-                        day: "numeric",
-                      })}
-                    </span>
-                  </div>
+                  <>
+                    <span>•</span>
+                    <div>
+                      <span className="text-muted-foreground">Created: </span>
+                      <span className="font-medium text-foreground">
+                        {(() => {
+                          try {
+                            const d = new Date(liveAws.orgDetails.joinedTimestamp);
+                            return !isNaN(d.getTime())
+                              ? d.toLocaleDateString(undefined, {
+                                  year: "numeric",
+                                  month: "short",
+                                  day: "numeric",
+                                })
+                              : liveAws.orgDetails.joinedTimestamp;
+                          } catch {
+                            return liveAws.orgDetails.joinedTimestamp;
+                          }
+                        })()}
+                      </span>
+                    </div>
+                  </>
                 )}
               </div>
-            </div>
-
-            {/* Live AWS Sync Status Pill */}
-            <div className="flex items-center gap-2 bg-muted/40 px-3 py-1.5 rounded-lg border border-muted/50 text-xs self-start">
-              {liveAws?.available ? (
-                <>
-                  <span className="relative flex h-2 w-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                  </span>
-                  <span className="font-semibold text-emerald-600 dark:text-emerald-400">
-                    Live AWS Data Synced
-                  </span>
-                </>
-              ) : (
-                <>
-                  <span className="h-2 w-2 rounded-full bg-amber-400"></span>
-                  <span className="font-medium text-amber-600 dark:text-amber-400">
-                    SQL Database Mode
-                  </span>
-                </>
-              )}
             </div>
           </div>
-        </Card>
 
-        {/* 4 Financial KPI Cards */}
-        <div className="grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-4">
-          <Card className="border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 rounded-xl shadow-xs transition-all hover:border-slate-300">
-            <div className="flex items-center justify-between">
-              <div className="space-y-1">
-                <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+          <div className="flex items-center gap-2 self-start sm:self-center">
+            <Badge variant="outline" className="text-xs font-semibold px-3 py-1 bg-background/50 border-muted">
+              Reporting Period: {formatMonthName(financials.currentMonth)}
+            </Badge>
+          </div>
+        </div>
+
+        {/* 4 Standardized KPI Cards (matching Image 2) */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {/* Card 1: PERIOD SPEND */}
+          <Card className="border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 rounded-xl shadow-xs transition-all hover:border-slate-300 flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between">
+                <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider truncate">
                   PERIOD SPEND ({formatMonthName(financials.currentMonth).toUpperCase()})
                 </p>
-                <h3 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight">
-                  {fmt(financials.currentSpend)}
-                </h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400 pt-0.5">
-                  Billed in active billing cycle
-                </p>
-              </div>
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 dark:bg-indigo-950/50 dark:text-indigo-400">
-                <DollarSign className="h-5 w-5" />
-              </div>
-            </div>
-          </Card>
-
-          <Card className="border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 rounded-xl shadow-xs transition-all hover:border-slate-300">
-            <div className="flex items-center justify-between">
-              <div className="space-y-1">
-                <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                  PREVIOUS PERIOD SPEND
-                </p>
-                <h3 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight">
-                  {financials.previousSpend ? fmt(financials.previousSpend) : "—"}
-                </h3>
-                <div className="flex items-center gap-1.5 text-xs pt-0.5">
-                  {financials.previousSpend > 0 ? (
-                    <span
-                      className={`inline-flex items-center gap-1 font-semibold ${
-                        isPositiveMoM
-                          ? "text-rose-600 dark:text-rose-500"
-                          : isNegativeMoM
-                          ? "text-emerald-600 dark:text-emerald-500"
-                          : "text-muted-foreground"
-                      }`}
-                    >
-                      {isPositiveMoM && <TrendingUp className="h-3.5 w-3.5" />}
-                      {isNegativeMoM && <TrendingDown className="h-3.5 w-3.5" />}
-                      {isPositiveMoM ? "+" : ""}
-                      {financials.momChangePercent}% MoM
-                    </span>
-                  ) : (
-                    <span className="text-muted-foreground">Prior month total</span>
-                  )}
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 dark:bg-indigo-950/50 dark:text-indigo-400">
+                  <DollarSign className="h-4 w-4" />
                 </div>
               </div>
-              <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${isPositiveMoM ? "bg-rose-50 text-rose-600 dark:bg-rose-950/50 dark:text-rose-400" : "bg-emerald-50 text-emerald-600 dark:bg-emerald-950/50 dark:text-emerald-400"}`}>
-                <TrendingUp className="h-5 w-5" />
-              </div>
+              <h3 className="mt-2 text-2xl font-extrabold text-slate-900 dark:text-white tracking-tight">
+                {fmt(financials.currentSpend)}
+              </h3>
+            </div>
+            <div className="mt-2.5 flex items-center justify-between text-[11px] border-t border-slate-100 dark:border-slate-800 pt-2 text-muted-foreground">
+              <span className="text-slate-500 dark:text-slate-400">Billed in active billing cycle</span>
             </div>
           </Card>
 
-          <Card className="border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 rounded-xl shadow-xs transition-all hover:border-slate-300">
-            <div className="flex items-center justify-between">
-              <div className="space-y-1">
-                <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+          {/* Card 2: PREVIOUS PERIOD SPEND */}
+          <Card className="border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 rounded-xl shadow-xs transition-all hover:border-slate-300 flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between">
+                <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider truncate">
+                  PREVIOUS PERIOD SPEND
+                </p>
+                <div className={`flex h-8 w-8 items-center justify-center rounded-lg ${isPositiveMoM ? "bg-rose-50 text-rose-600 dark:bg-rose-950/50 dark:text-rose-400" : "bg-emerald-50 text-emerald-600 dark:bg-emerald-950/50 dark:text-emerald-400"}`}>
+                  {isPositiveMoM ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
+                </div>
+              </div>
+              <h3 className="mt-2 text-2xl font-extrabold text-slate-900 dark:text-white tracking-tight">
+                {financials.previousSpend ? fmt(financials.previousSpend) : "—"}
+              </h3>
+            </div>
+            <div className="mt-2.5 flex items-center justify-between text-[11px] border-t border-slate-100 dark:border-slate-800 pt-2 text-muted-foreground">
+              {financials.previousSpend > 0 ? (
+                <span
+                  className={`inline-flex items-center gap-1 font-semibold ${
+                    isPositiveMoM
+                      ? "text-rose-600 dark:text-rose-500"
+                      : isNegativeMoM
+                      ? "text-emerald-600 dark:text-emerald-500"
+                      : "text-muted-foreground"
+                  }`}
+                >
+                  {isPositiveMoM && <TrendingUp className="h-3 w-3" />}
+                  {isNegativeMoM && <TrendingDown className="h-3 w-3" />}
+                  {isPositiveMoM ? "+" : ""}
+                  {financials.momChangePercent}% MoM
+                </span>
+              ) : (
+                <span className="text-slate-500 dark:text-slate-400">Prior month total</span>
+              )}
+            </div>
+          </Card>
+
+          {/* Card 3: 6-MONTH AVERAGE SPEND */}
+          <Card className="border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 rounded-xl shadow-xs transition-all hover:border-slate-300 flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between">
+                <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider truncate">
                   6-MONTH AVERAGE SPEND
                 </p>
-                <h3 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight">
-                  {fmt(variance?.mean || financials.currentSpend)}
-                </h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400 pt-0.5">
-                  Volatility:{" "}
-                  <span className="font-semibold text-foreground">
-                    {variance?.volatilityCategory || "Stable"}
-                  </span>
-                </p>
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-sky-50 text-sky-600 dark:bg-sky-950/50 dark:text-sky-400">
+                  <Building2 className="h-4 w-4" />
+                </div>
               </div>
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-sky-50 text-sky-600 dark:bg-sky-950/50 dark:text-sky-400">
-                <Building2 className="h-5 w-5" />
-              </div>
+              <h3 className="mt-2 text-2xl font-extrabold text-slate-900 dark:text-white tracking-tight">
+                {fmt(variance?.mean || financials.currentSpend)}
+              </h3>
+            </div>
+            <div className="mt-2.5 flex items-center justify-between text-[11px] border-t border-slate-100 dark:border-slate-800 pt-2 text-muted-foreground">
+              <span className="text-slate-500 dark:text-slate-400">
+                Volatility:{" "}
+                <span className="font-semibold text-foreground">
+                  {variance?.volatilityCategory || "Stable"}
+                </span>
+              </span>
             </div>
           </Card>
 
-          <Card className="border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 rounded-xl shadow-xs transition-all hover:border-slate-300">
-            <div className="flex items-center justify-between">
-              <div className="space-y-1 min-w-0 pr-2">
-                <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+          {/* Card 4: PRIMARY COST DRIVER */}
+          <Card className="border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 rounded-xl shadow-xs transition-all hover:border-slate-300 flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between">
+                <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider truncate">
                   PRIMARY COST DRIVER
                 </p>
-                <h3 className="text-lg font-bold text-slate-900 dark:text-white tracking-tight truncate" title={governance.topCostDriver}>
-                  {governance.topCostDriver}
-                </h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400 pt-0.5">
-                  Dominant service inside account
-                </p>
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-50 text-amber-600 dark:bg-amber-950/50 dark:text-amber-400">
+                  <Sparkles className="h-4 w-4" />
+                </div>
               </div>
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-50 text-amber-600 dark:bg-amber-950/50 dark:text-amber-400 shrink-0">
-                <Sparkles className="h-5 w-5" />
-              </div>
+              <h3 className="mt-2 text-xl font-bold text-slate-900 dark:text-white tracking-tight truncate" title={governance.topCostDriver}>
+                {governance.topCostDriver}
+              </h3>
+            </div>
+            <div className="mt-2.5 flex items-center justify-between text-[11px] border-t border-slate-100 dark:border-slate-800 pt-2 text-muted-foreground">
+              <span className="text-slate-500 dark:text-slate-400">Dominant service inside account</span>
             </div>
           </Card>
         </div>
 
-        {/* Visual Charts Grid: 6-Month Spend Trend & Live Service Breakdown */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Chart 1: 6-Month Historical Spend Trajectory */}
+        {/* Charts Section: Full-width Trend + Side-by-Side 50%/50% Lower Cards (Matching Image 2) */}
+        <div className="space-y-6">
+          {/* 1. Full-Width Last 6 Months Cost Trend */}
           <Card className="border border-muted/50 shadow-sm transition-all duration-300 hover:shadow-md bg-card/60 backdrop-blur-md">
-            <CardHeader className="pb-2">
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="text-lg font-semibold tracking-tight text-foreground">
-                    Historical Monthly Spend Trend
-                  </CardTitle>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    6-month billing history from SQL Server database
-                  </p>
-                </div>
-                <Badge variant="outline" className="text-xs font-semibold px-2 py-0.5">
-                  {financials.historicalMonthlySpend.length} Months
-                </Badge>
+            <CardHeader className="pb-2 flex flex-row items-center justify-between">
+              <div>
+                <CardTitle className="text-lg font-semibold tracking-tight text-foreground">
+                  Last 6 Months Cost Trend
+                </CardTitle>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Historical monthly billing trajectory for {account.accountName}
+                </p>
               </div>
+              <Badge variant="outline" className="text-xs font-semibold px-2 py-0.5">
+                {financials?.historicalMonthlySpend?.length || 0} Months
+              </Badge>
             </CardHeader>
             <CardContent>
-              {financials.historicalMonthlySpend.length > 0 ? (
-                <div className="h-[280px] w-full pt-2">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart
-                      data={financials.historicalMonthlySpend}
-                      margin={{ top: 10, right: 20, left: 10, bottom: 5 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-                      <XAxis
-                        dataKey="month"
-                        stroke="#94a3b8"
-                        fontSize={12}
-                        tickLine={false}
-                        axisLine={false}
-                      />
-                      <YAxis
-                        stroke="#94a3b8"
-                        fontSize={12}
-                        tickLine={false}
-                        axisLine={false}
-                        tickFormatter={formatCompactCurrency}
-                        width={50}
-                      />
-                      <Tooltip
-                        formatter={(val: any) => [
-                          `$${Number(val).toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
-                          "Total Spend",
-                        ]}
-                        contentStyle={{
-                          backgroundColor: "#1e293b",
-                          borderColor: "#334155",
-                          borderRadius: "0.5rem",
-                          color: "#fff",
-                          fontSize: "12px",
+              {trendData.length > 0 ? (
+                <ResponsiveContainer width="100%" height={300}>
+                  <AreaChart data={trendData} margin={{ top: 20, right: 35, left: 15, bottom: 5 }}>
+                    <defs>
+                      <linearGradient id="areaGradientAccount" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#6366f1" stopOpacity={0.25} />
+                        <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                    <XAxis
+                      dataKey="Month"
+                      stroke="#94a3b8"
+                      fontSize={12}
+                      tickLine={false}
+                      axisLine={false}
+                      dy={10}
+                    />
+                    <YAxis
+                      stroke="#94a3b8"
+                      fontSize={12}
+                      tickLine={false}
+                      axisLine={false}
+                      tickFormatter={formatCompactCurrency}
+                      width={55}
+                      dx={-5}
+                    />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: "rgba(255, 255, 255, 0.96)",
+                        border: "1px solid #e2e8f0",
+                        borderRadius: "12px",
+                        boxShadow: "0 8px 30px rgb(0 0 0 / 0.08)",
+                        fontSize: "12px",
+                        fontFamily: "inherit",
+                        color: "#0f172a",
+                      }}
+                      formatter={(value) => [formatFullCurrency(value), "Total Cost"]}
+                    />
+                    {financials.currentMonth && isSelectedMonthInTrend && (
+                      <ReferenceLine
+                        x={financials.currentMonth}
+                        stroke="#4f46e5"
+                        strokeDasharray="4 4"
+                        strokeWidth={2}
+                        label={{
+                          value: "Viewing",
+                          fill: "#4f46e5",
+                          fontSize: 10,
+                          fontWeight: "bold",
+                          position: "top",
+                          offset: 10,
                         }}
                       />
-                      <Bar dataKey="cost" fill="#6366f1" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
+                    )}
+                    <Area
+                      type="monotone"
+                      dataKey="Total Cost"
+                      stroke="#6366f1"
+                      fill="url(#areaGradientAccount)"
+                      strokeWidth={2.5}
+                      activeDot={{ r: 6, strokeWidth: 0, fill: "#6366f1" }}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
               ) : (
                 <div className="h-[280px] flex items-center justify-center text-muted-foreground text-xs">
                   No historical cost data recorded for this account.
@@ -559,17 +700,17 @@ export function LinkedAccountDetailPage() {
             </CardContent>
           </Card>
 
-          {/* Chart 2: Top AWS Services inside this account */}
-          <Card className="border border-muted/50 shadow-sm transition-all duration-300 hover:shadow-md bg-card/60 backdrop-blur-md">
-            <CardHeader className="pb-2">
-              <div className="flex items-center justify-between">
+          {/* 2. Side-by-Side: Top Services (Bar) & Cost Breakdown (Donut) */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Left: Top Services (Horizontal Bar Chart matching Image 2) */}
+            <Card className="border border-muted/50 shadow-sm transition-all duration-300 hover:shadow-md bg-card/60 backdrop-blur-md">
+              <CardHeader className="pb-2 flex flex-row items-center justify-between">
                 <div>
-                  <CardTitle className="text-lg font-semibold tracking-tight text-foreground flex items-center gap-2">
-                    <Server className="w-4 h-4 text-indigo-500" />
-                    Services Inside This Account
+                  <CardTitle className="text-lg font-semibold tracking-tight text-foreground">
+                    Top Services in This Account
                   </CardTitle>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    Live AWS Cost Explorer breakdown ({financials.currentMonth})
+                    Highest cost contributors for active cycle
                   </p>
                 </div>
                 {liveAws?.services && (
@@ -577,78 +718,152 @@ export function LinkedAccountDetailPage() {
                     {liveAws.services.length} Services
                   </Badge>
                 )}
-              </div>
-            </CardHeader>
-            <CardContent>
-              {pieData.length > 0 ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 items-center gap-4 h-[280px] pt-2">
-                  <div className="h-full w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie
-                          data={pieData}
-                          dataKey="value"
-                          nameKey="name"
-                          cx="50%"
-                          cy="50%"
-                          outerRadius={80}
-                          innerRadius={45}
-                          paddingAngle={3}
-                        >
-                          {pieData.map((_, index) => (
-                            <Cell
-                              key={`cell-${index}`}
-                              fill={PROFESSIONAL_COLORS[index % PROFESSIONAL_COLORS.length]}
-                            />
-                          ))}
-                        </Pie>
-                        <Tooltip
-                          formatter={(val: any) => [
-                            `$${Number(val).toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
-                            "Cost",
-                          ]}
-                          contentStyle={{
-                            backgroundColor: "#1e293b",
-                            borderColor: "#334155",
-                            borderRadius: "0.5rem",
-                            color: "#fff",
-                            fontSize: "12px",
-                          }}
-                        />
-                      </PieChart>
-                    </ResponsiveContainer>
+              </CardHeader>
+              <CardContent>
+                {normalizedTopServices.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={320}>
+                    <BarChart
+                      data={normalizedTopServices}
+                      layout="vertical"
+                      margin={{ top: 5, right: 20, left: 10, bottom: 10 }}
+                    >
+                      <defs>
+                        <linearGradient id="barGradientAccount" x1="0" y1="0" x2="1" y2="0">
+                          <stop offset="0%" stopColor="#8b5cf6" stopOpacity={0.8} />
+                          <stop offset="100%" stopColor="#c084fc" stopOpacity={1} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={false} />
+                      <XAxis
+                        type="number"
+                        stroke="#94a3b8"
+                        fontSize={12}
+                        tickLine={false}
+                        axisLine={false}
+                        tickFormatter={formatCompactCurrency}
+                        dy={5}
+                      />
+                      <YAxis
+                        type="category"
+                        dataKey="Service"
+                        width={130}
+                        stroke="#94a3b8"
+                        fontSize={11}
+                        tickLine={false}
+                        axisLine={false}
+                        tickFormatter={(t) => (t && typeof t === "string" && t.length > 16) ? `${t.slice(0, 16)}...` : String(t || "")}
+                        dx={-5}
+                      />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: "rgba(255, 255, 255, 0.96)",
+                          border: "1px solid #e2e8f0",
+                          borderRadius: "12px",
+                          boxShadow: "0 8px 30px rgb(0 0 0 / 0.08)",
+                          fontSize: "12px",
+                          fontFamily: "inherit",
+                          color: "#0f172a",
+                        }}
+                        formatter={(value) => [formatFullCurrency(value), "Cost"]}
+                      />
+                      <Bar dataKey="Cost" fill="url(#barGradientAccount)" radius={[0, 6, 6, 0]} barSize={16} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="h-[320px] flex items-center justify-center text-muted-foreground text-xs">
+                    {liveAws?.error ? `Live AWS Notice: ${liveAws.error}` : "No service breakdown available."}
                   </div>
+                )}
+              </CardContent>
+            </Card>
 
-                  {/* Top 5 Service Legend List */}
-                  <div className="space-y-2 text-xs pr-2 overflow-y-auto max-h-[250px]">
-                    {pieData.map((s, idx) => (
-                      <div key={idx} className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <span
-                            className="w-2.5 h-2.5 rounded-full shrink-0"
-                            style={{
-                              backgroundColor:
-                                PROFESSIONAL_COLORS[idx % PROFESSIONAL_COLORS.length],
+            {/* Right: Cost Breakdown Donut Chart (matching Image 2) */}
+            <Card className="border border-muted/50 shadow-sm transition-all duration-300 hover:shadow-md bg-card/60 backdrop-blur-md flex flex-col justify-between">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-lg font-semibold tracking-tight text-foreground">
+                  Cost Breakdown ({formatMonthName(financials.currentMonth)})
+                </CardTitle>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Proportional service expenditure distribution
+                </p>
+              </CardHeader>
+              <CardContent className="flex flex-col md:flex-row items-center justify-between gap-6 py-6 flex-1">
+                {pieData.length > 0 ? (
+                  <>
+                    {/* Donut Chart */}
+                    <div className="w-full md:w-1/2 flex justify-center">
+                      <ResponsiveContainer width="100%" height={240}>
+                        <PieChart>
+                          <Pie
+                            data={pieData}
+                            dataKey="value"
+                            nameKey="name"
+                            innerRadius={65}
+                            outerRadius={90}
+                            paddingAngle={1.5}
+                          >
+                            {pieData.map((_, i) => (
+                              <Cell
+                                key={i}
+                                fill={PROFESSIONAL_COLORS[i % PROFESSIONAL_COLORS.length]}
+                                className="outline-none stroke-background stroke-2"
+                              />
+                            ))}
+                          </Pie>
+                          <Tooltip
+                            contentStyle={{
+                              backgroundColor: "rgba(255, 255, 255, 0.96)",
+                              border: "1px solid #e2e8f0",
+                              borderRadius: "12px",
+                              boxShadow: "0 8px 30px rgb(0 0 0 / 0.08)",
+                              fontSize: "12px",
+                              fontFamily: "inherit",
+                              color: "#0f172a",
                             }}
+                            formatter={(value) => [formatFullCurrency(value), "Cost"]}
                           />
-                          <span className="font-medium text-foreground truncate">
-                            {s.name}
-                          </span>
-                        </div>
-                        <span className="font-mono font-semibold text-foreground shrink-0">
-                          {fmt(s.value)}
-                        </span>
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+
+                    {/* Tabular Legend List */}
+                    <div className="w-full md:w-1/2 flex flex-col justify-center">
+                      <div className="flex flex-col gap-1.5 max-h-[240px] overflow-y-auto pr-1 select-none scrollbar-thin">
+                        {pieData.map((s, i) => {
+                          const color = PROFESSIONAL_COLORS[i % PROFESSIONAL_COLORS.length];
+                          return (
+                            <div
+                              key={i}
+                              className="flex items-center justify-between text-xs py-1 border-b border-muted/15 last:border-0 hover:bg-muted/10 px-2 rounded transition-colors"
+                            >
+                              <div className="flex items-center gap-2 truncate">
+                                <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: color }} />
+                                <span className="font-medium text-foreground truncate" title={s.name}>
+                                  {s.name}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-3 text-right shrink-0">
+                                <span className="font-semibold text-foreground">
+                                  {fmt(s.value)}
+                                </span>
+                                <span className="text-[11px] text-muted-foreground w-10 text-right">
+                                  {s.sharePct}%
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
-                    ))}
+                    </div>
+                  </>
+                ) : (
+                  <div className="h-[240px] w-full flex items-center justify-center text-muted-foreground text-xs">
+                    {liveAws?.error ? `Live AWS Notice: ${liveAws.error}` : "No service breakdown available."}
                   </div>
-                </div>
-              ) : (
-                <div className="h-[280px] flex items-center justify-center text-muted-foreground text-xs">
-                  {liveAws?.error ? `Live AWS Notice: ${liveAws.error}` : "No live service breakdown available."}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+                )}
+              </CardContent>
+            </Card>
+          </div>
         </div>
 
         {/* Section 3: Live Services Table & Regional Distribution */}
@@ -750,6 +965,14 @@ export function LinkedAccountDetailPage() {
         </div>
       </main>
     </div>
+  );
+}
+
+export function LinkedAccountDetailPage() {
+  return (
+    <ErrorBoundary>
+      <LinkedAccountDetailContent />
+    </ErrorBoundary>
   );
 }
 

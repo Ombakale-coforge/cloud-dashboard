@@ -10,7 +10,6 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { useCsv } from "@/lib/useCsv";
-import { resolveBudgetsForMonth, type AccountSpendInfo } from "@/lib/budgetMatcher";
 import { ManualBudgetAlertsSection } from "@/components/ManualBudgetAlertsSection";
 import type {
   GovernanceSummary,
@@ -19,18 +18,24 @@ import type {
   MonthlyTotal,
 } from "@/lib/types";
 import {
-  ShieldCheck,
-  Building2,
-  PieChart,
-  AlertTriangle,
-  Wallet,
   Search,
   ChevronLeft,
   ChevronRight,
   TrendingUp,
   AlertCircle,
-  CheckCircle2,
 } from "lucide-react";
+
+interface AccountSpendInfo {
+  id: string;
+  name: string;
+  status?: string;
+  currentSpend: number;
+  previousSpend?: number;
+  momChangePercent?: number;
+  hasBudget?: boolean;
+  topCostDriver?: string;
+  latestSpend?: number;
+}
 
 interface OrganizationGovernanceSectionProps {
   selectedMonth: string;
@@ -44,7 +49,6 @@ export function OrganizationGovernanceSection({
   // 1. Fetch Summary JSON metadata (via API first, with fallback)
   const [summary, setSummary] = useState<GovernanceSummary | null>(null);
   const [accountsForMonth, setAccountsForMonth] = useState<AccountSpendInfo[]>([]);
-  const [latestMonthFromApi, setLatestMonthFromApi] = useState<string>("");
 
   useEffect(() => {
     let active = true;
@@ -94,9 +98,6 @@ export function OrganizationGovernanceSection({
       .then(([monthRes, latestRes]) => {
         if (!active || !monthRes?.accounts) return;
         const refRes = latestRes?.accounts ? latestRes : monthRes;
-        if (refRes?.selectedMonth) {
-          setLatestMonthFromApi(refRes.selectedMonth);
-        }
         const latestMap = new Map<string, number>();
         for (const a of refRes.accounts || []) {
           latestMap.set(a.linkedAccountId, Number(a.currentSpend || 0));
@@ -134,20 +135,6 @@ export function OrganizationGovernanceSection({
     ? `${basePath}/budgets_overview.csv?month=${encodeURIComponent(selectedMonth)}`
     : `${basePath}/budgets_overview.csv`;
   const { data: rawBudgetsOverview } = useCsv<BudgetOverviewRow>(budgetsPath);
-  const { data: monthlyTotals } = useCsv<MonthlyTotal>(`${basePath}/monthly_totals_last_6_months.csv`);
-
-  const budgetsOverview = useMemo(() => {
-    const sortedMonths = (monthlyTotals || []).map((m) => m.Month).filter(Boolean).sort();
-    const latestMonth = latestMonthFromApi || sortedMonths[sortedMonths.length - 1] || "";
-    const targetRec = (monthlyTotals || []).find((m) => m.Month === selectedMonth);
-    const latestRec = (monthlyTotals || []).find((m) => m.Month === latestMonth);
-    const targetTotal = targetRec ? Number(targetRec["Total Cost"] || 0) : 0;
-    const latestTotal = latestRec ? Number(latestRec["Total Cost"] || 0) : 0;
-    const scaleRatio = latestTotal > 0 && targetTotal > 0 ? targetTotal / latestTotal : 1;
-    const isLatest = !selectedMonth || !latestMonth || selectedMonth === latestMonth;
-
-    return resolveBudgetsForMonth(rawBudgetsOverview || [], accountsForMonth, scaleRatio, isLatest);
-  }, [rawBudgetsOverview, accountsForMonth, monthlyTotals, selectedMonth, latestMonthFromApi]);
 
   // 4. Compute Top 5 Spends (Top 5 Linked Accounts by spend for selectedMonth)
   const top5Spends = useMemo(() => {
@@ -158,37 +145,32 @@ export function OrganizationGovernanceSection({
 
     const source: AccountSpendInfo[] =
       accountsForMonth.length > 0
-        ? accountsForMonth.map((a) => ({
-            ...a,
-            hasBudget:
-              a.status?.toUpperCase() === "ACTIVE" &&
-              hasAnyBudgets &&
-              !unbudgetedIds.has(a.id) &&
-              Boolean(a.hasBudget),
-          }))
-        : (unbudgetedAccounts || [])
-            .filter((u) => u && u["Account Name"])
-            .map((u) => ({
-              id: String(u["Account ID"] || ""),
-              name: String(u["Account Name"] || ""),
-              status: String(u.Status || "ACTIVE"),
-              currentSpend: Number(u["Current Month Spend"] || 0),
-              previousSpend: Number(u["Previous Month Spend"] || 0),
-              momChangePercent: Number(u["MoM Change %"] || 0),
-              hasBudget: false,
-              topCostDriver: String(u["Top Cost Driver"] || "Cloud Services"),
-            }));
+        ? accountsForMonth
+        : (unbudgetedAccounts || []).map((u) => ({
+            id: String(u["Account ID"] || ""),
+            name: String(u["Account Name"] || u["Account ID"] || ""),
+            status: u.Status,
+            currentSpend: Number(u["Current Month Spend"] || 0),
+            previousSpend: Number(u["Previous Month Spend"] || 0),
+            momChangePercent:
+              typeof u["MoM Change %"] === "number"
+                ? u["MoM Change %"]
+                : parseFloat(String(u["MoM Change %"] || 0)),
+            hasBudget: hasAnyBudgets ? !unbudgetedIds.has(String(u["Account ID"] || "")) : false,
+            topCostDriver: u["Top Cost Driver"] || "AWS Services",
+          }));
 
-    return [...source]
-      .sort(
-        (a, b) =>
-          b.currentSpend - a.currentSpend || (b.previousSpend || 0) - (a.previousSpend || 0)
-      )
-      .slice(0, 5);
+    const sorted = [...source]
+      .filter((a) => a.currentSpend > 0)
+      .sort((a, b) => b.currentSpend - a.currentSpend);
+
+    return sorted.slice(0, 5);
   }, [accountsForMonth, unbudgetedAccounts, rawBudgetsOverview]);
 
   const totalOrgMonthSpend = useMemo(() => {
-    if (summary && summary.activeSpendTotal > 0) return summary.activeSpendTotal;
+    if (summary && typeof summary.activeSpendTotal === "number" && summary.activeSpendTotal > 0) {
+      return summary.activeSpendTotal;
+    }
     if (accountsForMonth.length > 0) {
       return accountsForMonth.reduce((sum, a) => sum + a.currentSpend, 0);
     }
@@ -213,10 +195,6 @@ export function OrganizationGovernanceSection({
   const [pageUnbudgeted, setPageUnbudgeted] = useState(1);
   const ITEMS_PER_PAGE = 6;
 
-  // Search & Pagination for Budgets Overview
-  const [searchBudgets, setSearchBudgets] = useState("");
-  const [pageBudgets, setPageBudgets] = useState(1);
-
   // Filter Unbudgeted Accounts
   const filteredUnbudgeted = (unbudgetedAccounts || []).filter((a) => {
     if (!a || !a["Account Name"]) return false;
@@ -231,21 +209,6 @@ export function OrganizationGovernanceSection({
   const paginatedUnbudgeted = filteredUnbudgeted.slice(
     (pageUnbudgeted - 1) * ITEMS_PER_PAGE,
     pageUnbudgeted * ITEMS_PER_PAGE
-  );
-
-  // Filter Budgets Overview
-  const filteredBudgets = (budgetsOverview || []).filter((b) => {
-    if (!b || !b["Budget Name"]) return false;
-    const term = searchBudgets.toLowerCase();
-    return (
-      b["Budget Name"].toLowerCase().includes(term) ||
-      (b["Threshold Status"] && String(b["Threshold Status"]).toLowerCase().includes(term))
-    );
-  });
-  const totalPagesBudgets = Math.max(1, Math.ceil(filteredBudgets.length / ITEMS_PER_PAGE));
-  const paginatedBudgets = filteredBudgets.slice(
-    (pageBudgets - 1) * ITEMS_PER_PAGE,
-    pageBudgets * ITEMS_PER_PAGE
   );
 
   // Month Formatter
@@ -263,160 +226,9 @@ export function OrganizationGovernanceSection({
 
   return (
     <div className="space-y-6 pt-2">
-      {/* Section Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-muted/30 pb-3">
-        <div className="flex items-center gap-2.5">
-          <div className="p-2 rounded-lg bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
-            <ShieldCheck className="h-5 w-5" />
-          </div>
-          <div>
-            <h2 className="text-xl font-bold tracking-tight text-foreground">
-              AWS Organization & Budget Governance
-            </h2>
-            <p className="text-xs text-muted-foreground">
-              Account inventory, budget enforcement, and unbudgeted financial exposure
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <Badge variant="outline" className="text-xs font-semibold px-2.5 py-1 bg-background/50">
-            Reporting Period: {monthLabel}
-          </Badge>
-        </div>
-      </div>
-
-      {/* KPI Cards Grid */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
-        {/* Card 1: Accounts in Organisation */}
-        <Card className="border border-muted/40 shadow-sm bg-card/60 backdrop-blur-md">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-muted-foreground">
-                Org Accounts
-              </span>
-              <Building2 className="h-4 w-4 text-indigo-500" />
-            </div>
-            <div className="mt-2 text-2xl font-bold text-foreground">
-              {summary ? summary.totalAccounts : unbudgetedAccounts.length || "--"}
-            </div>
-            <div className="mt-2.5 flex items-center justify-between text-xs border-t border-muted/30 pt-2 text-muted-foreground">
-              <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-medium">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                {summary ? `${summary.activeAccounts} active` : "Active accounts"}
-              </span>
-              <span className="text-slate-500">
-                {summary ? `${summary.suspendedAccounts} closed` : ""}
-              </span>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Card 2: Accounts with a Budget */}
-        <Card className="border border-muted/40 shadow-sm bg-card/60 backdrop-blur-md">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-muted-foreground">
-                Budget Coverage
-              </span>
-              <PieChart className="h-4 w-4 text-emerald-500" />
-            </div>
-            <div className="mt-2 flex items-baseline gap-2">
-              <span className="text-2xl font-bold text-foreground">
-                {summary ? `${summary.budgetCoveragePct}%` : "--%"}
-              </span>
-              <span className="text-xs text-muted-foreground font-medium">
-                {summary ? `${summary.accountsWithBudget}/${summary.activeAccounts}` : "covered"}
-              </span>
-            </div>
-            <div className="mt-2.5 flex items-center justify-between text-xs border-t border-muted/30 pt-2">
-              <span className="text-emerald-600 dark:text-emerald-400 font-medium">
-                {summary ? `${summary.accountsWithBudget} with budget` : "Under budget"}
-              </span>
-              <span className="text-amber-600 dark:text-amber-400 font-medium">
-                {summary ? `${summary.accountsWithNoBudget} no budget` : "No budget"}
-              </span>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Card 3: Spend Under Management */}
-        <Card className="border border-muted/40 shadow-sm bg-card/60 backdrop-blur-md">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-muted-foreground">
-                {monthLabel} Active Spend
-              </span>
-              <TrendingUp className="h-4 w-4 text-blue-500" />
-            </div>
-            <div className="mt-2 text-2xl font-bold text-foreground">
-              ${summary ? summary.activeSpendTotal.toLocaleString(undefined, { maximumFractionDigits: 0 }) : "--"}
-            </div>
-            <div className="mt-2.5 flex items-center justify-between text-xs border-t border-muted/30 pt-2">
-              <span className="text-emerald-600 dark:text-emerald-400 font-medium">
-                ${summary ? summary.spendUnderBudget.toLocaleString(undefined, { maximumFractionDigits: 0 }) : "0"} under
-              </span>
-              <span className="text-rose-600 dark:text-rose-400 font-medium">
-                ${summary ? summary.spendWithNoBudget.toLocaleString(undefined, { maximumFractionDigits: 0 }) : "0"} unbudgeted
-              </span>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Card 4: Sum of Budget Limits in Force */}
-        <Card className="border border-muted/40 shadow-sm bg-card/60 backdrop-blur-md">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-muted-foreground">
-                Budget Limits In Force
-              </span>
-              <Wallet className="h-4 w-4 text-purple-500" />
-            </div>
-            <div className="mt-2 text-2xl font-bold text-foreground">
-              ${summary ? summary.sumBudgetLimits.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "--"}
-            </div>
-            <div className="mt-2.5 flex items-center justify-between text-xs border-t border-muted/30 pt-2">
-              <span className="text-muted-foreground">
-                Uncovered Share:
-              </span>
-              <span className="font-semibold text-rose-600 dark:text-rose-400">
-                {summary ? `${summary.shareSpendUncoveredPct}%` : "--%"}
-              </span>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Card 5: Suspended Accounts Still Charging */}
-        <Card className="border border-muted/40 shadow-sm bg-card/60 backdrop-blur-md">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-muted-foreground">
-                Suspended Accounts Leakage
-              </span>
-              <AlertTriangle className={`h-4 w-4 ${summary && summary.suspendedAccountsChargingCount > 0 ? "text-amber-500" : "text-slate-400"}`} />
-            </div>
-            <div className="mt-2 flex items-baseline gap-2">
-              <span className={`text-2xl font-bold ${summary && summary.suspendedAccountsChargingCount > 0 ? "text-amber-600 dark:text-amber-400" : "text-foreground"}`}>
-                {summary ? summary.suspendedAccountsChargingCount : 0}
-              </span>
-              <span className="text-xs text-muted-foreground font-medium">
-                still charging
-              </span>
-            </div>
-            <div className="mt-2.5 flex items-center justify-between text-xs border-t border-muted/30 pt-2">
-              <span className="text-muted-foreground">
-                {summary?.suspendedPeriodLabel || "Jun-Sep Total"}:
-              </span>
-              <span className="font-bold text-rose-600 dark:text-rose-400">
-                ${summary ? summary.suspendedAccountsSpendTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "0.00"}
-              </span>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Governance Data Tables (3-Column Grid: Top 5 Spends | Unbudgeted Accounts | AWS Budgets Overview) */}
-      <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
-        {/* Table 0: Top 5 Spends */}
+      {/* Side-by-side Governance Tables: Top 5 Spends | Largest Accounts with No Budget */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        {/* Table 1: Top 5 Spends */}
         <Card className="flex flex-col h-full border border-muted/40 shadow-sm bg-card/60 backdrop-blur-md">
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between gap-2">
@@ -456,10 +268,10 @@ export function OrganizationGovernanceSection({
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-[36px]">#</TableHead>
-                    <TableHead className="max-w-[150px]">Account</TableHead>
-                    <TableHead className="w-[95px]">Share</TableHead>
-                    <TableHead className="text-right whitespace-nowrap w-[90px]">
+                    <TableHead className="w-[32px] text-center">#</TableHead>
+                    <TableHead>Account</TableHead>
+                    <TableHead className="w-[110px]">Share of Org</TableHead>
+                    <TableHead className="text-right whitespace-nowrap w-[100px]">
                       {monthLabel} Spend
                     </TableHead>
                   </TableRow>
@@ -469,29 +281,20 @@ export function OrganizationGovernanceSection({
                     top5Spends.map((acc, idx) => {
                       const sharePct =
                         totalOrgMonthSpend > 0
-                          ? Math.min(100, Number(((acc.currentSpend / totalOrgMonthSpend) * 100).toFixed(1)))
+                          ? Number(((acc.currentSpend / totalOrgMonthSpend) * 100).toFixed(1))
                           : 0;
-                      const mom = Number(acc.momChangePercent || 0);
+                      const mom =
+                        typeof acc.momChangePercent === "number"
+                          ? Number(acc.momChangePercent.toFixed(1))
+                          : 0;
 
                       return (
                         <TableRow key={acc.id || idx} className="hover:bg-muted/30">
-                          <TableCell className="py-2.5 w-[36px]">
-                            <span
-                              className={`inline-flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold ${
-                                idx === 0
-                                  ? "bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300"
-                                  : idx === 1
-                                  ? "bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-300"
-                                  : idx === 2
-                                  ? "bg-orange-100 text-orange-700 dark:bg-orange-950/60 dark:text-orange-300"
-                                  : "bg-indigo-50 text-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-400"
-                              }`}
-                            >
-                              {idx + 1}
-                            </span>
+                          <TableCell className="w-[32px] text-center font-bold text-xs text-muted-foreground py-2.5">
+                            {idx + 1}
                           </TableCell>
-                          <TableCell className="py-2.5 max-w-[150px]">
-                            <div className="font-semibold text-xs truncate" title={acc.name}>
+                          <TableCell className="py-2.5">
+                            <div className="font-semibold text-xs truncate max-w-[220px]" title={acc.name}>
                               {acc.name}
                             </div>
                             <div className="flex items-center gap-1.5 mt-0.5">
@@ -510,7 +313,7 @@ export function OrganizationGovernanceSection({
                               </Badge>
                             </div>
                           </TableCell>
-                          <TableCell className="py-2.5 w-[95px]">
+                          <TableCell className="py-2.5 w-[110px]">
                             <div className="flex items-center gap-1.5">
                               <div className="flex-1 bg-muted rounded-full h-1.5 overflow-hidden">
                                 <div
@@ -518,12 +321,12 @@ export function OrganizationGovernanceSection({
                                   style={{ width: `${Math.min(100, sharePct)}%` }}
                                 />
                               </div>
-                              <span className="text-[10px] font-mono font-medium text-muted-foreground min-w-[28px] text-right">
+                              <span className="text-[10px] font-mono font-medium text-muted-foreground min-w-[32px] text-right">
                                 {sharePct}%
                               </span>
                             </div>
                           </TableCell>
-                          <TableCell className="text-right whitespace-nowrap w-[90px] py-2.5">
+                          <TableCell className="text-right whitespace-nowrap w-[100px] py-2.5">
                             <div className="font-semibold text-xs text-foreground">
                               ${acc.currentSpend.toLocaleString(undefined, {
                                 minimumFractionDigits: 2,
@@ -568,7 +371,7 @@ export function OrganizationGovernanceSection({
           </CardContent>
         </Card>
 
-        {/* Table 1: Largest Accounts with No Budget */}
+        {/* Table 2: Largest Accounts with No Budget */}
         <Card className="flex flex-col h-full border border-muted/40 shadow-sm bg-card/60 backdrop-blur-md">
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
@@ -607,9 +410,9 @@ export function OrganizationGovernanceSection({
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="max-w-[180px]">Account</TableHead>
-                    <TableHead className="w-[100px] hidden sm:table-cell">Top Driver</TableHead>
-                    <TableHead className="text-right whitespace-nowrap w-[90px]">
+                    <TableHead>Account</TableHead>
+                    <TableHead className="w-[120px] hidden sm:table-cell">Top Driver</TableHead>
+                    <TableHead className="text-right whitespace-nowrap w-[100px]">
                       {monthLabel} Spend
                     </TableHead>
                   </TableRow>
@@ -618,20 +421,20 @@ export function OrganizationGovernanceSection({
                   {paginatedUnbudgeted.length > 0 ? (
                     paginatedUnbudgeted.map((a, i) => (
                       <TableRow key={i} className="hover:bg-muted/30">
-                        <TableCell className="py-2.5 max-w-[180px]">
-                          <div className="font-semibold text-xs truncate" title={a["Account Name"]}>
+                        <TableCell className="py-2.5">
+                          <div className="font-semibold text-xs truncate max-w-[220px]" title={a["Account Name"]}>
                             {a["Account Name"]}
                           </div>
                           <div className="text-[10px] text-muted-foreground font-mono">
                             {a["Account ID"]}
                           </div>
                         </TableCell>
-                        <TableCell className="py-2.5 w-[100px] hidden sm:table-cell">
-                          <span className="text-xs text-muted-foreground truncate block max-w-[120px]" title={a["Top Cost Driver"]}>
+                        <TableCell className="py-2.5 w-[120px] hidden sm:table-cell">
+                          <span className="text-xs text-muted-foreground truncate block max-w-[130px]" title={a["Top Cost Driver"]}>
                             {a["Top Cost Driver"] || "Various"}
                           </span>
                         </TableCell>
-                        <TableCell className="text-right font-semibold whitespace-nowrap w-[90px] py-2.5 text-xs text-rose-600 dark:text-rose-400">
+                        <TableCell className="text-right font-semibold whitespace-nowrap w-[100px] py-2.5 text-xs text-rose-600 dark:text-rose-400">
                           ${Number(a["Current Month Spend"] || 0).toLocaleString(undefined, {
                             minimumFractionDigits: 2,
                             maximumFractionDigits: 2,
@@ -674,155 +477,6 @@ export function OrganizationGovernanceSection({
                 <button
                   onClick={() => setPageUnbudgeted((p) => Math.min(totalPagesUnbudgeted, p + 1))}
                   disabled={pageUnbudgeted === totalPagesUnbudgeted || totalPagesUnbudgeted === 0}
-                  className="p-1 rounded border border-muted/30 hover:bg-muted/50 disabled:opacity-40 transition-colors cursor-pointer"
-                >
-                  <ChevronRight size={16} />
-                </button>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Table 2: AWS Budgets Overview & Health */}
-        <Card className="flex flex-col h-full border border-muted/40 shadow-sm bg-card/60 backdrop-blur-md">
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle className="text-lg font-semibold tracking-tight flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-                  AWS Budgets Overview
-                </CardTitle>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Live budget limits, actual consumption, and forecasted alerts
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <Badge variant="outline" className="text-[10px] font-semibold text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800">
-                  Live Active Budgets
-                </Badge>
-                <Badge variant="outline" className="text-xs font-semibold text-indigo-600 border-indigo-300 dark:border-indigo-800">
-                  {filteredBudgets.length} budgets
-                </Badge>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent className="flex flex-col flex-1 pb-4">
-            {/* Search Input */}
-            <div className="relative mb-3">
-              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-              <input
-                type="text"
-                placeholder="Search budgets..."
-                value={searchBudgets}
-                onChange={(e) => {
-                  setSearchBudgets(e.target.value);
-                  setPageBudgets(1);
-                }}
-                className="w-full bg-background pl-8 pr-3 py-1.5 text-sm rounded-md border border-input focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-indigo-500/50"
-              />
-            </div>
-
-            {/* Table */}
-            <div className="flex-1 min-h-[300px]">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="max-w-[150px]">Budget Name</TableHead>
-                    <TableHead className="text-right whitespace-nowrap w-[70px]">Limit</TableHead>
-                    <TableHead className="text-right whitespace-nowrap w-[90px]">{monthLabel} Used</TableHead>
-                    <TableHead className="w-[110px]">Utilization</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {paginatedBudgets.length > 0 ? (
-                    paginatedBudgets.map((b, i) => {
-                      const limit = Number(b.Limit ?? b["Budget Limit"] ?? 0);
-                      const used = Number(b["Current Used"] ?? b["Current Spend"] ?? 0);
-                      const pct = limit > 0 ? Math.round((used / limit) * 100) : 0;
-                      const isExceeded = b["Threshold Status"]?.toLowerCase().includes("exceeded") || pct >= 100;
-
-                      return (
-                        <TableRow key={i} className="hover:bg-muted/30">
-                          <TableCell className="py-2.5 max-w-[150px]">
-                            <div className="font-semibold text-xs truncate" title={b["Budget Name"]}>
-                              {b["Budget Name"]}
-                            </div>
-                            <div className="mt-0.5">
-                              <Badge
-                                variant="secondary"
-                                className={`text-[10px] px-1.5 py-0 border ${
-                                  isExceeded
-                                    ? "bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/40 dark:text-rose-300"
-                                    : "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300"
-                                }`}
-                              >
-                                {b["Threshold Status"] || (isExceeded ? "Exceeded" : "OK")}
-                              </Badge>
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-right font-medium whitespace-nowrap w-[70px] py-2.5 text-xs">
-                            ${limit.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                          </TableCell>
-                          <TableCell className="text-right font-semibold whitespace-nowrap w-[70px] py-2.5 text-xs text-foreground">
-                            ${used.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </TableCell>
-                          <TableCell className="w-[110px] py-2.5">
-                            <div className="flex items-center gap-2">
-                              <div className="flex-1 bg-muted rounded-full h-1.5 overflow-hidden">
-                                <div
-                                  className={`h-full rounded-full transition-all ${
-                                    pct >= 100
-                                      ? "bg-rose-500"
-                                      : pct >= 80
-                                      ? "bg-amber-500"
-                                      : "bg-emerald-500"
-                                  }`}
-                                  style={{ width: `${Math.min(pct, 100)}%` }}
-                                />
-                              </div>
-                              <span className="text-[11px] font-mono font-medium text-muted-foreground min-w-[28px] text-right">
-                                {pct}%
-                              </span>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })
-                  ) : (
-                    <TableRow>
-                      <TableCell colSpan={4} className="text-center text-muted-foreground py-8">
-                        No budgets found
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </div>
-
-            {/* Pagination Controls */}
-            <div className="flex items-center justify-between mt-4 pt-3 border-t border-muted/30">
-              <div className="text-xs text-muted-foreground">
-                {filteredBudgets.length > 0
-                  ? `Showing ${(pageBudgets - 1) * ITEMS_PER_PAGE + 1}-${Math.min(
-                      pageBudgets * ITEMS_PER_PAGE,
-                      filteredBudgets.length
-                    )} of ${filteredBudgets.length}`
-                  : "0-0 of 0"}
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setPageBudgets((p) => Math.max(1, p - 1))}
-                  disabled={pageBudgets === 1}
-                  className="p-1 rounded border border-muted/30 hover:bg-muted/50 disabled:opacity-40 transition-colors cursor-pointer"
-                >
-                  <ChevronLeft size={16} />
-                </button>
-                <span className="text-xs font-medium min-w-[32px] text-center">
-                  {pageBudgets} / {totalPagesBudgets || 1}
-                </span>
-                <button
-                  onClick={() => setPageBudgets((p) => Math.min(totalPagesBudgets, p + 1))}
-                  disabled={pageBudgets === totalPagesBudgets || totalPagesBudgets === 0}
                   className="p-1 rounded border border-muted/30 hover:bg-muted/50 disabled:opacity-40 transition-colors cursor-pointer"
                 >
                   <ChevronRight size={16} />
