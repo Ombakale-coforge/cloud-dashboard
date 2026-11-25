@@ -37,12 +37,16 @@ export function formatUsd(
 ): string {
   const num = Number(amount ?? 0);
   const safe = Number.isFinite(num) ? num : 0;
+  const maxFrac =
+    options?.maximumFractionDigits ??
+    Math.max(2, options?.minimumFractionDigits ?? 2);
+  const minFrac = Math.min(options?.minimumFractionDigits ?? 2, maxFrac);
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
     ...options,
+    minimumFractionDigits: minFrac,
+    maximumFractionDigits: maxFrac,
   }).format(safe);
 }
 
