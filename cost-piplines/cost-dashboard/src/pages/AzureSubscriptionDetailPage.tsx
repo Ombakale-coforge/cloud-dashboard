@@ -230,49 +230,26 @@ export function AzureSubscriptionDetailPage() {
     return date.toLocaleString("default", { month: "long", year: "numeric" });
   };
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-[#f4f7fa] dark:bg-slate-950 flex flex-col items-center justify-center space-y-3 font-sans">
-        <RefreshCw className="w-8 h-8 text-sky-500 animate-spin" />
-        <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">
-          Loading 360° Azure Subscription Analytics & FOCUS Cost Data...
-        </p>
-        <p className="text-xs text-muted-foreground">
-          Querying SQL database and FOCUS storage exports for subscription {subscriptionId}
-        </p>
-      </div>
-    );
-  }
+  const account = data?.account || ({} as any);
+  const financials = data?.financials || {
+    currentMonth: "",
+    currentSpend: 0,
+    previousSpend: 0,
+    momChangePercent: 0,
+    historicalMonthlySpend: [],
+  };
+  const variance = data?.variance;
+  const governance = data?.governance || {
+    hasBudget: false,
+    status: "Unbudgeted" as const,
+    topCostDriver: "Cloud Infrastructure",
+  };
+  const liveAzure = data?.liveAzure;
 
-  if (error || !data) {
-    return (
-      <div className="min-h-screen bg-[#f4f7fa] dark:bg-slate-950 flex flex-col items-center justify-center p-6 space-y-4 font-sans">
-        <AlertTriangle className="w-10 h-10 text-rose-500" />
-        <h2 className="text-xl font-bold tracking-tight text-foreground">Failed to Load Subscription Profile</h2>
-        <p className="text-xs text-rose-600 max-w-md text-center">{error}</p>
-        <div className="flex gap-2.5 pt-2">
-          <Link
-            to="/azure/subscriptions"
-            className="px-3 py-1.5 text-xs font-semibold rounded-md border border-input bg-background hover:bg-muted text-foreground transition-colors"
-          >
-            ← Back to Directory
-          </Link>
-          <button
-            onClick={fetchDetails}
-            className="px-3 py-1.5 text-xs font-semibold rounded-md bg-sky-600 text-white hover:bg-sky-700 transition-colors cursor-pointer"
-          >
-            Retry
-          </button>
-        </div>
-      </div>
-    );
-  }
+  const isPositiveMoM = (financials.momChangePercent || 0) > 0;
+  const isNegativeMoM = (financials.momChangePercent || 0) < 0;
 
-  const { account, financials, variance, governance, liveAzure } = data;
-  const isPositiveMoM = financials.momChangePercent > 0;
-  const isNegativeMoM = financials.momChangePercent < 0;
-
-  const historicalMonthlySpendUsd = financials.historicalMonthlySpend.map((h) => ({
+  const historicalMonthlySpendUsd = (financials.historicalMonthlySpend || []).map((h) => ({
     ...h,
     cost: azureInrToUsd(h.cost, "INR"),
   }));
@@ -352,6 +329,44 @@ export function AzureSubscriptionDetailPage() {
 
     return list;
   }, [liveAzure?.services, inventoryCategory, inventorySearch]);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#f4f7fa] dark:bg-slate-950 flex flex-col items-center justify-center space-y-3 font-sans">
+        <RefreshCw className="w-8 h-8 text-sky-500 animate-spin" />
+        <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">
+          Loading 360° Azure Subscription Analytics & FOCUS Cost Data...
+        </p>
+        <p className="text-xs text-muted-foreground">
+          Querying SQL database and FOCUS storage exports for subscription {subscriptionId}
+        </p>
+      </div>
+    );
+  }
+
+  if (error || !data) {
+    return (
+      <div className="min-h-screen bg-[#f4f7fa] dark:bg-slate-950 flex flex-col items-center justify-center p-6 space-y-4 font-sans">
+        <AlertTriangle className="w-10 h-10 text-rose-500" />
+        <h2 className="text-xl font-bold tracking-tight text-foreground">Failed to Load Subscription Profile</h2>
+        <p className="text-xs text-rose-600 max-w-md text-center">{error}</p>
+        <div className="flex gap-2.5 pt-2">
+          <Link
+            to="/azure/subscriptions"
+            className="px-3 py-1.5 text-xs font-semibold rounded-md border border-input bg-background hover:bg-muted text-foreground transition-colors"
+          >
+            ← Back to Directory
+          </Link>
+          <button
+            onClick={fetchDetails}
+            className="px-3 py-1.5 text-xs font-semibold rounded-md bg-sky-600 text-white hover:bg-sky-700 transition-colors cursor-pointer"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#f4f7fa] dark:bg-slate-950 text-slate-900 dark:text-slate-100 font-sans antialiased pb-12">

@@ -352,44 +352,6 @@ function LinkedAccountDetailContent() {
     return date.toLocaleString("default", { month: "long", year: "numeric" });
   };
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-[#f4f7fa] dark:bg-slate-950 flex flex-col items-center justify-center space-y-3 font-sans">
-        <RefreshCw className="w-8 h-8 text-indigo-500 animate-spin" />
-        <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">
-          Loading 360° Account Analytics & Live AWS Cost Explorer...
-        </p>
-        <p className="text-xs text-muted-foreground">
-          Querying SQL Server database and AWS Organizations for account {linkedAccountId}
-        </p>
-      </div>
-    );
-  }
-
-  if (error || !data) {
-    return (
-      <div className="min-h-screen bg-[#f4f7fa] dark:bg-slate-950 flex flex-col items-center justify-center p-6 space-y-4 font-sans">
-        <AlertTriangle className="w-10 h-10 text-rose-500" />
-        <h2 className="text-xl font-bold tracking-tight text-foreground">Failed to Load Account Profile</h2>
-        <p className="text-xs text-rose-600 max-w-md text-center">{error}</p>
-        <div className="flex gap-2.5 pt-2">
-          <Link
-            to="/linked-accounts"
-            className="px-3 py-1.5 text-xs font-semibold rounded-md border border-input bg-background hover:bg-muted text-foreground transition-colors"
-          >
-            ← Back to Directory
-          </Link>
-          <button
-            onClick={fetchDetails}
-            className="px-3 py-1.5 text-xs font-semibold rounded-md bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
-          >
-            Retry
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   const account = data?.account || ({} as any);
   const financials = data?.financials || {
     currentMonth: "",
@@ -506,6 +468,44 @@ function LinkedAccountDetailContent() {
 
     return list;
   }, [liveAws?.services, inventoryCategory, inventorySearch]);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#f4f7fa] dark:bg-slate-950 flex flex-col items-center justify-center space-y-3 font-sans">
+        <RefreshCw className="w-8 h-8 text-indigo-500 animate-spin" />
+        <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">
+          Loading 360° Account Analytics & Live AWS Cost Explorer...
+        </p>
+        <p className="text-xs text-muted-foreground">
+          Querying SQL Server database and AWS Organizations for account {linkedAccountId}
+        </p>
+      </div>
+    );
+  }
+
+  if (error || !data) {
+    return (
+      <div className="min-h-screen bg-[#f4f7fa] dark:bg-slate-950 flex flex-col items-center justify-center p-6 space-y-4 font-sans">
+        <AlertTriangle className="w-10 h-10 text-rose-500" />
+        <h2 className="text-xl font-bold tracking-tight text-foreground">Failed to Load Account Profile</h2>
+        <p className="text-xs text-rose-600 max-w-md text-center">{error}</p>
+        <div className="flex gap-2.5 pt-2">
+          <Link
+            to="/linked-accounts"
+            className="px-3 py-1.5 text-xs font-semibold rounded-md border border-input bg-background hover:bg-muted text-foreground transition-colors"
+          >
+            ← Back to Directory
+          </Link>
+          <button
+            onClick={fetchDetails}
+            className="px-3 py-1.5 text-xs font-semibold rounded-md bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#f4f7fa] dark:bg-slate-950 text-slate-900 dark:text-slate-100 font-sans antialiased pb-12">
