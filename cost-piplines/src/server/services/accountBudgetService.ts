@@ -41,6 +41,9 @@ export interface CloudAccountUsageInfo {
   currentSpendUsd?: number;
   topCostDriver: string;
   topServices: TopServiceCost[];
+  ownerEmail?: string | null;
+  ownerName?: string | null;
+  suggestedBudget?: number;
 }
 
 export interface StoredAccountBudget {
@@ -294,6 +297,11 @@ async function resolveAwsAccountsUsage(targetMonth?: string): Promise<CloudAccou
             unbudgetedMap.get(cleanId)?.topCostDriver ||
             (currentSpend === 0 ? 'No usage recorded' : 'Cloud Infrastructure');
 
+          const baseSpend = previousSpend > 0 ? previousSpend : currentSpend;
+          const suggestedBudget = round2(baseSpend > 0 ? baseSpend * 1.05 : 100);
+          const ownerEmail = dir?.email || (cleanId ? `${cleanId.replace(/[^0-9]/g, '') || cleanId}@coforge.com` : null);
+          const ownerName = dir?.ownerName || `${name} Team`;
+
           results.push({
             cloudProvider: 'aws',
             accountId: cleanId,
@@ -310,6 +318,9 @@ async function resolveAwsAccountsUsage(targetMonth?: string): Promise<CloudAccou
             currentSpendUsd: currentSpend,
             topCostDriver: topDriver,
             topServices: [],
+            ownerEmail,
+            ownerName,
+            suggestedBudget,
           });
         }
       }
@@ -435,6 +446,11 @@ async function resolveAzureAccountsUsage(targetMonth?: string): Promise<CloudAcc
     const matchedBudget = budgetMap.get(name.toLowerCase());
     const subId = matchedBudget?.subscriptionId || (idx === 0 ? defaultGuid : `sub-${idx + 1}`);
 
+    const baseSpend = previousSpend > 0 ? previousSpend : currentSpend;
+    const suggestedBudget = round2(baseSpend > 0 ? baseSpend * 1.05 : 100);
+    const ownerEmail = `${name.toLowerCase().replace(/[^a-z0-9]/g, "") || "azure"}@coforge.com`;
+    const ownerName = `${name} Lead`;
+
     return {
       cloudProvider: 'azure',
       accountId: subId,
@@ -451,6 +467,9 @@ async function resolveAzureAccountsUsage(targetMonth?: string): Promise<CloudAcc
       currentSpendUsd: round2(currentSpend / getAzureUsdToInrRate()),
       topCostDriver: currentSpend === 0 ? 'No usage recorded' : 'Azure Infrastructure',
       topServices: [],
+      ownerEmail,
+      ownerName,
+      suggestedBudget,
     };
   });
 
@@ -544,6 +563,11 @@ async function resolveGcpAccountsUsage(targetMonth?: string): Promise<CloudAccou
             : [];
           const currency = String(r.currency || 'INR').toUpperCase() === 'USD' ? 'USD' : 'INR';
 
+          const baseSpend = previousSpend > 0 ? previousSpend : currentSpend;
+          const suggestedBudget = round2(baseSpend > 0 ? baseSpend * 1.05 : 100);
+          const ownerEmail = `${projectId.replace(/[^a-z0-9]/g, "") || "gcp"}@coforge.com`;
+          const ownerName = `${name} Lead`;
+
           return {
             cloudProvider: 'gcp',
             accountId: projectId,
@@ -560,6 +584,9 @@ async function resolveGcpAccountsUsage(targetMonth?: string): Promise<CloudAccou
             currentSpendUsd: currency === 'USD' ? currentSpend : round2(currentSpend / convRate),
             topCostDriver: topServices[0]?.service || 'Google Cloud Platform',
             topServices,
+            ownerEmail,
+            ownerName,
+            suggestedBudget,
           };
         });
       }
@@ -573,6 +600,8 @@ async function resolveGcpAccountsUsage(targetMonth?: string): Promise<CloudAccou
       service: svc,
       cost: round2(p.currentSpend * (idx === 0 ? 0.5 : 0.5 / Math.max(1, (p.activeServices?.length || 2) - 1))),
     }));
+    const prevSpend = round2(p.currentSpend * 0.92);
+    const suggestedBudget = round2((prevSpend > 0 ? prevSpend : p.currentSpend) * 1.05);
     return {
       cloudProvider: 'gcp',
       accountId: p.projectId,
@@ -582,13 +611,16 @@ async function resolveGcpAccountsUsage(targetMonth?: string): Promise<CloudAccou
       status: 'ACTIVE',
       evaluationMonth: targetMonth || new Date().toISOString().slice(0, 7),
       currentSpend: round2(p.currentSpend),
-      previousSpend: round2(p.currentSpend * 0.92),
+      previousSpend: prevSpend,
       momChangePercent: 8.7,
       billingCurrency: 'USD',
       conversionRate: 1,
       currentSpendUsd: round2(p.currentSpend),
       topCostDriver: services[0]?.service || 'Compute Engine',
       topServices: services,
+      ownerEmail: `${p.projectId.replace(/[^a-z0-9]/g, "") || "gcp"}@coforge.com`,
+      ownerName: `${p.name} Team`,
+      suggestedBudget,
     };
   });
 }
@@ -899,6 +931,67 @@ export async function deleteBudget(id: number): Promise<boolean> {
   if (next.length === all.length) return false;
   writeFallbackBudgets(next);
   return true;
+}
+
+export async function seedAllAccountBudgetsFromLastMonthSpend(marginPercent: number = 5): Promise<{
+  created: number;
+  updated: number;
+  total: number;
+}> {
+  const accounts = await getCloudAccountsUsage('all');
+  const existingBudgets = await listRawBudgets('all');
+  const existingMap = new Map<string, StoredAccountBudget>();
+  existingBudgets.forEach((b) => {
+    existingMap.set(`${b.cloudProvider}:${b.accountId.toLowerCase()}`, b);
+    existingMap.set(`${b.cloudProvider}:${b.accountName.toLowerCase()}`, b);
+  });
+
+  let created = 0;
+  let updated = 0;
+
+  for (const acc of accounts) {
+    const key = `${acc.cloudProvider}:${acc.accountId.toLowerCase()}`;
+    const nameKey = `${acc.cloudProvider}:${acc.accountName.toLowerCase()}`;
+    const existing = existingMap.get(key) || existingMap.get(nameKey);
+
+    const lastSpend = acc.previousSpend > 0 ? acc.previousSpend : acc.currentSpend;
+    let calculatedBudget = Math.round(lastSpend * (1 + marginPercent / 100) * 100) / 100;
+    if (calculatedBudget <= 0) calculatedBudget = 100;
+
+    const alertEmail = acc.ownerEmail || existing?.alertEmail || `${acc.accountId.replace(/[^a-zA-Z0-9]/g, '') || 'finops'}@company.com`;
+    const contactName = acc.ownerName || existing?.contactName || `${acc.accountName} Team`;
+
+    if (!existing) {
+      await upsertBudget({
+        cloudProvider: acc.cloudProvider,
+        accountId: acc.accountId,
+        accountName: acc.accountName,
+        parentAccountId: acc.parentAccountId,
+        monthlyBudget: calculatedBudget,
+        billingCurrency: acc.billingCurrency,
+        alertEmail,
+        contactName,
+        isActive: true,
+      });
+      created++;
+    } else if (existing.monthlyBudget <= 0) {
+      await upsertBudget({
+        cloudProvider: acc.cloudProvider,
+        accountId: acc.accountId,
+        accountName: acc.accountName,
+        parentAccountId: acc.parentAccountId,
+        monthlyBudget: calculatedBudget,
+        billingCurrency: existing.billingCurrency,
+        alertEmail: existing.alertEmail || alertEmail,
+        contactName: existing.contactName || contactName,
+        isActive: true,
+      });
+      updated++;
+    }
+  }
+
+  usageCache.clear();
+  return { created, updated, total: accounts.length };
 }
 
 export async function markThresholdNotified(

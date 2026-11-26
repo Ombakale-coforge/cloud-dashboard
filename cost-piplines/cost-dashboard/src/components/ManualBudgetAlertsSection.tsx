@@ -88,6 +88,9 @@ export interface CloudAccountUsageItem {
   topCostDriver: string;
   topServices: TopServiceCost[];
   manualBudget?: EnrichedAccountBudget | null;
+  ownerEmail?: string | null;
+  ownerName?: string | null;
+  suggestedBudget?: number | null;
 }
 
 export interface ExternalBudgetTrigger {
@@ -96,7 +99,11 @@ export interface ExternalBudgetTrigger {
   accountName: string;
   parentAccountId?: string | null;
   currentSpend?: number;
+  previousSpend?: number;
   billingCurrency?: "USD" | "INR";
+  contactName?: string | null;
+  alertEmail?: string | string[] | null;
+  suggestedBudget?: number | null;
   mode?: "budget" | "instant-email";
 }
 
@@ -467,17 +474,10 @@ export function ManualBudgetAlertsSection({
     setFormAccountId(matchedUsage?.accountId || accountId);
     setFormAccountName(matchedUsage?.accountName || accountName);
     setFormParentAccountId(parentAccountId || matchedUsage?.parentAccountId || "");
+    
+    // Set currency
     if (cloudProvider === "azure") {
       setFormCurrency("USD");
-      if (existing) {
-        const prefill =
-          existing.billingCurrency === "INR"
-            ? Math.round(azureInrToUsd(existing.monthlyBudget, "INR") * 100) / 100
-            : existing.monthlyBudget;
-        setFormMonthlyBudget(String(prefill));
-      } else {
-        setFormMonthlyBudget("");
-      }
     } else {
       setFormCurrency(
         existing?.billingCurrency ||
@@ -485,12 +485,55 @@ export function ManualBudgetAlertsSection({
           matchedUsage?.billingCurrency ||
           "USD"
       );
-      setFormMonthlyBudget(existing ? String(existing.monthlyBudget) : "");
     }
-    setFormContactName(existing?.contactName || "");
-    setFormAlertEmails(
-      existing ? parseEmailList(existing.alertEmails?.length ? existing.alertEmails : existing.alertEmail) : []
-    );
+
+    // Auto-calculate default budget: Prior month spend + 5%
+    if (existing) {
+      if (cloudProvider === "azure" && existing.billingCurrency === "INR") {
+        setFormMonthlyBudget(
+          String(Math.round(azureInrToUsd(existing.monthlyBudget, "INR") * 100) / 100)
+        );
+      } else {
+        setFormMonthlyBudget(String(existing.monthlyBudget));
+      }
+    } else {
+      const prior =
+        externalTriggerAccount.previousSpend ??
+        matchedUsage?.previousSpend ??
+        externalTriggerAccount.currentSpend ??
+        matchedUsage?.currentSpend ??
+        0;
+      const calcBudget =
+        externalTriggerAccount.suggestedBudget ??
+        matchedUsage?.suggestedBudget ??
+        (prior > 0 ? Number((prior * 1.05).toFixed(2)) : 100);
+
+      if (cloudProvider === "azure") {
+        setFormMonthlyBudget(
+          String(Math.round(azureInrToUsd(calcBudget, "INR") * 100) / 100)
+        );
+      } else {
+        setFormMonthlyBudget(String(calcBudget));
+      }
+    }
+
+    // Auto-populate contact name
+    const contact =
+      existing?.contactName ||
+      externalTriggerAccount.contactName ||
+      matchedUsage?.ownerName ||
+      matchedUsage?.accountName ||
+      "";
+    setFormContactName(contact);
+
+    // Auto-populate alert recipient email(s)
+    const emailSource =
+      (existing?.alertEmails?.length ? existing.alertEmails : existing?.alertEmail) ||
+      externalTriggerAccount.alertEmail ||
+      matchedUsage?.ownerEmail ||
+      "";
+    setFormAlertEmails(parseEmailList(emailSource));
+
     setEmailInputDraft("");
     setFormError("");
     setAccountSearchQuery("");
@@ -631,16 +674,27 @@ export function ManualBudgetAlertsSection({
             ? Math.round(azureInrToUsd(acc.manualBudget.monthlyBudget, "INR") * 100) / 100
             : acc.manualBudget.monthlyBudget;
         setFormMonthlyBudget(String(budgetVal));
-        setFormContactName(acc.manualBudget.contactName || "");
+        setFormContactName(acc.manualBudget.contactName || acc.ownerName || "");
         setFormAlertEmails(
           parseEmailList(
             acc.manualBudget.alertEmails?.length
               ? acc.manualBudget.alertEmails
-              : acc.manualBudget.alertEmail
+              : acc.manualBudget.alertEmail || acc.ownerEmail
           )
         );
-        setEmailInputDraft("");
+      } else {
+        const prior = acc.previousSpend > 0 ? acc.previousSpend : acc.currentSpend;
+        const autoBudget =
+          acc.suggestedBudget ?? (prior > 0 ? Number((prior * 1.05).toFixed(2)) : 100);
+        const budgetVal =
+          acc.cloudProvider === "azure"
+            ? Math.round(azureInrToUsd(autoBudget, "INR") * 100) / 100
+            : autoBudget;
+        setFormMonthlyBudget(String(budgetVal));
+        setFormContactName(acc.ownerName || acc.accountName || "");
+        setFormAlertEmails(parseEmailList(acc.ownerEmail || ""));
       }
+      setEmailInputDraft("");
     }
     setAccountSearchQuery("");
     setIsAccountDropdownOpen(false);

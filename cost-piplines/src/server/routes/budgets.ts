@@ -17,6 +17,8 @@ import {
   sendAccountUsageEmail,
   shouldSendThresholdAlert,
   upsertBudget,
+  seedAllAccountBudgetsFromLastMonthSpend,
+  computeBudgetEvaluation,
 } from '../services/accountBudgetService.ts';
 import { requireAuth } from '../auth/middleware.ts';
 import {
@@ -116,9 +118,38 @@ router.get('/cloud-accounts', async (req: Request, res: Response) => {
             b.accountName.toLowerCase() === acc.accountName.toLowerCase()
         ) ||
         null;
+
+      const lastSpend = acc.previousSpend > 0 ? acc.previousSpend : acc.currentSpend;
+      const defaultBudgetLimit = acc.suggestedBudget || (lastSpend > 0 ? Math.round(lastSpend * 1.05 * 100) / 100 : 100);
+
+      const effectiveBudget = matchedBudget || {
+        id: -1,
+        cloudProvider: acc.cloudProvider,
+        accountId: acc.accountId,
+        accountName: acc.accountName,
+        parentAccountId: acc.parentAccountId || null,
+        monthlyBudget: defaultBudgetLimit,
+        billingCurrency: acc.billingCurrency,
+        alertEmail: acc.ownerEmail || 'finops@company.com',
+        alertEmails: acc.ownerEmail ? [acc.ownerEmail] : ['finops@company.com'],
+        contactName: acc.ownerName || `${acc.accountName} Team`,
+        isActive: true,
+        ...computeBudgetEvaluation(acc.currentSpend, defaultBudgetLimit),
+        currentSpend: acc.currentSpend,
+        previousSpend: acc.previousSpend,
+        momChangePercent: acc.momChangePercent,
+        evaluationMonth: acc.evaluationMonth,
+        topCostDriver: acc.topCostDriver,
+        topServices: acc.topServices,
+        nativeCurrency: acc.billingCurrency,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
       return {
         ...acc,
-        manualBudget: matchedBudget,
+        suggestedBudget: defaultBudgetLimit,
+        manualBudget: effectiveBudget,
       };
     });
 
@@ -128,6 +159,22 @@ router.get('/cloud-accounts', async (req: Request, res: Response) => {
     });
   } catch (err: any) {
     console.error('Error fetching multi-cloud accounts:', err.message);
+    return res.status(500).json({ error: 'SERVER_ERROR', message: err.message });
+  }
+});
+
+// Seed default budget (last month spend + 5%) for all accounts in AWS, Azure, GCP
+router.post('/seed-default-budgets', async (req: Request, res: Response) => {
+  try {
+    const margin = typeof req.body?.marginPercent === 'number' ? req.body.marginPercent : 5;
+    const result = await seedAllAccountBudgetsFromLastMonthSpend(margin);
+    return res.json({
+      success: true,
+      message: `Seeded default budgets (last month spend + ${margin}%) for all accounts.`,
+      ...result,
+    });
+  } catch (err: any) {
+    console.error('Error seeding default budgets:', err.message);
     return res.status(500).json({ error: 'SERVER_ERROR', message: err.message });
   }
 });

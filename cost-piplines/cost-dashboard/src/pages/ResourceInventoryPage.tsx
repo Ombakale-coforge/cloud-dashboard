@@ -20,6 +20,9 @@ import {
   Terminal,
   Activity,
   Globe,
+  ArrowUpRight,
+  ArrowDownRight,
+  Minus,
 } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -35,6 +38,8 @@ interface InventoryItem {
   accountOrSubscriptionId: string;
   month: string;
   cost: number;
+  previousCost?: number;
+  momChangePercent?: number;
   status: string;
   category: string;
   privateIp?: string | null;
@@ -85,7 +90,7 @@ export function ResourceInventoryPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/inventory?cloud=${cloudFilter}&search=${encodeURIComponent(searchTerm)}`);
+      const res = await fetch(`/api/inventory?cloud=${cloudFilter}`);
       if (!res.ok) {
         throw new Error(`Failed to load inventory (HTTP ${res.status})`);
       }
@@ -111,18 +116,25 @@ export function ResourceInventoryPage() {
       list = list.filter((i) => i.category === categoryFilter);
     }
 
-    if (searchTerm) {
-      const q = searchTerm.toLowerCase();
-      list = list.filter(
-        (i) =>
-          i.name.toLowerCase().includes(q) ||
-          i.service.toLowerCase().includes(q) ||
-          i.resourceGroupOrRegion.toLowerCase().includes(q) ||
-          i.accountOrSubscription.toLowerCase().includes(q) ||
-          (i.privateIp && i.privateIp.toLowerCase().includes(q)) ||
-          (i.publicIp && i.publicIp.toLowerCase().includes(q)) ||
-          (i.sizeOrType && i.sizeOrType.toLowerCase().includes(q))
-      );
+    if (searchTerm.trim()) {
+      const q = searchTerm.trim().toLowerCase();
+      list = list.filter((i) => {
+        return (
+          (i.name || '').toLowerCase().includes(q) ||
+          (i.service || '').toLowerCase().includes(q) ||
+          (i.resourceGroupOrRegion || '').toLowerCase().includes(q) ||
+          (i.accountOrSubscription || '').toLowerCase().includes(q) ||
+          (i.accountOrSubscriptionId || '').toLowerCase().includes(q) ||
+          (i.category || '').toLowerCase().includes(q) ||
+          (i.powerState || '').toLowerCase().includes(q) ||
+          (i.status || '').toLowerCase().includes(q) ||
+          (i.os || '').toLowerCase().includes(q) ||
+          (Boolean(i.privateIp) && String(i.privateIp).toLowerCase().includes(q)) ||
+          (Boolean(i.publicIp) && String(i.publicIp).toLowerCase().includes(q)) ||
+          (Boolean(i.sizeOrType) && String(i.sizeOrType).toLowerCase().includes(q)) ||
+          (Boolean(i.vpcOrVnet) && String(i.vpcOrVnet).toLowerCase().includes(q))
+        );
+      });
     }
 
     list.sort((a, b) => {
@@ -344,11 +356,17 @@ export function ResourceInventoryPage() {
                     </div>
                   </th>
                   <th className="py-3.5 px-4">Resource Group / Region</th>
+                  <th className="py-3.5 px-4 text-right">
+                    <span>Last Month Spend</span>
+                  </th>
                   <th className="py-3.5 px-4 text-right cursor-pointer" onClick={() => toggleSort('cost')}>
                     <div className="flex items-center justify-end gap-1.5">
                       <span>Monthly Spend</span>
                       <ArrowUpDown className="w-3.5 h-3.5" />
                     </div>
+                  </th>
+                  <th className="py-3.5 px-4 text-right">
+                    <span>MoM Variance</span>
                   </th>
                   <th className="py-3.5 px-4 text-center">Power State</th>
                 </tr>
@@ -356,7 +374,7 @@ export function ResourceInventoryPage() {
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800/70">
                 {loading ? (
                   <tr>
-                    <td colSpan={8} className="text-center py-12 text-slate-500">
+                    <td colSpan={10} className="text-center py-12 text-slate-500">
                       <div className="flex flex-col items-center justify-center gap-2">
                         <RefreshCw className="w-6 h-6 animate-spin text-indigo-500" />
                         <span>Querying live resources, IPs, and compute sizes...</span>
@@ -365,7 +383,7 @@ export function ResourceInventoryPage() {
                   </tr>
                 ) : paginatedItems.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="text-center py-12 text-slate-500">
+                    <td colSpan={10} className="text-center py-12 text-slate-500">
                       No assets found matching your search and filter criteria.
                     </td>
                   </tr>
@@ -452,8 +470,37 @@ export function ResourceInventoryPage() {
                           {item.resourceGroupOrRegion}
                         </td>
 
+                        <td className="py-3.5 px-4 text-right font-mono text-slate-500 dark:text-slate-400">
+                          {item.previousCost !== undefined && item.previousCost > 0 ? fmtCurrency(item.previousCost) : '—'}
+                        </td>
+
                         <td className="py-3.5 px-4 text-right font-mono font-bold text-slate-900 dark:text-white">
                           {item.cost > 0 ? fmtCurrency(item.cost) : 'Included'}
+                        </td>
+
+                        <td className="py-3.5 px-4 text-right font-mono">
+                          {item.momChangePercent !== undefined ? (
+                            <span
+                              className={`inline-flex items-center gap-0.5 text-xs font-semibold ${
+                                item.momChangePercent > 0
+                                  ? 'text-rose-600 dark:text-rose-400'
+                                  : item.momChangePercent < 0
+                                  ? 'text-emerald-600 dark:text-emerald-400'
+                                  : 'text-slate-500'
+                              }`}
+                            >
+                              {item.momChangePercent > 0 ? (
+                                <ArrowUpRight className="w-3.5 h-3.5" />
+                              ) : item.momChangePercent < 0 ? (
+                                <ArrowDownRight className="w-3.5 h-3.5" />
+                              ) : (
+                                <Minus className="w-3 h-3" />
+                              )}
+                              {item.momChangePercent > 0 ? `+${item.momChangePercent.toFixed(1)}%` : `${item.momChangePercent.toFixed(1)}%`}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400 text-xs">—</span>
+                          )}
                         </td>
 
                         <td className="py-3.5 px-4 text-center">

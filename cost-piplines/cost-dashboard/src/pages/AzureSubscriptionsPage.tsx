@@ -131,6 +131,7 @@ export function AzureSubscriptionsPage() {
         accountName: acc.accountName,
         parentAccountId: "azure-root",
         currentSpend: acc.currentSpend,
+        previousSpend: acc.previousSpend,
         billingCurrency: "INR",
         mode: "instant-email",
       });
@@ -713,6 +714,7 @@ export function AzureSubscriptionsPage() {
                                   accountName: acc.accountName,
                                   parentAccountId: "azure-root",
                                   currentSpend: acc.currentSpend,
+                                  previousSpend: acc.previousSpend,
                                   billingCurrency: "INR",
                                   mode: "budget",
                                 })

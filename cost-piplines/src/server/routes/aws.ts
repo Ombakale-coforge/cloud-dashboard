@@ -1312,6 +1312,8 @@ router.get('/linked-accounts/:linkedAccountId', async (req: Request, res: Respon
         const [yearStr, monthStr] = (targetMonth || '2026-09').split('-');
         const year = parseInt(yearStr, 10);
         const month = parseInt(monthStr, 10);
+        const prevMonthDate = new Date(Date.UTC(year, month - 2, 1));
+        const prevStartStr = `${prevMonthDate.getUTCFullYear()}-${String(prevMonthDate.getUTCMonth() + 1).padStart(2, '0')}-01`;
         const startStr = `${year}-${String(month).padStart(2, '0')}-01`;
         const nextMonthDate = new Date(Date.UTC(year, month, 1));
         const endStr = `${nextMonthDate.getUTCFullYear()}-${String(nextMonthDate.getUTCMonth() + 1).padStart(2, '0')}-01`;
@@ -1319,7 +1321,7 @@ router.get('/linked-accounts/:linkedAccountId', async (req: Request, res: Respon
         const [descResult, serviceResult, regionResult, tagsResult] = await Promise.allSettled([
           orgClient.send(new DescribeAccountCommand({ AccountId: cleanAccountId })),
           ceClient.send(new GetCostAndUsageCommand({
-            TimePeriod: { Start: startStr, End: endStr },
+            TimePeriod: { Start: prevStartStr, End: endStr },
             Granularity: 'MONTHLY',
             Metrics: ['UnblendedCost'],
             Filter: {
@@ -1382,17 +1384,37 @@ router.get('/linked-accounts/:linkedAccountId', async (req: Request, res: Respon
           };
         }
 
-        let services: Array<{ service: string; cost: number; sharePct: number }> = [];
+        let services: Array<{ service: string; cost: number; previousCost?: number; momChangePercent?: number; sharePct: number }> = [];
         if (serviceResult.status === 'fulfilled') {
-          const groups = serviceResult.value.ResultsByTime?.[0]?.Groups || [];
+          const rbt = serviceResult.value.ResultsByTime || [];
+          const currentGroups = rbt.length > 1 ? (rbt[1]?.Groups || []) : (rbt[0]?.Groups || []);
+          const prevGroups = rbt.length > 1 ? (rbt[0]?.Groups || []) : [];
+
+          const prevCostMap = new Map<string, number>();
+          prevGroups.forEach((g) => {
+            const svcName = g.Keys?.[0] || 'Unknown';
+            const cost = parseFloat(g.Metrics?.UnblendedCost?.Amount || '0') || 0;
+            prevCostMap.set(svcName, Number(cost.toFixed(2)));
+          });
+
           let totalServCost = 0;
-          const mappedServices = groups
+          const mappedServices = currentGroups
             .map((g) => {
+              const svcName = g.Keys?.[0] || 'Unknown';
               const cost = parseFloat(g.Metrics?.UnblendedCost?.Amount || '0') || 0;
               totalServCost += cost;
-              return { service: g.Keys?.[0] || 'Unknown', cost: Number(cost.toFixed(2)) };
+              const prevCost = prevCostMap.get(svcName) || 0;
+              const momChange = prevCost > 0
+                ? Number((((cost - prevCost) / prevCost) * 100).toFixed(1))
+                : (cost > 0 ? 100 : 0);
+              return {
+                service: svcName,
+                cost: Number(cost.toFixed(2)),
+                previousCost: prevCost,
+                momChangePercent: momChange,
+              };
             })
-            .filter((s) => s.cost > 0)
+            .filter((s) => s.cost > 0 || (s.previousCost && s.previousCost > 0))
             .sort((a, b) => b.cost - a.cost);
 
           services = mappedServices.map((s) => ({

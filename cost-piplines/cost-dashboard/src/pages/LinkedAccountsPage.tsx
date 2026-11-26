@@ -188,7 +188,10 @@ export function LinkedAccountsPage() {
         accountName: acc.accountName,
         parentAccountId: selectedAwsAccount,
         currentSpend: acc.currentSpend,
+        previousSpend: acc.previousSpend,
         billingCurrency: "USD",
+        contactName: acc.ownerName || (acc.email ? acc.email.split("@")[0].replace(/[._-]/g, " ") : ""),
+        alertEmail: acc.email || "",
         mode: "instant-email",
       });
       return;
@@ -1230,7 +1233,10 @@ export function LinkedAccountsPage() {
                                   accountName: acc.accountName,
                                   parentAccountId: selectedAwsAccount,
                                   currentSpend: acc.currentSpend,
+                                  previousSpend: acc.previousSpend,
                                   billingCurrency: "USD",
+                                  contactName: acc.ownerName || (acc.email ? acc.email.split("@")[0].replace(/[._-]/g, " ") : ""),
+                                  alertEmail: acc.email || "",
                                   mode: "budget",
                                 })
                               }

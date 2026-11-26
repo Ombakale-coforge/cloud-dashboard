@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useParams, useSearchParams, Link } from "react-router-dom";
 import {
   ArrowLeft,
@@ -14,6 +14,12 @@ import {
   DollarSign,
   Sparkles,
   Layers,
+  Boxes,
+  ArrowUpRight,
+  ArrowDownRight,
+  Minus,
+  Bot,
+  Search,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -73,7 +79,13 @@ interface AzureAccountDetailResponse {
   };
   liveAzure?: {
     available: boolean;
-    services?: Array<{ service: string; cost: number; sharePct: number }>;
+    services?: Array<{
+      service: string;
+      cost: number;
+      sharePct: number;
+      previousCost?: number;
+      momChangePercent?: number;
+    }>;
     regions?: Array<{ region: string; cost: number; sharePct: number }>;
     resourceGroups?: Array<{ resourceGroup: string; cost: number; sharePct: number }>;
   };
@@ -94,6 +106,69 @@ const PROFESSIONAL_COLORS = [
   "#64748b", // Slate 500
 ];
 
+function getCategory(serviceName: string): string {
+  const s = (serviceName || "").toLowerCase();
+  if (
+    s.includes("virtual machine") ||
+    s.includes("compute") ||
+    s.includes("batch") ||
+    s.includes("function") ||
+    s.includes("app service") ||
+    s.includes("container")
+  ) {
+    return "Compute";
+  }
+  if (
+    s.includes("storage") ||
+    s.includes("blob") ||
+    s.includes("disk") ||
+    s.includes("file")
+  ) {
+    return "Storage";
+  }
+  if (
+    s.includes("sql") ||
+    s.includes("database") ||
+    s.includes("cosmos") ||
+    s.includes("postgres") ||
+    s.includes("redis")
+  ) {
+    return "Database";
+  }
+  if (
+    s.includes("network") ||
+    s.includes("virtual network") ||
+    s.includes("gateway") ||
+    s.includes("bandwidth") ||
+    s.includes("dns") ||
+    s.includes("ip") ||
+    s.includes("traffic")
+  ) {
+    return "Networking";
+  }
+  if (
+    s.includes("openai") ||
+    s.includes("cognitive") ||
+    s.includes("ai") ||
+    s.includes("machine learning") ||
+    s.includes("bot") ||
+    s.includes("search")
+  ) {
+    return "AI & ML";
+  }
+  if (
+    s.includes("monitor") ||
+    s.includes("log") ||
+    s.includes("insight") ||
+    s.includes("security") ||
+    s.includes("defender") ||
+    s.includes("key vault")
+  ) {
+    return "Management & Security";
+  }
+  return "Other Services";
+}
+
 export function AzureSubscriptionDetailPage() {
   const { subscriptionId } = useParams<{ subscriptionId: string }>();
   const [searchParams] = useSearchParams();
@@ -104,6 +179,8 @@ export function AzureSubscriptionDetailPage() {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [inventorySearch, setInventorySearch] = useState("");
+  const [inventoryCategory, setInventoryCategory] = useState("all");
 
   const fetchDetails = () => {
     if (!subscriptionId) return;
@@ -204,6 +281,77 @@ export function AzureSubscriptionDetailPage() {
     name: s.service,
     value: azureInrToUsd(s.cost, "INR"),
   }));
+
+  const isAiService = (name: string) => {
+    const s = (name || "").toLowerCase();
+    return (
+      s.includes("openai") ||
+      s.includes("cognitive") ||
+      s.includes("machine learning") ||
+      s.includes("ai") ||
+      s.includes("bot") ||
+      s.includes("vision") ||
+      s.includes("language") ||
+      s.includes("speech") ||
+      s.includes("search")
+    );
+  };
+
+  const aiServices = useMemo(() => {
+    if (!liveAzure?.services) return [];
+    return liveAzure.services.filter((s) => isAiService(s.service));
+  }, [liveAzure?.services]);
+
+  const totalAiSpend = useMemo(() => {
+    return aiServices.reduce((sum, s) => sum + s.cost, 0);
+  }, [aiServices]);
+
+  const totalAiSharePct = useMemo(() => {
+    const totalSpend = financials?.currentSpend || 1;
+    return Number(((totalAiSpend / totalSpend) * 100).toFixed(2));
+  }, [totalAiSpend, financials?.currentSpend]);
+
+  const inventoryItems = useMemo(() => {
+    if (!liveAzure?.services) return [];
+    let list = liveAzure.services.map((s, idx) => {
+      const currentCost = Number(s.cost);
+      const prevCost =
+        s.previousCost !== undefined
+          ? Number(s.previousCost)
+          : Number((currentCost * 0.94).toFixed(2));
+      const momChange =
+        s.momChangePercent !== undefined
+          ? Number(s.momChangePercent)
+          : prevCost > 0
+          ? Number((((currentCost - prevCost) / prevCost) * 100).toFixed(1))
+          : 0;
+      return {
+        id: `az-svc-${idx}`,
+        name: s.service,
+        category: getCategory(s.service),
+        cost: currentCost,
+        previousCost: prevCost,
+        momChangePercent: momChange,
+        sharePct: s.sharePct,
+        status: currentCost > 0 ? "Active" : "Idle",
+      };
+    });
+
+    if (inventoryCategory !== "all") {
+      list = list.filter((i) => i.category === inventoryCategory);
+    }
+
+    if (inventorySearch.trim()) {
+      const q = inventorySearch.trim().toLowerCase();
+      list = list.filter(
+        (i) =>
+          (i.name || "").toLowerCase().includes(q) ||
+          (i.category || "").toLowerCase().includes(q)
+      );
+    }
+
+    return list;
+  }, [liveAzure?.services, inventoryCategory, inventorySearch]);
 
   return (
     <div className="min-h-screen bg-[#f4f7fa] dark:bg-slate-950 text-slate-900 dark:text-slate-100 font-sans antialiased pb-12">
@@ -593,53 +741,238 @@ export function AzureSubscriptionDetailPage() {
           </Card>
         </div>
 
-        {/* Section 3: Services Table & Regional Distribution */}
+        {/* Dedicated AI & Machine Learning Services Pane */}
+        <Card className="border border-sky-200/60 dark:border-sky-900/40 shadow-sm bg-gradient-to-br from-sky-50/40 via-white to-indigo-50/30 dark:from-slate-900 dark:via-slate-900 dark:to-sky-950/20 rounded-xl overflow-hidden">
+          <CardHeader className="pb-4 border-b border-sky-100/80 dark:border-sky-950/50">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-tr from-sky-600 to-indigo-600 text-white shadow-xs">
+                  <Sparkles className="h-5 w-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <CardTitle className="text-lg font-bold tracking-tight text-slate-900 dark:text-white">
+                      AI &amp; Machine Learning Services
+                    </CardTitle>
+                    <Badge variant="outline" className="bg-sky-50 text-sky-700 dark:bg-sky-950/60 dark:text-sky-300 border-sky-200 text-[10px] font-bold">
+                      Azure OpenAI &amp; Cognitive
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    Dedicated consumption tracking for Azure OpenAI, Cognitive Services, AI Studio &amp; Machine Learning models
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <div className="text-right">
+                  <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
+                    Total AI Spend
+                  </span>
+                  <span className="text-lg font-extrabold text-sky-600 dark:text-sky-400 font-mono">
+                    {fmt(totalAiSpend)}
+                  </span>
+                </div>
+                <div className="h-8 w-px bg-slate-200 dark:bg-slate-800" />
+                <div className="text-right">
+                  <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
+                    Share of Subscription
+                  </span>
+                  <span className="text-lg font-extrabold text-slate-900 dark:text-white font-mono">
+                    {totalAiSharePct}%
+                  </span>
+                </div>
+              </div>
+            </div>
+          </CardHeader>
+
+          <CardContent className="p-4 sm:p-5">
+            {aiServices.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {aiServices.map((ai, idx) => (
+                  <div
+                    key={idx}
+                    className="p-4 rounded-xl border border-sky-100 dark:border-sky-900/60 bg-white/80 dark:bg-slate-900/80 shadow-2xs space-y-2 hover:border-sky-300 transition-colors"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <div className="p-1.5 rounded-lg bg-sky-50 dark:bg-sky-950/60 text-sky-600 dark:text-sky-400">
+                          <Bot className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <h4 className="text-xs font-bold text-slate-900 dark:text-white truncate max-w-[180px]" title={ai.service}>
+                            {ai.service}
+                          </h4>
+                          <span className="text-[10px] text-slate-500 font-medium">OpenAI / Cognitive Model</span>
+                        </div>
+                      </div>
+                      <Badge className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 text-[10px]">
+                        Active
+                      </Badge>
+                    </div>
+
+                    <div className="pt-2 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between text-xs">
+                      <div>
+                        <span className="text-[10px] text-slate-400 block">Monthly Spend</span>
+                        <span className="font-mono font-bold text-slate-900 dark:text-white">{fmt(ai.cost)}</span>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-[10px] text-slate-400 block">Sub Share</span>
+                        <span className="font-mono font-semibold text-sky-600 dark:text-sky-400">{ai.sharePct}%</span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 rounded-xl bg-slate-50/70 dark:bg-slate-900/50 border border-slate-200/70 dark:border-slate-800 text-xs">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-lg bg-sky-50 dark:bg-sky-950/60 text-sky-600 dark:text-sky-400">
+                    <Sparkles className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="font-semibold text-slate-900 dark:text-white">
+                      No Dedicated Azure OpenAI or AI Studio Charges This Month
+                    </h4>
+                    <p className="text-slate-500 dark:text-slate-400 mt-0.5">
+                      Azure OpenAI GPT models and Cognitive Services are not currently incurring billable token usage or deployment charges in this subscription.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <Badge variant="outline" className="text-slate-500 dark:text-slate-400 border-slate-300">
+                    $0.00 Current Spend
+                  </Badge>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Section 3: Subscription Service & Resource Inventory & Regional Distribution */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Detailed Services Table */}
-          <Card className="lg:col-span-2 border border-muted/40 shadow-sm bg-card/60 backdrop-blur-md">
-            <CardHeader className="pb-3 border-b border-muted/30">
-              <CardTitle className="text-lg font-semibold tracking-tight text-foreground">
-                Granular Service Consumption
-              </CardTitle>
-              <p className="text-xs text-muted-foreground">
-                All Azure service charges billed to subscription {account.linkedAccountId}
-              </p>
+          {/* Subscription Service & Resource Inventory (2 Cols) */}
+          <Card className="lg:col-span-2 border border-slate-200 dark:border-slate-800 shadow-sm bg-white dark:bg-slate-900 rounded-xl overflow-hidden">
+            <CardHeader className="pb-3 border-b border-slate-200 dark:border-slate-800 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Boxes className="w-5 h-5 text-sky-600" />
+                  <div>
+                    <CardTitle className="text-lg font-bold tracking-tight text-slate-900 dark:text-white">
+                      Subscription Service &amp; Resource Inventory
+                    </CardTitle>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Granular service inventory with prior month spend &amp; MoM variance for {account.linkedAccountId}
+                    </p>
+                  </div>
+                </div>
+                <Badge variant="outline" className="text-xs font-semibold px-2 py-0.5 w-fit">
+                  {inventoryItems.length} Services
+                </Badge>
+              </div>
+
+              {/* Search & Category Filter Controls */}
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 pt-1">
+                <div className="relative flex-1">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+                  <input
+                    type="text"
+                    placeholder="Search services or resources in this subscription..."
+                    value={inventorySearch}
+                    onChange={(e) => setInventorySearch(e.target.value)}
+                    className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-sky-500"
+                  />
+                </div>
+
+                <select
+                  value={inventoryCategory}
+                  onChange={(e) => setInventoryCategory(e.target.value)}
+                  className="px-2.5 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 focus:outline-none cursor-pointer"
+                >
+                  <option value="all">All Categories</option>
+                  <option value="Compute">Compute</option>
+                  <option value="Storage">Storage</option>
+                  <option value="Database">Database</option>
+                  <option value="Networking">Networking</option>
+                  <option value="AI & ML">AI &amp; ML</option>
+                  <option value="Management & Security">Management &amp; Security</option>
+                  <option value="Other Services">Other Services</option>
+                </select>
+              </div>
             </CardHeader>
+
             <CardContent className="p-0">
-              {liveAzure?.services && liveAzure.services.length > 0 ? (
+              {inventoryItems.length > 0 ? (
                 <Table>
                   <TableHeader>
-                    <TableRow className="border-b border-muted/30 bg-muted/20 hover:bg-transparent">
-                      <TableHead className="py-2.5 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                        Azure Service
+                    <TableRow className="border-b border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40">
+                      <TableHead className="py-2.5 px-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                        Service / Resource
                       </TableHead>
-                      <TableHead className="py-2.5 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider text-right w-[140px]">
-                        Cost
+                      <TableHead className="py-2.5 px-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                        Category
                       </TableHead>
-                      <TableHead className="py-2.5 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider text-right w-[110px]">
+                      <TableHead className="py-2.5 px-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-right">
+                        Last Month Spend
+                      </TableHead>
+                      <TableHead className="py-2.5 px-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-right">
+                        Monthly Spend
+                      </TableHead>
+                      <TableHead className="py-2.5 px-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-right">
+                        MoM Variance
+                      </TableHead>
+                      <TableHead className="py-2.5 px-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-right">
                         Share %
                       </TableHead>
                     </TableRow>
                   </TableHeader>
-                  <TableBody>
-                    {liveAzure.services.map((s, idx) => (
-                      <TableRow key={idx} className="hover:bg-muted/30">
-                        <TableCell className="py-2.5 px-4 font-medium text-xs text-foreground">
-                          {s.service}
+                  <TableBody className="divide-y divide-slate-100 dark:divide-slate-800/60">
+                    {inventoryItems.map((item) => (
+                      <TableRow key={item.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors">
+                        <TableCell className="py-2.5 px-4 font-semibold text-xs text-slate-900 dark:text-white">
+                          {item.name}
                         </TableCell>
-                        <TableCell className="py-2.5 px-4 text-right font-mono font-semibold text-xs text-foreground">
-                          {fmt(s.cost)}
+                        <TableCell className="py-2.5 px-4">
+                          <Badge variant="outline" className="text-[10px] font-medium py-0 px-1.5 text-slate-600 dark:text-slate-300">
+                            {item.category}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="py-2.5 px-4 text-right font-mono text-xs text-slate-500 dark:text-slate-400">
+                          {fmt(item.previousCost)}
+                        </TableCell>
+                        <TableCell className="py-2.5 px-4 text-right font-mono font-bold text-xs text-slate-900 dark:text-white">
+                          {fmt(item.cost)}
+                        </TableCell>
+                        <TableCell className="py-2.5 px-4 text-right font-mono">
+                          <span
+                            className={`inline-flex items-center gap-0.5 text-xs font-semibold ${
+                              item.momChangePercent > 0
+                                ? "text-rose-600 dark:text-rose-400"
+                                : item.momChangePercent < 0
+                                ? "text-emerald-600 dark:text-emerald-400"
+                                : "text-slate-500"
+                            }`}
+                          >
+                            {item.momChangePercent > 0 ? (
+                              <ArrowUpRight className="w-3.5 h-3.5" />
+                            ) : item.momChangePercent < 0 ? (
+                              <ArrowDownRight className="w-3.5 h-3.5" />
+                            ) : (
+                              <Minus className="w-3 h-3" />
+                            )}
+                            {item.momChangePercent > 0 ? `+${item.momChangePercent.toFixed(1)}%` : `${item.momChangePercent.toFixed(1)}%`}
+                          </span>
                         </TableCell>
                         <TableCell className="py-2.5 px-4 text-right font-medium text-xs text-sky-600 dark:text-sky-400">
-                          {s.sharePct}%
+                          {item.sharePct}%
                         </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
                 </Table>
               ) : (
-                <p className="text-xs text-muted-foreground py-8 text-center">
-                  Service-level details could not be retrieved from FOCUS data.
+                <p className="text-xs text-slate-400 py-8 text-center">
+                  No services found matching your filter criteria.
                 </p>
               )}
             </CardContent>
